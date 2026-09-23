@@ -22,8 +22,9 @@ Contract는 프로세스 중립 선언이다. handler, Electron 객체, 자격�
 1. Renderer는 preload가 제공한 transport로 handshake를 시작하고 Main에서 공개 manifest를 받는다.
 2. Electron 어댑터는 고정 namespace 채널에서 요청을 받고 sender의 `webContents`, frame, 현재 main frame 여부, origin을 확인한다.
 3. Main은 연결된 문서 세션과 도메인 계약을 확인하고 권한 함수를 적용한다.
-4. RPC 입력과 출력, handshake 및 stream envelope는 프로토콜 파서와 payload 한도를 통과해야 한다.
+4. RPC 입력과 출력, handshake 및 stream envelope는 프로토콜 파서와 payload 한도를 통과해야 한다. RPC handler와 stream source가 만든 값은 원시 값 검사 → 출력 스키마 변환 → 변환 결과 재검사 → 복제 → 복제본 검사 순서를 모두 통과해야 전송된다. 이 순서는 `src/main/output-boundary.ts`의 `parseOutput` 하나로 구현되어 RPC 출력과 stream 값(State/Event)이 공유하며, 두 번째 검사(복제 전)는 accessor·함수 값이 `structuredClone` 단계로 새는 것을 막고 복제는 검증 이후 handler·스키마가 쥔 참조로 값을 바꾸는 TOCTOU를 막는다.
 5. 오류 응답은 안전한 프로토콜 오류 코드로 직렬화한다. 내부 예외나 원문 payload를 진단 정보에 기록하지 않는다.
+6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수)를 넘으면 같은 `INTERNAL`로 대체된다. 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다.
 
 Electron 어댑터는 `allowedOrigins`를 받고 현재 main frame과 허용 origin을 검사한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
