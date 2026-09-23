@@ -23,7 +23,7 @@ const connectionStateObject = z.object({
   phase: z.enum(["connecting", "connected", "disconnected"]),
   reason: z.literal("cable-disconnected").optional(),
 });
-export type ConnectionState = Readonly<z.infer<typeof connectionStateObject>>;
+export type ConnectionState = z.infer<typeof connectionStateObject>;
 export const connectionState: Schema<ConnectionState> = connectionStateObject
   .refine(
     ({ connected, phase, reason }) =>
@@ -43,7 +43,7 @@ const deviceMetricsObject = z.object({
   generatedTotal: nonNegativeIntegerSchema,
   forwardedTotal: nonNegativeIntegerSchema,
 });
-export type DeviceMetrics = Readonly<z.infer<typeof deviceMetricsObject>>;
+export type DeviceMetrics = z.infer<typeof deviceMetricsObject>;
 export const deviceMetrics: Schema<DeviceMetrics> = deviceMetricsObject;
 
 const serialLineObject = z.object({
@@ -53,14 +53,14 @@ const serialLineObject = z.object({
   }),
   at: numberValueSchema,
 });
-export type SerialLine = Readonly<z.infer<typeof serialLineObject>>;
+export type SerialLine = z.infer<typeof serialLineObject>;
 export const serialLine: Schema<SerialLine> = serialLineObject;
 
 const deviceErrorObject = z.object({
   code: z.literal("DEVICE_TIMEOUT"),
   message: z.literal("Device response timeout"),
 });
-export type DeviceError = Readonly<z.infer<typeof deviceErrorObject>>;
+export type DeviceError = z.infer<typeof deviceErrorObject>;
 export const deviceError: Schema<DeviceError> = deviceErrorObject;
 
 const sendCommandInputObject = z.object({
@@ -70,27 +70,27 @@ const sendCommandInputObject = z.object({
     .max(80)
     .regex(/^[\x20-\x7e]+$/),
 });
-export type SendCommandInput = Readonly<z.infer<typeof sendCommandInputObject>>;
+export type SendCommandInput = z.infer<typeof sendCommandInputObject>;
 export const sendCommandInput: Schema<SendCommandInput> =
   sendCommandInputObject;
 
 const sendResultObject = z.object({
   accepted: z.literal(true),
 });
-export type SendResult = Readonly<z.infer<typeof sendResultObject>>;
+export type SendResult = z.infer<typeof sendResultObject>;
 export const sendResult: Schema<SendResult> = sendResultObject;
 
 const setRateInputObject = z.object({
   messagesPerSecond: rate,
 });
-export type SetRateInput = Readonly<z.infer<typeof setRateInputObject>>;
+export type SetRateInput = z.infer<typeof setRateInputObject>;
 export const setRateInput: Schema<SetRateInput> = setRateInputObject;
 
 const setSourceSamplingInputObject = z.object({
   milliseconds: sampling,
 });
-export type SetSourceSamplingInput = Readonly<
-  z.infer<typeof setSourceSamplingInputObject>
+export type SetSourceSamplingInput = z.infer<
+  typeof setSourceSamplingInputObject
 >;
 export const setSourceSamplingInput: Schema<SetSourceSamplingInput> =
   setSourceSamplingInputObject;

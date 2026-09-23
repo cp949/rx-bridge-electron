@@ -1,9 +1,8 @@
-import { describe, expect, expectTypeOf, test } from "vitest";
+import { describe, expect, test } from "vitest";
 import { publicManifest } from "@cp949/rx-bridge-electron/contract";
 
 import { appContract } from "../src/bridge/contract.js";
 import {
-  type ConnectionState,
   connectionState,
   serialLine,
   sendCommandInput,
@@ -12,21 +11,7 @@ import {
 } from "../src/bridge/schemas.js";
 import { relayStatus } from "../src/bridge/relay-contract.js";
 
-type IsReadonly<T, K extends keyof T> =
-  (<U>() => U extends Pick<T, K> ? 1 : 2) extends <U>() => U extends Readonly<
-    Pick<T, K>
-  >
-    ? 1
-    : 2
-    ? true
-    : false;
-
 describe("demo app contract", () => {
-  test("keeps parsed connection state read-only in TypeScript", () => {
-    expectTypeOf<
-      IsReadonly<ConnectionState, "connected">
-    >().toEqualTypeOf<true>();
-  });
   test("does not freeze parsed payloads at runtime", () => {
     expect(
       Object.isFrozen(
