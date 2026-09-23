@@ -4,10 +4,38 @@ import {
   createRendererApi,
   type BridgeTransport,
 } from "@cp949/rx-bridge-electron/renderer";
+import type { BridgeApi } from "@cp949/rx-bridge-electron/contract";
 
-import { appContract, type AppBridge } from "../src/bridge/contract.js";
+import type { AppBridge } from "../src/bridge/contract.js";
 import { MainMonitorApp } from "../src/renderer/App.js";
-import { publicManifest } from "@cp949/rx-bridge-electron/contract";
+
+// `AppBridge`는 타입 계약이라 런타임 manifest를 만들지 못한다(DELTA-06).
+// `composition.test.ts`가 `createDemoComposition()`으로 검증하는 실제
+// manifest와 같은 모양을 여기서는 리터럴로 재현한다.
+const manifest = {
+  rpc: [
+    "rpc:device/connect",
+    "rpc:device/disconnect",
+    "rpc:device/send",
+    "rpc:device/setRate",
+    "rpc:device/setSourceSampling",
+    "rpc:device/simulateCableDisconnect",
+    "rpc:device/triggerError",
+    "rpc:relay/reset",
+    "rpc:relay/simulateFault",
+    "rpc:relay/turnOff",
+    "rpc:relay/turnOn",
+  ],
+  state: [
+    "state:device/connection",
+    "state:device/metrics",
+    "state:device/packetCount",
+    "state:device/signalStrength",
+    "state:device/temperature",
+    "state:relay/status",
+  ],
+  event: ["event:device/data", "event:device/error", "event:relay/fault"],
+};
 
 async function monitorHarness() {
   const invoke = vi.fn(async () => ({
@@ -28,14 +56,17 @@ async function monitorHarness() {
     connect: async () => ({
       protocolVersion: 1,
       clientId: "client-1",
-      manifest: publicManifest(appContract),
+      manifest,
     }),
     invoke,
     cancel: () => {},
     control: () => {},
     onStreamMessage: () => () => {},
   };
-  return { api: await createRendererApi<AppBridge>(transport), invoke };
+  return {
+    api: await createRendererApi<BridgeApi<AppBridge>>(transport),
+    invoke,
+  };
 }
 
 describe("MainMonitorApp", () => {

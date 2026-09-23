@@ -1,4 +1,4 @@
-import type { SerialLine } from "../bridge/schemas.js";
+import type { SerialLine } from "../bridge/device-contract.js";
 export const MAX_TERMINAL_LINES = 500;
 export function appendTerminalLine(
   lines: readonly SerialLine[],

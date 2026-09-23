@@ -1,21 +1,12 @@
 import { BehaviorSubject } from "rxjs";
-import {
-  defineDomain,
-  rpc,
-  state,
-  type Schema,
-} from "@cp949/rx-bridge-electron/contract";
-import {
-  currentValueSource,
-  implementDomain,
-} from "@cp949/rx-bridge-electron/main";
-import type { BridgeValue } from "@cp949/rx-bridge-electron/protocol";
+import type { BridgeImpl, Schema } from "@cp949/rx-bridge-electron/contract";
+import { currentValueSource } from "@cp949/rx-bridge-electron/main";
 
-interface AppendInput extends Record<string, BridgeValue> {
+export type AppendInput = {
   readonly text: string;
-}
+};
 
-const appendInput: Schema<AppendInput> = {
+export const appendInputSchema: Schema<AppendInput> = {
   parse(value) {
     if (
       value === null ||
@@ -29,23 +20,15 @@ const appendInput: Schema<AppendInput> = {
     return { text: (value as { text: string }).text };
   },
 };
-const saved: Schema<boolean> = {
-  parse(value) {
-    if (value !== true) throw new TypeError("Expected saved confirmation.");
-    return true;
-  },
-};
-const noteText: Schema<string> = {
-  parse(value) {
-    if (typeof value !== "string") throw new TypeError("Expected note text.");
-    return value;
-  },
-};
 
-export const notesContract = defineDomain("notes", {
-  rpc: { append: rpc({ input: appendInput, output: saved }) },
-  state: { latest: state(noteText) },
-});
+export type NotesBridge = {
+  notes: {
+    rpc: {
+      append(input: AppendInput): boolean;
+    };
+    state: { latest: string };
+  };
+};
 
 export function createNotes() {
   const latest$ = new BehaviorSubject("");
@@ -55,14 +38,18 @@ export function createNotes() {
   };
 }
 
-export function registerNotes(notes: ReturnType<typeof createNotes>) {
-  return implementDomain(notesContract, {
-    rpc: {
-      append: (input) => {
-        notes.latest$.next(input.text);
-        return true;
+export function registerNotes(
+  notes: ReturnType<typeof createNotes>,
+): BridgeImpl<NotesBridge> {
+  return {
+    notes: {
+      rpc: {
+        append: (input) => {
+          notes.latest$.next(input.text);
+          return true;
+        },
       },
+      state: { latest: currentValueSource(notes.latest$) },
     },
-    state: { latest: currentValueSource(notes.latest$) },
-  });
+  };
 }

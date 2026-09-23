@@ -26,6 +26,44 @@ function sender(id: number): SenderIdentity {
 }
 
 describe("demo composition", () => {
+  test("publishes only declared device and relay operations", () => {
+    const composition = createDemoComposition();
+    try {
+      composition.server.attach(attachTarget(1, "main"));
+      const handshake = composition.server.handshake(sender(1), "client-1");
+      expect(handshake?.manifest).toEqual({
+        rpc: [
+          "rpc:device/connect",
+          "rpc:device/disconnect",
+          "rpc:device/send",
+          "rpc:device/setRate",
+          "rpc:device/setSourceSampling",
+          "rpc:device/simulateCableDisconnect",
+          "rpc:device/triggerError",
+          "rpc:relay/reset",
+          "rpc:relay/simulateFault",
+          "rpc:relay/turnOff",
+          "rpc:relay/turnOn",
+        ],
+        state: [
+          "state:device/connection",
+          "state:device/metrics",
+          "state:device/packetCount",
+          "state:device/signalStrength",
+          "state:device/temperature",
+          "state:relay/status",
+        ],
+        event: [
+          "event:device/data",
+          "event:device/error",
+          "event:relay/fault",
+        ],
+      });
+    } finally {
+      composition.dispose();
+    }
+  });
+
   test("allows controller commands and denies monitor commands", async () => {
     const composition = createDemoComposition();
     try {

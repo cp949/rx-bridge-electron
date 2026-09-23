@@ -19,7 +19,7 @@ import type {
   SerialLine,
   SetRateInput,
   SetSourceSamplingInput,
-} from "../bridge/schemas.js";
+} from "../bridge/device-contract.js";
 
 const disconnected: ConnectionState = {
   connected: false,

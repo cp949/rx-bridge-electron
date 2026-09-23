@@ -1,13 +1,12 @@
-import { relayContract } from "../bridge/relay-contract.js";
-import {
-  broadcastEvent,
-  currentValueSource,
-  implementDomain,
-} from "@cp949/rx-bridge-electron/main";
+import { broadcastEvent, currentValueSource } from "@cp949/rx-bridge-electron/main";
+import type { BridgeImpl } from "@cp949/rx-bridge-electron/contract";
+import type { AppBridge } from "../bridge/contract.js";
 import type { VirtualRelay } from "./virtual-relay.js";
 
-export function registerRelay(relay: VirtualRelay) {
-  return implementDomain(relayContract, {
+export function registerRelay(
+  relay: VirtualRelay,
+): BridgeImpl<AppBridge>["relay"] {
+  return {
     rpc: {
       turnOn: () => relay.turnOn(),
       turnOff: () => relay.turnOff(),
@@ -15,6 +14,10 @@ export function registerRelay(relay: VirtualRelay) {
       reset: () => relay.reset(),
     },
     state: { status: currentValueSource(relay.status$) },
-    event: { fault: broadcastEvent(relay.fault$) },
-  });
+    event: {
+      fault: broadcastEvent(relay.fault$, {
+        buffer: { capacity: 20, overflow: "drop-oldest" },
+      }),
+    },
+  };
 }

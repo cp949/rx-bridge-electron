@@ -1,14 +1,15 @@
 import { describe, expect, test } from "vitest";
-import { composeContracts } from "@cp949/rx-bridge-electron/contract";
 import {
   createBridgeServer,
   type AttachedTarget,
 } from "@cp949/rx-bridge-electron/main";
+import type { SchemasFor } from "@cp949/rx-bridge-electron/contract";
 import type { StreamMessage } from "@cp949/rx-bridge-electron/protocol";
 import {
+  appendInputSchema,
   createNotes,
-  notesContract,
   registerNotes,
+  type NotesBridge,
 } from "./fixtures/notes-domain.js";
 
 const sender = {
@@ -25,12 +26,14 @@ const target: AttachedTarget = {
   onLifecycle: () => () => undefined,
 };
 
+const schemas = {
+  notes: { rpc: { append: { input: appendInputSchema } } },
+} satisfies SchemasFor<NotesBridge>;
+
 describe("non-hardware domain", () => {
   test("registers a notes command and current State through the same bridge", async () => {
     const notes = createNotes();
-    const server = createBridgeServer(composeContracts(notesContract), [
-      registerNotes(notes),
-    ]);
+    const server = createBridgeServer(registerNotes(notes), { schemas });
     try {
       server.attach(target);
       const response = await server.dispatchRpc(sender, {

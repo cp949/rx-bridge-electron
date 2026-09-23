@@ -1,45 +1,25 @@
-import {
-  defineDomain,
-  event,
-  rpc,
-  state,
-} from "@cp949/rx-bridge-electron/contract";
-import type { Schema } from "@cp949/rx-bridge-electron/contract";
-import type { BridgeValue } from "@cp949/rx-bridge-electron/protocol";
-import { z } from "zod";
-import { noInput } from "./schemas.js";
-
-export interface RelayStatus extends Record<string, BridgeValue> {
+// 경량 계약(DELTA-06): relay 도메인도 순수 TS 타입으로만 선언한다. 검증은
+// `src/main/schemas.ts`의 `schemas`/`errors` map이 맡는다. `interface`가
+// 아니라 `type`으로 선언하는 이유는 `device-contract.ts` 상단 주석 참고.
+export type RelayStatus = {
   readonly energized: boolean;
   readonly faulted: boolean;
-}
-export interface RelayFault extends Record<string, BridgeValue> {
+};
+
+export type RelayFault = {
   readonly code: "RELAY_TRIPPED";
   readonly message: "Relay overload simulated.";
-}
+};
 
-export const relayStatus: Schema<RelayStatus> = z
-  .object({ energized: z.boolean(), faulted: z.boolean() })
-  .refine(({ energized, faulted }) => !(energized && faulted), {
-    error: "Expected a valid relay status.",
-  });
-
-export const relayFault: Schema<RelayFault> = z.object({
-  code: z.literal("RELAY_TRIPPED"),
-  message: z.literal("Relay overload simulated."),
-});
-
-export const relayContract = defineDomain("relay", {
-  rpc: {
-    turnOn: rpc({ input: noInput, output: relayStatus }),
-    turnOff: rpc({ input: noInput, output: relayStatus }),
-    simulateFault: rpc({ input: noInput, output: relayStatus }),
-    reset: rpc({ input: noInput, output: relayStatus }),
-  },
-  state: { status: state(relayStatus) },
-  event: {
-    fault: event(relayFault, {
-      buffer: { capacity: 20, overflow: "drop-oldest" },
-    }),
-  },
-});
+export type RelayBridge = {
+  relay: {
+    rpc: {
+      turnOn(): RelayStatus;
+      turnOff(): RelayStatus;
+      simulateFault(): RelayStatus;
+      reset(): RelayStatus;
+    };
+    state: { status: RelayStatus };
+    event: { fault: RelayFault };
+  };
+};

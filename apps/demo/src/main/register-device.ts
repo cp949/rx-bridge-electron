@@ -1,13 +1,12 @@
-import { deviceContract } from "../bridge/device-contract.js";
-import {
-  broadcastEvent,
-  currentValueSource,
-  implementDomain,
-} from "@cp949/rx-bridge-electron/main";
+import { broadcastEvent, currentValueSource } from "@cp949/rx-bridge-electron/main";
+import type { BridgeImpl } from "@cp949/rx-bridge-electron/contract";
+import type { AppBridge } from "../bridge/contract.js";
 import type { Device } from "./virtual-device.js";
 
-export function registerDevice(device: Device) {
-  return implementDomain(deviceContract, {
+export function registerDevice(
+  device: Device,
+): BridgeImpl<AppBridge>["device"] {
+  return {
     rpc: {
       connect: (_input, context) => device.connect(context.signal),
       disconnect: (_input, context) => device.disconnect(context.signal),
@@ -28,8 +27,12 @@ export function registerDevice(device: Device) {
       metrics: currentValueSource(device.metrics$),
     },
     event: {
-      data: broadcastEvent(device.data$),
-      error: broadcastEvent(device.error$),
+      data: broadcastEvent(device.data$, {
+        buffer: { capacity: 100, overflow: "drop-oldest" },
+      }),
+      error: broadcastEvent(device.error$, {
+        buffer: { capacity: 20, overflow: "drop-oldest" },
+      }),
     },
-  });
+  };
 }

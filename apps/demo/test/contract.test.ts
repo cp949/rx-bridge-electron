@@ -1,15 +1,13 @@
 import { describe, expect, test } from "vitest";
-import { publicManifest } from "@cp949/rx-bridge-electron/contract";
 
-import { appContract } from "../src/bridge/contract.js";
 import {
   connectionState,
-  serialLine,
+  relayStatus,
   sendCommandInput,
+  serialLine,
   setRateInput,
   setSourceSamplingInput,
-} from "../src/bridge/schemas.js";
-import { relayStatus } from "../src/bridge/relay-contract.js";
+} from "../src/main/schemas.js";
 
 describe("demo app contract", () => {
   test("does not freeze parsed payloads at runtime", () => {
@@ -66,32 +64,5 @@ describe("demo app contract", () => {
     expect(() =>
       serialLine.parse({ kind: "rx", text: "😀".repeat(129), at: 1 }),
     ).toThrow();
-  });
-
-  test("publishes only declared device and relay operations", () => {
-    expect(publicManifest(appContract)).toEqual({
-      rpc: [
-        "rpc:device/connect",
-        "rpc:device/disconnect",
-        "rpc:device/send",
-        "rpc:device/setRate",
-        "rpc:device/setSourceSampling",
-        "rpc:device/simulateCableDisconnect",
-        "rpc:device/triggerError",
-        "rpc:relay/reset",
-        "rpc:relay/simulateFault",
-        "rpc:relay/turnOff",
-        "rpc:relay/turnOn",
-      ],
-      state: [
-        "state:device/connection",
-        "state:device/metrics",
-        "state:device/packetCount",
-        "state:device/signalStrength",
-        "state:device/temperature",
-        "state:relay/status",
-      ],
-      event: ["event:device/data", "event:device/error", "event:relay/fault"],
-    });
   });
 });

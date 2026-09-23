@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 import { createVirtualDevice } from "../src/main/virtual-device.js";
-import type { SerialLine } from "../src/bridge/schemas.js";
+import type { SerialLine } from "../src/bridge/device-contract.js";
 
 describe("VirtualDevice", () => {
   afterEach(() => vi.useRealTimers());

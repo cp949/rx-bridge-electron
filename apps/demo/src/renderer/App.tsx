@@ -6,7 +6,8 @@ import type {
   ConnectionState,
   DeviceMetrics,
   SerialLine,
-} from "../bridge/schemas.js";
+} from "../bridge/device-contract.js";
+import type { BridgeApi } from "@cp949/rx-bridge-electron/contract";
 import {
   RemoteError,
   type RemoteStateSnapshot,
@@ -17,7 +18,7 @@ import { RelayPanel } from "./RelayPanel.js";
 import { useRemoteState } from "./use-remote-state.js";
 
 interface Props {
-  readonly api: RendererApi<AppBridge>;
+  readonly api: RendererApi<BridgeApi<AppBridge>>;
 }
 function valueOf<T>(snapshot: RemoteStateSnapshot<T>): T | undefined {
   return snapshot.status === "current" || snapshot.status === "stale"
@@ -42,7 +43,7 @@ function SnapshotLabel<T>({
     </p>
   );
 }
-function useDeviceView(api: RendererApi<AppBridge>) {
+function useDeviceView(api: RendererApi<BridgeApi<AppBridge>>) {
   const connection = useRemoteState(api.device.state.connection);
   const temperature = useRemoteState(api.device.state.temperature);
   const signal = useRemoteState(api.device.state.signalStrength);
