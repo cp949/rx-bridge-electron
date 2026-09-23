@@ -130,6 +130,13 @@ export class StreamHub {
     return this.#registrations.has(key);
   }
 
+  public queuedEventsCount(): number {
+    let count = 0;
+    for (const consumer of this.#consumers.values())
+      count += consumer.pendingEvents?.length ?? 0;
+    return count;
+  }
+
   public subscribe(
     sender: SenderIdentity,
     clientId: string,
@@ -185,6 +192,10 @@ export class StreamHub {
       closed: false,
     };
     this.#consumers.set(id, consumer);
+    recordDiagnostic(this.#diagnostics, {
+      type: "subscription-opened",
+      key: consumer.key,
+    });
     sessionSignal.addEventListener("abort", consumer.onSessionAbort, {
       once: true,
     });
@@ -494,6 +505,10 @@ export class StreamHub {
   #close(consumer: Consumer): void {
     if (consumer.closed) return;
     consumer.closed = true;
+    recordDiagnostic(this.#diagnostics, {
+      type: "subscription-closed",
+      key: consumer.key,
+    });
     consumer.sessionSignal.removeEventListener(
       "abort",
       consumer.onSessionAbort,

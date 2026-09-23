@@ -46,6 +46,7 @@ export class DocumentSessions {
   readonly #diagnostics: DiagnosticsSink | undefined;
   readonly #resourceLimits: ResourceLimits;
   #disposed = false;
+  #globalRunningRpc = 0;
 
   public constructor(
     resourceLimits: ResourceLimits,
@@ -112,6 +113,7 @@ export class DocumentSessions {
       runningRpc: 0,
     });
     attachment.current = session;
+    recordDiagnostic(this.#diagnostics, { type: "session-opened" });
     return session;
   }
 
@@ -139,13 +141,37 @@ export class DocumentSessions {
     if (state === undefined) return false;
     if (state.runningRpc >= this.#resourceLimits.maxConcurrentRpc) return false;
     state.runningRpc += 1;
+    this.#globalRunningRpc += 1;
     return true;
   }
 
   public releaseRpc(session: DocumentSession): void {
     const state = this.#states.get(session);
-    if (state === undefined) return;
-    state.runningRpc = Math.max(0, state.runningRpc - 1);
+    if (state !== undefined)
+      state.runningRpc = Math.max(0, state.runningRpc - 1);
+    this.#globalRunningRpc = Math.max(0, this.#globalRunningRpc - 1);
+  }
+
+  public sessionCount(): number {
+    let count = 0;
+    for (const attachment of this.#attachments.values())
+      if (attachment.current !== undefined) count += 1;
+    return count;
+  }
+
+  public subscriptionCount(): number {
+    let count = 0;
+    for (const attachment of this.#attachments.values()) {
+      const session = attachment.current;
+      const state =
+        session === undefined ? undefined : this.#states.get(session);
+      if (state !== undefined) count += state.subscriptions.size;
+    }
+    return count;
+  }
+
+  public rpcInFlightCount(): number {
+    return this.#globalRunningRpc;
   }
 
   public beginRpc(
@@ -251,6 +277,7 @@ export class DocumentSessions {
     const session = attachment.current;
     if (session !== undefined) {
       attachment.current = undefined;
+      recordDiagnostic(this.#diagnostics, { type: "session-closed" });
       let retired = this.#retiredClients.get(webContentsId);
       if (retired === undefined) {
         retired = new Set();

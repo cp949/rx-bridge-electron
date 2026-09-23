@@ -23,6 +23,7 @@ import type {
   BridgeContext,
   BridgeServer,
   DiagnosticsSink,
+  DiagnosticsSnapshot,
   DomainImplementation,
   RejectReason,
   SenderIdentity,
@@ -53,6 +54,7 @@ export interface StreamBridgeServer extends BridgeServer {
     command: WireStreamCommand,
     send: StreamSender,
   ): Promise<void>;
+  getDiagnosticsSnapshot(): DiagnosticsSnapshot;
   [recordAdapterRejection]?(reason: RejectReason): void;
 }
 
@@ -400,6 +402,14 @@ export function createBridgeServer<Contract extends ComposedContract>(
       disposed = true;
       sessions.dispose();
       streams.dispose();
+    },
+    getDiagnosticsSnapshot(): DiagnosticsSnapshot {
+      return {
+        sessions: sessions.sessionCount(),
+        rpcInFlight: sessions.rpcInFlightCount(),
+        subscriptions: sessions.subscriptionCount(),
+        queuedEvents: streams.queuedEventsCount(),
+      };
     },
   };
 }
