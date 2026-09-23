@@ -9,21 +9,19 @@ import {
 import { fileURLToPath } from "node:url";
 
 import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
+  type BridgeImpl,
   type Schema,
+  type SchemasFor,
 } from "@cp949/rx-bridge-electron/contract";
 import {
   bindElectronBridge,
   broadcastEvent,
   createBridgeServer,
   currentValueSource,
-  implementDomain,
   type BridgeDiagnostic,
 } from "@cp949/rx-bridge-electron/main";
+
+import type { LabBridge } from "./contract.js";
 
 const string: Schema<string> = {
   parse(value) {
@@ -62,61 +60,61 @@ const subjects = {
 const holds = new Set<() => void>();
 const diagnostics: BridgeDiagnostic[] = [];
 
-const lab = defineDomain("lab", {
-  rpc: {
-    ping: rpc({ input: string, output: string }),
-    secure: rpc({ input: string, output: string }),
-    hold: rpc({ input: string, output: string }),
+const impl: BridgeImpl<LabBridge> = {
+  lab: {
+    rpc: {
+      ping: (input) => `pong:${input}`,
+      secure: (input) => `secure:${input}`,
+      hold: (input, context) =>
+        new Promise<string>((resolve, reject) => {
+          const release = () => {
+            holds.delete(release);
+            resolve(`held:${input}`);
+          };
+          holds.add(release);
+          context.signal.addEventListener("abort", () => {
+            holds.delete(release);
+            reject(new Error("aborted"));
+          });
+        }),
+    },
+    state: {
+      status: currentValueSource(
+        Object.assign(counted("status", status), {
+          getValue: () => status.getValue(),
+        }),
+      ),
+    },
+    event: {
+      notice: broadcastEvent(counted("notice", subjects.notice)),
+      strict: broadcastEvent(counted("strict", subjects.strict), {
+        buffer: { capacity: 4, overflow: "error" },
+      }),
+      lossy: broadcastEvent(counted("lossy", subjects.lossy), {
+        buffer: { capacity: 4, overflow: "drop-oldest" },
+      }),
+    },
   },
-  state: { status: state(string) },
-  event: {
-    notice: event(string),
-    strict: event(string, { buffer: { capacity: 4, overflow: "error" } }),
-    lossy: event(string, { buffer: { capacity: 4, overflow: "drop-oldest" } }),
+};
+const schemas = {
+  lab: {
+    rpc: {
+      ping: { input: string, output: string },
+      secure: { input: string, output: string },
+      hold: { input: string, output: string },
+    },
+    state: { status: string },
+    event: { notice: string, strict: string, lossy: string },
   },
+} satisfies SchemasFor<LabBridge>;
+const server = createBridgeServer(impl, {
+  schemas,
+  // viewer 창은 쓰기 성격의 RPC를 거부한다.
+  authorize: (context, operationId) =>
+    context.windowRole === "editor" ||
+    !["rpc:lab/secure", "rpc:lab/hold"].includes(operationId),
+  diagnostics: { record: (event) => diagnostics.push(event) },
 });
-const server = createBridgeServer(
-  composeContracts(lab),
-  [
-    implementDomain(lab, {
-      rpc: {
-        ping: (input) => `pong:${input}`,
-        secure: (input) => `secure:${input}`,
-        hold: (input, context) =>
-          new Promise<string>((resolve, reject) => {
-            const release = () => {
-              holds.delete(release);
-              resolve(`held:${input}`);
-            };
-            holds.add(release);
-            context.signal.addEventListener("abort", () => {
-              holds.delete(release);
-              reject(new Error("aborted"));
-            });
-          }),
-      },
-      state: {
-        status: currentValueSource(
-          Object.assign(counted("status", status), {
-            getValue: () => status.getValue(),
-          }),
-        ),
-      },
-      event: {
-        notice: broadcastEvent(counted("notice", subjects.notice)),
-        strict: broadcastEvent(counted("strict", subjects.strict)),
-        lossy: broadcastEvent(counted("lossy", subjects.lossy)),
-      },
-    }),
-  ],
-  {
-    // viewer 창은 쓰기 성격의 RPC를 거부한다.
-    authorize: (context, operationId) =>
-      context.windowRole === "editor" ||
-      !["rpc:lab/secure", "rpc:lab/hold"].includes(operationId),
-    diagnostics: { record: (event) => diagnostics.push(event) },
-  },
-);
 
 // 테스트가 `app.evaluate`로 읽는 Main 관측·제어 지점.
 const probe = {

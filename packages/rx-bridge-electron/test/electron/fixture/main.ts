@@ -3,20 +3,18 @@ import { BehaviorSubject, Subject } from "rxjs";
 import { fileURLToPath } from "node:url";
 
 import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
+  type BridgeImpl,
   type Schema,
+  type SchemasFor,
 } from "@cp949/rx-bridge-electron/contract";
 import {
   bindElectronBridge,
   broadcastEvent,
   createBridgeServer,
   currentValueSource,
-  implementDomain,
 } from "@cp949/rx-bridge-electron/main";
+
+import type { FixtureBridge } from "./contract.js";
 
 const string: Schema<string> = {
   parse(value) {
@@ -26,18 +24,21 @@ const string: Schema<string> = {
 };
 const status = new BehaviorSubject("ready");
 const notices = new Subject<string>();
-const device = defineDomain("device", {
-  rpc: { ping: rpc({ input: string, output: string }) },
-  state: { status: state(string) },
-  event: { notice: event(string) },
-});
-const server = createBridgeServer(composeContracts(device), [
-  implementDomain(device, {
+const impl: BridgeImpl<FixtureBridge> = {
+  device: {
     rpc: { ping: (input) => `pong:${input}` },
     state: { status: currentValueSource(status) },
     event: { notice: broadcastEvent(notices) },
-  }),
-]);
+  },
+};
+const schemas = {
+  device: {
+    rpc: { ping: { input: string, output: string } },
+    state: { status: string },
+    event: { notice: string },
+  },
+} satisfies SchemasFor<FixtureBridge>;
+const server = createBridgeServer(impl, { schemas });
 
 async function start(): Promise<void> {
   await app.whenReady();
