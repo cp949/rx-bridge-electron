@@ -84,4 +84,4 @@ Main은 `createBridgeServer(contract, implementations, { diagnostics })`로 넘�
 
 `apps/demo`는 실제 장치 드라이버가 아니라 가상 장치와 relay를 통해 라이브러리의 계약, 역할 권한, State/Event, 다중 창 동작을 보여준다. 장치 연결 지원으로 해석하지 않는다.
 
-검증 명령은 각 패키지의 `verify`와 CI workflow에 정의되어 있다. CI는 단위·타입·빌드 검사, 개발용 Electron acceptance, Linux packaged 실행 검사를 분리한다. package manifest의 Electron peer 범위(`>=29`)는 모든 Electron 버전에서 동일한 런타임 증명이 있다는 뜻이 아니다. 저장소 개발/CI 의존성은 `^39.8.10`이므로 다른 버전에서의 동작은 별도로 확인해야 한다. 이 문서를 추가하면서 검증 명령은 실행하지 않았다.
+검증 명령은 각 패키지의 `verify`와 CI workflow에 정의되어 있다. CI는 단위·타입·빌드 검사, 개발용 Electron acceptance, Linux packaged 실행 검사를 분리한다. package manifest의 Electron peer 범위(`>=29`)는 모든 Electron 버전에서 동일한 런타임 증명이 있다는 뜻이 아니다. 저장소 개발/CI 의존성은 `^44.4.5`이므로 다른 버전에서의 동작은 별도로 확인해야 한다. 실제 Electron 다중 창·반복 실행 검증의 환경과 결과는 [RD-008 검증 결과](verification/rd-008.md)에 있다.

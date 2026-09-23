@@ -46,7 +46,7 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 
 ## 범위 밖
 
-서버 전역(모든 세션 합계) 상한, Renderer 쪽 사전 차단, 와이어 `timeoutMs`, RPC `requestId` 워터마크, IPC 역직렬화 단계의 수신 메모리 제한, 진단 지표 추가(RD-007, [ADR 0010](0010-operational-diagnostics.md)), 실제 Electron 다중 창·장시간 검증(RD-008).
+서버 전역(모든 세션 합계) 상한, Renderer 쪽 사전 차단, 와이어 `timeoutMs`, RPC `requestId` 워터마크, IPC 역직렬화 단계의 수신 메모리 제한, 진단 지표 추가(RD-007, [ADR 0010](0010-operational-diagnostics.md)), 실제 Electron 다중 창·장시간 검증(RD-008, [결과](../verification/rd-008.md)).
 
 ## 이전(migration)
 

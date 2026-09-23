@@ -16,6 +16,10 @@
 미확인. Electron 앱 창 생성 타이밍과 e2e 하니스의 창 탐색 사이의 경쟁 조건으로 추정되나, 이 트랩 등록
 시점에는 근본 원인을 조사하지 않았다.
 
+가설: `apps/demo/test/demo.electron.test.ts`의 `windowFor`는 `app.windows()`를 한 번 훑어 창 텍스트를 읽고
+대기하지 않는다. [TRP-003](TRP-003-electron-renderer-global-race.md)과 같은 계열의 경쟁이다(재현으로
+확인하지 않음).
+
 ## 탐지/회피
 
 같은 테스트 파일만 단독으로 재실행(`npx vitest run test/demo.electron.test.ts`, `apps/demo` 기준)하거나
