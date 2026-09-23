@@ -175,15 +175,15 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       return protocolError(value);
     }
   });
-  options.ipcMain.on(channels.cancel, (event, value: unknown) => {
+  const onCancel = (event: IpcMainEvent, value: unknown) => {
     try {
       options.server.cancel(
         senderIdentity(event),
         parseWireCancelRequest(value, limits),
       );
     } catch {}
-  });
-  options.ipcMain.on(channels.control, (event, value: unknown) => {
+  };
+  const onControl = (event: IpcMainEvent, value: unknown) => {
     try {
       void options.server.controlStream(
         senderIdentity(event),
@@ -191,10 +191,18 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
         streamSender(event),
       );
     } catch {}
-  });
+  };
+  options.ipcMain.on(channels.cancel, onCancel);
+  options.ipcMain.on(channels.control, onControl);
+  let disposed = false;
   return {
     channels,
     attach(contents, role) {
+      if (disposed)
+        throw new BridgeProtocolError(
+          "FORBIDDEN",
+          "Electron bridge is disposed.",
+        );
       const prior = attached.get(contents.id);
       prior?.();
       const detach = options.server.attach(
@@ -207,12 +215,14 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       };
     },
     dispose() {
+      if (disposed) return;
+      disposed = true;
       for (const detach of attached.values()) detach();
       attached.clear();
       options.ipcMain.removeHandler(channels.handshake);
       options.ipcMain.removeHandler(channels.rpc);
-      options.ipcMain.removeAllListeners(channels.cancel);
-      options.ipcMain.removeAllListeners(channels.control);
+      options.ipcMain.removeListener(channels.cancel, onCancel);
+      options.ipcMain.removeListener(channels.control, onControl);
       options.server.dispose();
     },
   };
