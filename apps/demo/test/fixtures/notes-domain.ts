@@ -59,7 +59,7 @@ export function registerNotes(notes: ReturnType<typeof createNotes>) {
   return implementDomain(notesContract, {
     rpc: {
       append: (input) => {
-        notes.latest$.next((input as AppendInput).text);
+        notes.latest$.next(input.text);
         return true;
       },
     },

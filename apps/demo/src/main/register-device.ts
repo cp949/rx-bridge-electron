@@ -11,12 +11,9 @@ export function registerDevice(device: Device) {
     rpc: {
       connect: (_input, context) => device.connect(context.signal),
       disconnect: (_input, context) => device.disconnect(context.signal),
-      send: (input, context) =>
-        device.send(input as { command: string }, context.signal),
-      setRate: (input) =>
-        device.setRate(input as { messagesPerSecond: 10 | 100 | 1000 | 10000 }),
-      setSourceSampling: (input) =>
-        device.setSourceSampling(input as { milliseconds: 0 | 10 | 100 }),
+      send: (input, context) => device.send(input, context.signal),
+      setRate: (input) => device.setRate(input),
+      setSourceSampling: (input) => device.setSourceSampling(input),
       triggerError: () => {
         device.triggerError();
         return undefined;
