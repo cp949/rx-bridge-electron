@@ -51,6 +51,10 @@ export class StreamMultiplexer implements Disposable {
     });
   }
 
+  public get disposed(): boolean {
+    return this.#disposed;
+  }
+
   public open(
     key: string,
     handlers: StreamGenerationHandlers,

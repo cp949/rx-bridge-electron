@@ -244,6 +244,103 @@ describe("api.dispose() root shutdown", () => {
     expect(transport.cancellations).toEqual([invocation.requestId]);
   });
 
+  test("재진입: 아직 complete되지 않은 활성 generation에 합류하는 subscribe도 동기 CANCELLED다", async () => {
+    const { transport, api } = await setup();
+
+    api.hardware.log$.subscribe({ error: () => {} });
+    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
+    transport.emitStream(
+      message(eventId, { type: "subscribed", sequence: 0 }),
+    );
+
+    api.hardware.status$.subscribe({ error: () => {} });
+    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+    transport.emitStream(
+      message(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+    );
+
+    const joinedStateValues: Array<string | undefined> = [];
+    let joinedStateError: unknown;
+    let joinedStateCompleted = false;
+    let joinedEventError: unknown;
+    let joinedEventCompleted = false;
+    let controlsBeforeJoin = 0;
+    let controlsAfterJoin = 0;
+
+    // Event generation이 먼저 열렸으므로 dispose 루프에서 먼저 complete된다.
+    // 그 시점에 State generation과 늦게 합류할 Event 구독은 아직 루프가 처리하지 않았다.
+    api.hardware.log$.subscribe({
+      error: () => {},
+      complete: () => {
+        controlsBeforeJoin = transport.controls.length;
+        api.hardware.status$.subscribe({
+          next: (value) => joinedStateValues.push(value),
+          error: (error) => {
+            joinedStateError = error;
+          },
+          complete: () => {
+            joinedStateCompleted = true;
+          },
+        });
+        api.hardware.log$.subscribe({
+          error: (error) => {
+            joinedEventError = error;
+          },
+          complete: () => {
+            joinedEventCompleted = true;
+          },
+        });
+        controlsAfterJoin = transport.controls.length;
+      },
+    });
+
+    api.dispose();
+
+    expect(joinedStateValues).toEqual([]);
+    expect(joinedStateError).toMatchObject({ code: "CANCELLED" });
+    expect(joinedStateCompleted).toBe(false);
+    expect(joinedEventError).toMatchObject({ code: "CANCELLED" });
+    expect(joinedEventCompleted).toBe(false);
+    expect(controlsAfterJoin).toBe(controlsBeforeJoin);
+    expect(api.hardware.status$.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "connected",
+    });
+  });
+
+  test("종료 후 subscribe는 이전에 받은 State 값을 stale로 유지한다", async () => {
+    const { transport, api } = await setup();
+
+    const subscription = api.hardware.status$.subscribe({ error: () => {} });
+    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+    transport.emitStream(
+      message(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+    );
+    subscription.unsubscribe();
+
+    api.dispose();
+
+    let stateError: unknown;
+    api.hardware.status$.subscribe({
+      error: (error) => {
+        stateError = error;
+      },
+    });
+    expect(stateError).toMatchObject({ code: "CANCELLED" });
+    expect(api.hardware.status$.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "connected",
+    });
+  });
+
   test("종료 후 호출: RPC와 subscribe는 전송 없이 동기 CANCELLED다", async () => {
     const { transport, api } = await setup();
 

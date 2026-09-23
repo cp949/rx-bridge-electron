@@ -23,7 +23,7 @@
 3. 스냅샷한 RPC마다 cancel을 전송한 뒤 로컬에서 reject한다.
 4. 스트림을 정리한다: `StreamMultiplexer`에 dispose 플래그를 설정하고, IPC listener를 제거하고, generation마다 `unsubscribe` 전송 후 `complete()`를 호출한다.
 
-이 순서에서 사용자 코드가 동기로 실행되는 지점은 4번의 `complete()` 콜백 하나뿐이다. RPC reject에 대한 사용자 반응은 Promise 콜백이라 microtask로 밀리며, 그 시점에는 이미 RPC(3번 결과)와 스트림(4번 결과) 양쪽이 종료 상태다. 따라서 `complete()` 콜백 안에서 사용자 코드가 `dispose()`를 다시 호출해도, 순서상 이미 지나간 3번·4번을 다시 실행하지 않는 no-op이 된다. 반복 `dispose()` 호출은 일반적으로도 no-op이다: cancel이나 unsubscribe를 추가로 전송하지 않는다.
+이 순서에서 사용자 코드가 동기로 실행되는 지점은 4번의 `complete()` 콜백 하나뿐이다. RPC reject에 대한 사용자 반응은 Promise 콜백이라 microtask로 밀리며, 그 시점에는 이미 RPC(3번 결과)와 스트림(4번 결과) 양쪽이 종료 상태다. 따라서 `complete()` 콜백 안에서 사용자 코드가 `dispose()`를 다시 호출해도, 순서상 이미 지나간 3번·4번을 다시 실행하지 않는 no-op이 된다. 반복 `dispose()` 호출은 일반적으로도 no-op이다: cancel이나 unsubscribe를 추가로 전송하지 않는다. 같은 콜백 안의 `subscribe()`는 루프가 아직 `complete()`하지 않은 활성 generation이 있어도 그 generation에 합류하지 않는다. 합류하면 현재값 재생과 늦은 `complete()`를 받아 종료 후 subscribe 규칙이 깨진다. 따라서 종료 플래그를 generation 합류보다 먼저 검사해 동기 `CANCELLED` error로 끝내고, `RemoteState` snapshot은 바꾸지 않는다.
 
 로컬에서 이미 확정된(reject된) RPC에 뒤늦게 Main 응답이 도착해도 caller에게 전달하지 않는다 — 기존 `settled` 가드(`rpc-client.ts`)를 그대로 쓴다. `dispose()` 이후 도착한 stream 메시지도 이미 listener를 제거했으므로 구독자에게 전달되지 않는다.
 

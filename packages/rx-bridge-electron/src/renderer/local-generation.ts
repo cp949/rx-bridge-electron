@@ -1,6 +1,6 @@
 import { Subject, type Subscriber, type TeardownLogic } from "rxjs";
 
-import type { RemoteError } from "./remote-error.js";
+import { createDisposedError, type RemoteError } from "./remote-error.js";
 import type { StreamMultiplexer } from "./stream-multiplexer.js";
 
 interface Generation<T> {
@@ -42,6 +42,14 @@ export class LocalGeneration<T> {
   }
 
   public subscribe(subscriber: Subscriber<T>): TeardownLogic {
+    // 종료 뒤에는 dispose 루프가 아직 complete하지 않은 활성 generation에도
+    // 합류하지 않는다. 합류하면 현재값 재생과 늦은 complete를 받게 된다.
+    // generation을 건드리지 않으므로 snapshot도 바뀌지 않는다.
+    if (this.#multiplexer.disposed) {
+      subscriber.error(createDisposedError());
+      return;
+    }
+
     let generation = this.#generation;
     const opensGeneration = generation === undefined;
     if (generation === undefined) {
