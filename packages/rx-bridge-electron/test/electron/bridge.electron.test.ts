@@ -1,10 +1,10 @@
 import { _electron as electron } from "@playwright/test";
 import { afterEach, beforeAll, describe, expect, test } from "vitest";
-import { execFileSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
 import { ELECTRON_BRIDGE_CHANNELS } from "../../src/main/electron-adapter.js";
+import { bundleFixture } from "./bundle-fixture.js";
 
 const fixtureRoot = fileURLToPath(
   new URL(
@@ -18,9 +18,6 @@ const fixtureRenderer = fileURLToPath(
   new URL("./fixture/renderer.html", import.meta.url),
 );
 const electronExecutable = createRequire(import.meta.url)("electron") as string;
-const tsupExecutable = fileURLToPath(
-  new URL("../../node_modules/.bin/tsup", import.meta.url),
-);
 
 type BridgeGlobal = {
   readonly rxBridge: {
@@ -39,47 +36,7 @@ describe("Electron bridge process seam", () => {
   let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
 
   beforeAll(() => {
-    execFileSync(
-      tsupExecutable,
-      [
-        "test/electron/fixture/main.ts",
-        "--format",
-        "esm",
-        "--out-dir",
-        "node_modules/.cache/rx-bridge-electron-fixture",
-        "--external",
-        "electron",
-      ],
-      { cwd: fileURLToPath(new URL("../../", import.meta.url)) },
-    );
-    execFileSync(
-      tsupExecutable,
-      [
-        "test/electron/fixture/renderer.ts",
-        "--format",
-        "iife",
-        "--global-name",
-        "fixtureRenderer",
-        "--out-dir",
-        "node_modules/.cache/rx-bridge-electron-fixture",
-        "--no-clean",
-      ],
-      { cwd: fileURLToPath(new URL("../../", import.meta.url)) },
-    );
-    execFileSync(
-      tsupExecutable,
-      [
-        "test/electron/fixture/preload.ts",
-        "--format",
-        "cjs",
-        "--out-dir",
-        "node_modules/.cache/rx-bridge-electron-fixture",
-        "--no-clean",
-        "--external",
-        "electron",
-      ],
-      { cwd: fileURLToPath(new URL("../../", import.meta.url)) },
-    );
+    bundleFixture("test/electron/fixture", "rx-bridge-electron-fixture");
   });
 
   afterEach(async () => {

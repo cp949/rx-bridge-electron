@@ -16,6 +16,9 @@
     "test": {
       "dependsOn": ["^test"]
     },
+    "@cp949/rx-bridge-electron#test": {
+      "dependsOn": ["^test", "build"]
+    },
     "verify": {
       "dependsOn": ["^verify"]
     },
