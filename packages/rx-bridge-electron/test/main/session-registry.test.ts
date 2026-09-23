@@ -7,6 +7,8 @@ import {
 } from "../../src/contract/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
 import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import { DocumentSessions } from "../../src/main/document-sessions.js";
+import { resolveResourceLimits } from "../../src/main/resource-limits.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
 const value: Schema<undefined> = { parse: () => undefined };
@@ -376,5 +378,81 @@ describe("Main session lifecycle", () => {
     await expect(
       server.dispatchRpc(sender(), request("document-1", "request-1")),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
+  });
+});
+
+describe("Main retired client retention", () => {
+  const limits = resolveResourceLimits({
+    maxRetiredClientsPerWebContents: 3,
+  });
+
+  test("eviction keeps only the most recent N retired client ids", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    for (const clientId of ["c1", "c2", "c3", "c4", "c5"])
+      expect(sessions.establish(sender(), clientId)).toBeDefined();
+
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
+    expect(sessions.establish(sender(), "c2")).toBeUndefined();
+    expect(sessions.establish(sender(), "c3")).toBeUndefined();
+    expect(sessions.establish(sender(), "c4")).toBeUndefined();
+  });
+
+  test("an evicted retired id still fails the frame check for a non-current sender", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    for (const clientId of ["c1", "c2", "c3", "c4", "c5"])
+      sessions.establish(sender(), clientId);
+
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
+    expect(
+      sessions.establish(sender({ isMainFrame: false }), "c1"),
+    ).toBeUndefined();
+  });
+
+  test("a destroyed lifecycle event clears retired ids for that webContents", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    sessions.establish(sender(), "c1");
+    sessions.establish(sender(), "c2");
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(1);
+
+    target.fireLifecycle("destroyed");
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(0);
+  });
+
+  test("main-frame-navigation and render-process-gone never clear retired ids", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    sessions.establish(sender(), "c1");
+    sessions.establish(sender(), "c2");
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(1);
+
+    target.fireLifecycle("main-frame-navigation");
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(2);
+    target.fireLifecycle("render-process-gone");
+    expect(sessions.retiredClientCount(target.webContentsId)).toBe(2);
+  });
+
+  test("eviction and destroyed events only affect their own webContents", () => {
+    const sessions = new DocumentSessions(limits);
+    const targetA = new FakeTarget(1, "a");
+    const targetB = new FakeTarget(2, "b");
+    sessions.attach(targetA);
+    sessions.attach(targetB);
+    for (const clientId of ["c1", "c2", "c3", "c4"])
+      sessions.establish(sender({ webContentsId: 1 }), clientId);
+    sessions.establish(sender({ webContentsId: 2 }), "d1");
+
+    expect(sessions.retiredClientCount(targetA.webContentsId)).toBe(3);
+    expect(sessions.retiredClientCount(targetB.webContentsId)).toBe(0);
+
+    targetA.fireLifecycle("destroyed");
+    expect(sessions.retiredClientCount(targetA.webContentsId)).toBe(0);
+    expect(sessions.retiredClientCount(targetB.webContentsId)).toBe(0);
   });
 });

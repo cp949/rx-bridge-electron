@@ -42,6 +42,12 @@ export class FakeTarget implements AttachedTarget {
   }
 
   public endDocument(): void {
-    for (const listener of this.listeners) listener("main-frame-navigation");
+    this.fireLifecycle("main-frame-navigation");
+  }
+
+  public fireLifecycle(
+    reason: "main-frame-navigation" | "render-process-gone" | "destroyed",
+  ): void {
+    for (const listener of this.listeners) listener(reason);
   }
 }

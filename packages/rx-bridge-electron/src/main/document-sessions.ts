@@ -12,6 +12,9 @@ export interface DocumentSession {
   readonly signal: AbortSignal;
 }
 
+type LifecycleReason =
+  "main-frame-navigation" | "render-process-gone" | "destroyed";
+
 interface SessionState {
   readonly controller: AbortController;
   streamWatermark: number;
@@ -58,7 +61,9 @@ export class DocumentSessions {
     if (this.#attachments.has(target.webContentsId)) return () => {};
     const attachment: Attachment = {
       target,
-      removeLifecycle: target.onLifecycle(() => this.#retire(attachment)),
+      removeLifecycle: target.onLifecycle((reason) =>
+        this.#retire(attachment, reason),
+      ),
       current: undefined,
     };
     this.#attachments.set(target.webContentsId, attachment);
@@ -219,6 +224,10 @@ export class DocumentSessions {
     controller.abort();
   }
 
+  public retiredClientCount(webContentsId: number): number {
+    return this.#retiredClients.get(webContentsId)?.size ?? 0;
+  }
+
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
@@ -233,21 +242,31 @@ export class DocumentSessions {
     this.#retire(attachment);
   }
 
-  #retire(attachment: Attachment): void {
+  #retire(attachment: Attachment, reason?: LifecycleReason): void {
+    const webContentsId = attachment.target.webContentsId;
     const session = attachment.current;
-    if (session === undefined) return;
-    attachment.current = undefined;
-    let retired = this.#retiredClients.get(attachment.target.webContentsId);
-    if (retired === undefined) {
-      retired = new Set();
-      this.#retiredClients.set(attachment.target.webContentsId, retired);
+    if (session !== undefined) {
+      attachment.current = undefined;
+      let retired = this.#retiredClients.get(webContentsId);
+      if (retired === undefined) {
+        retired = new Set();
+        this.#retiredClients.set(webContentsId, retired);
+      }
+      retired.add(session.clientId);
+      while (
+        retired.size > this.#resourceLimits.maxRetiredClientsPerWebContents
+      ) {
+        const oldest = retired.values().next().value;
+        if (oldest === undefined) break;
+        retired.delete(oldest);
+      }
+      const state = this.#states.get(session);
+      state?.controller.abort();
+      for (const id of [...(state?.active.keys() ?? [])])
+        this.cancelRpc(session, id);
+      for (const id of [...(state?.pendingStreams.keys() ?? [])])
+        this.cancelStream(session, id);
     }
-    retired.add(session.clientId);
-    const state = this.#states.get(session);
-    state?.controller.abort();
-    for (const id of [...(state?.active.keys() ?? [])])
-      this.cancelRpc(session, id);
-    for (const id of [...(state?.pendingStreams.keys() ?? [])])
-      this.cancelStream(session, id);
+    if (reason === "destroyed") this.#retiredClients.delete(webContentsId);
   }
 }
