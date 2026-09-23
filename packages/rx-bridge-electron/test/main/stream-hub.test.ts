@@ -20,6 +20,7 @@ import type {
 } from "../../src/protocol/index.js";
 import { parseBridgeValue } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
+import { testSubscriptionId } from "./subscription-ids.js";
 
 const number: Schema<number> = {
   parse(value) {
@@ -141,20 +142,35 @@ describe("Main stream sources and sharing", () => {
     };
     await server.controlStream(
       sender(),
-      command("subscribe", "a", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     await server.controlStream(
       sender(),
-      command("subscribe", "b", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     expect(subscriptions).toBe(2);
     expect(live).toBe(1);
-    await server.controlStream(sender(), ack("a", 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     await server.controlStream(
       sender(),
-      command("subscribe", "c", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(3),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     expect(subscriptions).toBe(2);
@@ -184,12 +200,14 @@ describe("Main stream sources and sharing", () => {
     server.attach(new FakeTarget(2));
     const first: StreamMessage[] = [];
     const second: StreamMessage[] = [];
-    await server.controlStream(sender(), command("subscribe", "a"), (message) =>
-      first.push(message),
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      (message) => first.push(message),
     );
     await server.controlStream(
       sender({ webContentsId: 2 }),
-      command("subscribe", "b", "client-2"),
+      command("subscribe", testSubscriptionId(2), "client-2"),
       (message) => second.push(message),
     );
     expect(first.map((message) => message.type)).toEqual([
@@ -203,17 +221,23 @@ describe("Main stream sources and sharing", () => {
     expect(first[1]).toMatchObject({ values: [7] });
     expect(second[1]).toMatchObject({ values: [7] });
     expect(subscribe).toHaveBeenCalledTimes(1);
-    await server.controlStream(sender(), command("unsubscribe", "a"), () => {});
+    await server.controlStream(
+      sender(),
+      command("unsubscribe", testSubscriptionId(1)),
+      () => {},
+    );
     await server.controlStream(
       sender({ webContentsId: 2 }),
-      command("unsubscribe", "b", "client-2"),
+      command("unsubscribe", testSubscriptionId(2), "client-2"),
       () => {},
     );
     expect(source.observed).toBe(false);
     source.next(9);
     const later: StreamMessage[] = [];
-    await server.controlStream(sender(), command("subscribe", "c"), (message) =>
-      later.push(message),
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(3)),
+      (message) => later.push(message),
     );
     expect(later[1]).toMatchObject({ values: [9] });
     expect(subscribe).toHaveBeenCalledTimes(2);
@@ -237,13 +261,23 @@ describe("Main stream sources and sharing", () => {
     server.attach(new FakeTarget(1, "dashboard"));
     await server.controlStream(
       sender({ origin: "https://evil.example" }),
-      command("subscribe", "bad", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       () => {},
     );
     expect(contexts).toHaveLength(0);
     await server.controlStream(
       sender(),
-      command("subscribe", "good", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "event:hardware/change$",
+      ),
       () => {},
     );
     expect(contexts).toEqual([
@@ -272,11 +306,15 @@ describe("Main stream flow control", () => {
     const send = (message: StreamMessage) => {
       messages.push(message);
     };
-    await server.controlStream(sender(), command("subscribe", "s"), send);
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
     const pending: { nested: { count: number } } = { nested: { count: 2 } };
     source.next(pending);
     Object.assign(pending.nested, { count: "invalid" });
-    await server.controlStream(sender(), ack("s", 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     expect(messages.at(-1)).toMatchObject({
       type: "batch",
       values: [{ nested: { count: 2 } }],
@@ -298,14 +336,19 @@ describe("Main stream flow control", () => {
     };
     await server.controlStream(
       sender(),
-      command("subscribe", "e", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     source.next({ nested: { count: 1 } });
     const pending: { nested: { count: number } } = { nested: { count: 2 } };
     source.next(pending);
     Object.assign(pending.nested, { raw: new Uint8Array([3]) });
-    await server.controlStream(sender(), ack("e", 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     const latest = messages.at(-1);
     expect(latest).toMatchObject({
       type: "batch",
@@ -322,13 +365,17 @@ describe("Main stream flow control", () => {
   });
   test("holds one State batch and replaces pending State with latest value until ACK", async () => {
     const { server, source, messages, send } = harness();
-    await server.controlStream(sender(), command("subscribe", "s"), send);
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
     source.next(2);
     source.next(3);
     expect(messages.filter((message) => message.type === "batch")).toHaveLength(
       1,
     );
-    await server.controlStream(sender(), ack("s", 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     expect(messages.at(-1)).toMatchObject({
       type: "batch",
       sequence: 2,
@@ -349,7 +396,12 @@ describe("Main stream flow control", () => {
       });
       await server.controlStream(
         sender(),
-        command("subscribe", "e", "client-1", "event:hardware/change$"),
+        command(
+          "subscribe",
+          testSubscriptionId(1),
+          "client-1",
+          "event:hardware/change$",
+        ),
         send,
       );
       events.next(1);
@@ -363,8 +415,8 @@ describe("Main stream flow control", () => {
       expect(diagnostics.record).toHaveBeenCalledWith(
         expect.objectContaining({ type: "stream-dropped", count: 1 }),
       );
-      await server.controlStream(sender(), ack("e", 1), send);
-      await server.controlStream(sender(), ack("e", 2), send);
+      await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
+      await server.controlStream(sender(), ack(testSubscriptionId(1), 2), send);
       expect(
         messages
           .filter((message) => message.type === "batch")
@@ -373,7 +425,7 @@ describe("Main stream flow control", () => {
             message.type === "batch" ? message.values[0] : undefined,
           ),
       ).toEqual(expected);
-      await server.controlStream(sender(), ack("e", 3), send);
+      await server.controlStream(sender(), ack(testSubscriptionId(1), 3), send);
       expect(messages.some((message) => message.type === "error")).toBe(ends);
       expect(
         diagnostics.record.mock.calls
@@ -407,7 +459,12 @@ describe("Main stream lifecycle and ordering", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
@@ -428,7 +485,12 @@ describe("Main stream lifecycle and ordering", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => {
         messages.push(message);
         target.endDocument();
@@ -443,21 +505,21 @@ describe("Main stream lifecycle and ordering", () => {
     const first: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "same"),
+      command("subscribe", testSubscriptionId(1)),
       (message) => first.push(message),
     );
     server.attach(new FakeTarget());
     const replay: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "other"),
+      command("subscribe", testSubscriptionId(1)),
       (message) => replay.push(message),
     );
     expect(replay).toEqual([]);
     const replacement: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "same", "client-2"),
+      command("subscribe", testSubscriptionId(1), "client-2"),
       (message) => replacement.push(message),
     );
     expect(replacement.map((message) => message.type)).toEqual([
@@ -465,7 +527,11 @@ describe("Main stream lifecycle and ordering", () => {
       "batch",
     ]);
     source.next(2);
-    await server.controlStream(sender(), ack("same", 1, "client-2"), () => {});
+    await server.controlStream(
+      sender(),
+      ack(testSubscriptionId(1), 1, "client-2"),
+      () => {},
+    );
     expect(replacement.at(-1)).toMatchObject({ type: "batch", values: [2] });
   });
   test("unsubscribe during pending authorization prevents a late source subscription", async () => {
@@ -489,12 +555,17 @@ describe("Main stream lifecycle and ordering", () => {
     };
     const pending = server.controlStream(
       sender(),
-      command("subscribe", "pending", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     await server.controlStream(
       sender(),
-      command("unsubscribe", "pending"),
+      command("unsubscribe", testSubscriptionId(1)),
       send,
     );
     allow(true);
@@ -503,7 +574,12 @@ describe("Main stream lifecycle and ordering", () => {
     expect(messages).toEqual([]);
     await server.controlStream(
       sender(),
-      command("subscribe", "pending", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     expect(source.observed).toBe(false);
@@ -527,7 +603,12 @@ describe("Main stream lifecycle and ordering", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "denied", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     expect(messages.map((message) => message.type)).toEqual([
@@ -552,7 +633,12 @@ describe("Main stream lifecycle and ordering", () => {
     await expect(
       server.controlStream(
         sender(),
-        command("subscribe", "e", "client-1", "event:hardware/change$"),
+        command(
+          "subscribe",
+          testSubscriptionId(1),
+          "client-1",
+          "event:hardware/change$",
+        ),
         () => {
           throw new Error("closed frame");
         },
@@ -561,23 +647,23 @@ describe("Main stream lifecycle and ordering", () => {
     expect(source.observed).toBe(false);
   });
 
-  test("opaque IDs with delimiters cannot collide across client and subscription fields", async () => {
+  test("delimiter-laden clientIds cannot collide across sessions", async () => {
     const { server, messages, send } = harness();
     await server.controlStream(
       sender(),
-      command("subscribe", "b:c", "a"),
+      command("subscribe", testSubscriptionId(1), "a"),
       send,
     );
     await server.controlStream(
       sender(),
-      command("subscribe", "c", "a:b"),
+      command("subscribe", testSubscriptionId(1), "a:b:c"),
       send,
     );
     expect(
       messages
         .filter((message) => message.type === "subscribed")
         .map((message) => message.clientId),
-    ).toEqual(["a", "a:b"]);
+    ).toEqual(["a", "a:b:c"]);
   });
 
   test("synchronous overflow unsubscribes the producer at the capacity boundary", async () => {
@@ -601,7 +687,12 @@ describe("Main stream lifecycle and ordering", () => {
     server.attach(new FakeTarget());
     await server.controlStream(
       sender(),
-      command("subscribe", "e", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       () => {},
     );
     expect(produced).toBe(3);
@@ -623,14 +714,19 @@ describe("Main stream lifecycle and ordering", () => {
     const send = (message: StreamMessage) => messages.push(message);
     await server.controlStream(
       sender(),
-      command("subscribe", "e", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     expect(messages.map((message) => message.type)).toEqual([
       "subscribed",
       "batch",
     ]);
-    await server.controlStream(sender(), ack("e", 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     expect(messages.at(-1)).toMatchObject({ type: "complete" });
   });
 
@@ -638,14 +734,19 @@ describe("Main stream lifecycle and ordering", () => {
     const { server, events, messages, send } = harness();
     await server.controlStream(
       sender(),
-      command("subscribe", "e", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       send,
     );
     events.next(1);
     events.next(2);
     events.error(new Error("private secret"));
-    await server.controlStream(sender(), ack("e", 1), send);
-    await server.controlStream(sender(), ack("e", 2), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 2), send);
     expect(messages.map((message) => message.type)).toEqual([
       "subscribed",
       "batch",
@@ -658,7 +759,12 @@ describe("Main stream lifecycle and ordering", () => {
     const fresh: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "later", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => fresh.push(message),
     );
     expect(fresh.map((message) => message.type)).toEqual([
@@ -669,17 +775,29 @@ describe("Main stream lifecycle and ordering", () => {
 
   test("old-session ACK and unsubscribe cannot affect replacement", async () => {
     const { server, source, messages, send } = harness();
-    await server.controlStream(sender(), command("subscribe", "same"), send);
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
     const replacement: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "same", "client-2"),
+      command("subscribe", testSubscriptionId(1), "client-2"),
       (message) => replacement.push(message),
     );
-    await server.controlStream(sender(), command("unsubscribe", "same"), send);
-    await server.controlStream(sender(), ack("same", 1), send);
+    await server.controlStream(
+      sender(),
+      command("unsubscribe", testSubscriptionId(1)),
+      send,
+    );
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
     source.next(10);
-    await server.controlStream(sender(), ack("same", 1, "client-2"), send);
+    await server.controlStream(
+      sender(),
+      ack(testSubscriptionId(1), 1, "client-2"),
+      send,
+    );
     expect(replacement.at(-1)).toMatchObject({
       clientId: "client-2",
       type: "batch",
@@ -723,7 +841,12 @@ describe("Main stream lifecycle and ordering", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => messages.push(message),
     );
     expect(messages.map((message) => message.type)).toEqual([

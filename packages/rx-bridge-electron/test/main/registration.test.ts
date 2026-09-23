@@ -17,6 +17,7 @@ import type {
   DomainImplementation,
 } from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
+import { testSubscriptionId } from "./subscription-ids.js";
 
 type NumberHandler = (
   input: number,
@@ -305,15 +306,17 @@ describe("Domain implementation registration", () => {
       const response = await server.dispatchRpc(sender(), rpcRequest(key, 1));
       expect(response).not.toMatchObject({ error: { code: "NOT_FOUND" } });
     }
+    let sequence = 0;
     for (const key of [...manifest.state, ...manifest.event]) {
       const messages: { type: string }[] = [];
+      sequence += 1;
       await server.controlStream(
         sender(),
         {
           protocolVersion: 1,
           clientId: "document-1",
           type: "subscribe",
-          subscriptionId: `sub-${key}`,
+          subscriptionId: testSubscriptionId(sequence),
           key,
         },
         (message) => messages.push(message),

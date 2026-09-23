@@ -14,7 +14,7 @@ export interface DocumentSession {
 
 interface SessionState {
   readonly controller: AbortController;
-  readonly usedStreamIds: Set<string>;
+  streamWatermark: number;
   readonly pendingStreams: Map<string, AbortController>;
   readonly subscriptions: Set<string>;
   readonly active: Map<
@@ -99,7 +99,7 @@ export class DocumentSessions {
     };
     this.#states.set(session, {
       controller,
-      usedStreamIds: new Set(),
+      streamWatermark: 0,
       pendingStreams: new Map(),
       subscriptions: new Set(),
       active: new Map(),
@@ -172,11 +172,15 @@ export class DocumentSessions {
     this.#diagnostics?.record({ type: "rpc-cancelled", key: work.key });
   }
 
-  public beginStream(session: DocumentSession, id: string): BeginStreamResult {
+  public beginStream(
+    session: DocumentSession,
+    id: string,
+    sequence: number,
+  ): BeginStreamResult {
     const state = this.#states.get(session);
-    if (state === undefined || state.usedStreamIds.has(id))
+    if (state === undefined || sequence <= state.streamWatermark)
       return { kind: "duplicate" };
-    state.usedStreamIds.add(id);
+    state.streamWatermark = sequence;
     if (state.subscriptions.size >= this.#resourceLimits.maxSubscriptions)
       return { kind: "exhausted" };
     state.subscriptions.add(id);
@@ -245,6 +249,5 @@ export class DocumentSessions {
       this.cancelRpc(session, id);
     for (const id of [...(state?.pendingStreams.keys() ?? [])])
       this.cancelStream(session, id);
-    state?.usedStreamIds.clear();
   }
 }

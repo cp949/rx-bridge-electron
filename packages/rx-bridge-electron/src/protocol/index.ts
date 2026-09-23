@@ -4,6 +4,7 @@ export {
   type BridgeValue,
   type PayloadLimits,
 } from "./bridge-value.js";
+export { parseOpaqueIdSequence } from "./opaque-id.js";
 export {
   parseHandshakeRequest,
   parseHandshakeResponse,

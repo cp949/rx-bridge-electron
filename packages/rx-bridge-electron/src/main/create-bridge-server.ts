@@ -7,6 +7,7 @@ import type {
   WireRpcRequest,
   WireStreamCommand,
 } from "../protocol/index.js";
+import { parseOpaqueIdSequence } from "../protocol/index.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import { registerImplementations } from "./registration.js";
@@ -211,8 +212,22 @@ export function createBridgeServer<Contract extends ComposedContract>(
       }
       const session = sessions.establish(sender, command.clientId);
       if (session === undefined) return;
+      const sequence = parseOpaqueIdSequence(command.subscriptionId);
+      if (sequence === undefined) {
+        streams.reject(
+          sender,
+          command,
+          send,
+          {
+            code: "INVALID_ARGUMENT",
+            message: "Invalid bridge subscription ID.",
+          },
+          session.signal,
+        );
+        return;
+      }
       const id = keyOf(sender, command.clientId, command.subscriptionId);
-      const begin = sessions.beginStream(session, id);
+      const begin = sessions.beginStream(session, id, sequence);
       if (begin.kind === "duplicate") return;
       if (begin.kind === "exhausted") {
         streams.reject(

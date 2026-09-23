@@ -48,7 +48,7 @@ describe("non-hardware domain", () => {
           protocolVersion: 1,
           clientId: "notes-client",
           type: "subscribe",
-          subscriptionId: "latest-1",
+          subscriptionId: "test:subscription:1",
           key: "state:notes/latest",
         },
         (message) => messages.push(message),

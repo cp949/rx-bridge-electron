@@ -58,7 +58,8 @@ describe("demo composition", () => {
     const composition = createDemoComposition();
     try {
       composition.server.attach(attachTarget(3, "unknown"));
-      for (const key of ["state:relay/status", "event:relay/fault"]) {
+      const keys = ["state:relay/status", "event:relay/fault"];
+      for (const [index, key] of keys.entries()) {
         const messages: StreamMessage[] = [];
         await composition.server.controlStream(
           sender(3),
@@ -66,7 +67,7 @@ describe("demo composition", () => {
             protocolVersion: 1,
             clientId: "unknown-client",
             type: "subscribe",
-            subscriptionId: key,
+            subscriptionId: `test:subscription:${index + 1}`,
             key,
           },
           (message) => messages.push(message),
@@ -95,7 +96,7 @@ describe("demo composition", () => {
           protocolVersion: 1,
           clientId: "monitor-client",
           type: "subscribe",
-          subscriptionId: "relay-fault",
+          subscriptionId: "test:subscription:1",
           key: "event:relay/fault",
         },
         (message) => messages.push(message),
@@ -135,7 +136,7 @@ describe("demo composition", () => {
           protocolVersion: 1,
           clientId: "monitor-client",
           type: "subscribe",
-          subscriptionId: "relay-status",
+          subscriptionId: "test:subscription:2",
           key: "state:relay/status",
         },
         (message) => messages.push(message),

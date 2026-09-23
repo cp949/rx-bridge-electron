@@ -134,21 +134,24 @@ describe("Electron bridge process seam", () => {
       });
       bridge.control({
         type: "subscribe",
-        subscriptionId: "state-1",
+        subscriptionId: "test:subscription:1",
         key: "state:device/status",
       });
       bridge.control({
         type: "subscribe",
-        subscriptionId: "event-1",
+        subscriptionId: "test:subscription:2",
         key: "event:device/notice",
       });
       await new Promise((resolve) => setTimeout(resolve, 50));
       bridge.control({
         type: "acknowledge",
-        subscriptionId: "state-1",
+        subscriptionId: "test:subscription:1",
         sequence: 1,
       });
-      bridge.control({ type: "unsubscribe", subscriptionId: "event-1" });
+      bridge.control({
+        type: "unsubscribe",
+        subscriptionId: "test:subscription:2",
+      });
       remove();
       return {
         handshake,
@@ -182,11 +185,11 @@ describe("Electron bridge process seam", () => {
       expect.arrayContaining([
         expect.objectContaining({
           type: "subscribed",
-          subscriptionId: "state-1",
+          subscriptionId: "test:subscription:1",
         }),
         expect.objectContaining({
           type: "subscribed",
-          subscriptionId: "event-1",
+          subscriptionId: "test:subscription:2",
         }),
       ]),
     );

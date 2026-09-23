@@ -20,6 +20,7 @@ import type {
   WireStreamCommand,
 } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
+import { testSubscriptionId } from "./subscription-ids.js";
 
 const number: Schema<number> = {
   parse(value) {
@@ -121,18 +122,33 @@ describe("세션별 구독 한도", () => {
     });
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       () => {},
     );
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s3", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(3),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "error"]);
@@ -156,19 +172,34 @@ describe("세션별 구독 한도", () => {
     });
     const p1 = server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     const p2 = server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       () => {},
     );
     await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s3", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(3),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "error"]);
@@ -185,18 +216,28 @@ describe("세션별 구독 한도", () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     await server.controlStream(
       sender(),
-      command("unsubscribe", "s1"),
+      command("unsubscribe", testSubscriptionId(1)),
       () => {},
     );
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "batch"]);
@@ -213,12 +254,17 @@ describe("세션별 구독 한도", () => {
     });
     const pending = server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     await server.controlStream(
       sender(),
-      command("unsubscribe", "s1"),
+      command("unsubscribe", testSubscriptionId(1)),
       () => {},
     );
     allow(true);
@@ -226,7 +272,12 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "batch"]);
@@ -239,17 +290,31 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "batch"]);
     currentSource.complete();
-    await server.controlStream(sender(), ack("s1", 1), () => {});
+    await server.controlStream(
+      sender(),
+      ack(testSubscriptionId(1), 1),
+      () => {},
+    );
     expect(messages.at(-1)).toMatchObject({ type: "complete" });
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -262,7 +327,12 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "e1", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     events.error(new Error("boom"));
@@ -270,7 +340,12 @@ describe("세션별 구독 한도", () => {
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -283,16 +358,29 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "e1", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => messages.push(message),
     );
     events.next(1);
     events.next(2);
     events.next(3);
     expect(types(messages)).toEqual(["subscribed", "batch"]);
-    await server.controlStream(sender(), ack("e1", 1), () => {});
+    await server.controlStream(
+      sender(),
+      ack(testSubscriptionId(1), 1),
+      () => {},
+    );
     expect(types(messages)).toEqual(["subscribed", "batch", "batch"]);
-    await server.controlStream(sender(), ack("e1", 2), () => {});
+    await server.controlStream(
+      sender(),
+      ack(testSubscriptionId(1), 2),
+      () => {},
+    );
     expect(messages.at(-1)).toMatchObject({
       type: "error",
       error: { code: "STREAM_OVERFLOW" },
@@ -300,7 +388,12 @@ describe("세션별 구독 한도", () => {
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -315,7 +408,12 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "error"]);
@@ -323,7 +421,12 @@ describe("세션별 구독 한도", () => {
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -341,7 +444,12 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "error"]);
@@ -349,7 +457,12 @@ describe("세션별 구독 한도", () => {
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -360,7 +473,12 @@ describe("세션별 구독 한도", () => {
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/missing$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/missing$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "error"]);
@@ -368,7 +486,12 @@ describe("세션별 구독 한도", () => {
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/current$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed", "batch"]);
@@ -378,25 +501,40 @@ describe("세션별 구독 한도", () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     const rejected: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => rejected.push(message),
     );
     expect(types(rejected)).toEqual(["subscribed", "error"]);
     await server.controlStream(
       sender(),
-      command("unsubscribe", "s1"),
+      command("unsubscribe", testSubscriptionId(1)),
       () => {},
     );
     const more: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s3", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(3),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => more.push(message),
     );
     expect(types(more)).toEqual(["subscribed"]);
@@ -408,14 +546,24 @@ describe("세션별 구독 한도", () => {
     });
     await server.controlStream(
       sender(),
-      command("subscribe", "s1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     target.endDocument();
     const messages: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "s2", "client-2", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-2",
+        "state:hardware/other$",
+      ),
       (message) => messages.push(message),
     );
     expect(types(messages)).toEqual(["subscribed", "batch"]);
@@ -426,20 +574,35 @@ describe("세션별 구독 한도", () => {
     server.attach(new FakeTarget(2, "main"));
     await server.controlStream(
       sender(),
-      command("subscribe", "a1", "client-1", "state:hardware/current$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
       () => {},
     );
     const rejected: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "a2", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => rejected.push(message),
     );
     expect(types(rejected)).toEqual(["subscribed", "error"]);
     const bMessages: StreamMessage[] = [];
     await server.controlStream(
       sender({ webContentsId: 2 }),
-      command("subscribe", "b1", "client-1", "state:hardware/other$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/other$",
+      ),
       (message) => bMessages.push(message),
     );
     expect(types(bMessages)).toEqual(["subscribed", "batch"]);
@@ -449,13 +612,23 @@ describe("세션별 구독 한도", () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
     await server.controlStream(
       sender(),
-      command("subscribe", "c1", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
       () => {},
     );
     const rejected: StreamMessage[] = [];
     await server.controlStream(
       sender(),
-      command("subscribe", "c2", "client-1", "event:hardware/change$"),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "event:hardware/change$",
+      ),
       (message) => rejected.push(message),
     );
     expect(types(rejected)).toEqual(["subscribed", "error"]);

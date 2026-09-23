@@ -87,8 +87,6 @@ export class StreamHub {
   readonly #registrations = new Map<string, Registration>();
   readonly #shared = new Map<string, SharedSource>();
   readonly #consumers = new Map<string, Consumer>();
-  readonly #used = new Set<string>();
-  readonly #usedBySession = new WeakMap<AbortSignal, Set<string>>();
   readonly #limits: PayloadLimits;
   readonly #diagnostics: DiagnosticsSink | undefined;
 
@@ -152,7 +150,7 @@ export class StreamHub {
       return;
     }
     const id = this.#id(sender, clientId, command.subscriptionId);
-    if (!this.#reserve(id, sessionSignal)) {
+    if (sessionSignal.aborted || this.#consumers.has(id)) {
       onClose();
       return;
     }
@@ -262,8 +260,7 @@ export class StreamHub {
     error: RpcErrorPayload,
     sessionSignal: AbortSignal,
   ): void {
-    const id = this.#id(sender, command.clientId, command.subscriptionId);
-    if (!this.#reserve(id, sessionSignal)) return;
+    if (sessionSignal.aborted) return;
     try {
       send({
         protocolVersion: 1,
@@ -315,28 +312,6 @@ export class StreamHub {
 
   public dispose(): void {
     this.closeWhere(() => true);
-    this.#used.clear();
-  }
-
-  #reserve(id: string, sessionSignal: AbortSignal): boolean {
-    if (sessionSignal.aborted || this.#used.has(id)) return false;
-    let ids = this.#usedBySession.get(sessionSignal);
-    if (ids === undefined) {
-      ids = new Set();
-      this.#usedBySession.set(sessionSignal, ids);
-      const reserved = ids;
-      sessionSignal.addEventListener(
-        "abort",
-        () => {
-          for (const used of reserved) this.#used.delete(used);
-          reserved.clear();
-        },
-        { once: true },
-      );
-    }
-    ids.add(id);
-    this.#used.add(id);
-    return true;
   }
 
   #id(
