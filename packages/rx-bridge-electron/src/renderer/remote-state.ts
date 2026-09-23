@@ -25,6 +25,7 @@ export class RemoteStateClient<T>
         this.#snapshot = { status: "current", active: true, value };
       },
       onClose: () => this.#markInactive(),
+      replayLatest: true,
     });
     subscribeLocal = (subscriber) => this.#local.subscribe(subscriber);
   }

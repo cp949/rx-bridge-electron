@@ -8,12 +8,21 @@ interface Generation<T> {
   subscriptionId?: string;
   subscribers: number;
   closed: boolean;
+  hasValue: boolean;
+  latest: T | undefined;
 }
 
 export interface LocalGenerationPolicy<T> {
   onOpen?(): void;
   beforeNext?(value: T): void;
   onClose?(): void;
+  /**
+   * true면 이미 값을 받은 활성 generation에 늦게 합류하는 구독자에게 현재값을
+   * `subscribe()` 호출 안에서 동기로 1회 재생한다. 값의 수명은 generation의
+   * 수명과 같다 — generation이 폐기되면(마지막 구독 해제, error, complete) 값도
+   * 함께 버려지고 다음 generation에는 재생되지 않는다.
+   */
+  replayLatest?: boolean;
 }
 
 export class LocalGeneration<T> {
@@ -40,6 +49,8 @@ export class LocalGeneration<T> {
         subject: new Subject<T>(),
         subscribers: 0,
         closed: false,
+        hasValue: false,
+        latest: undefined,
       };
       this.#generation = generation;
       this.#policy.onOpen?.();
@@ -47,6 +58,19 @@ export class LocalGeneration<T> {
 
     generation.subscribers += 1;
     const innerSubscription = generation.subject.subscribe(subscriber);
+
+    if (
+      !opensGeneration &&
+      this.#policy.replayLatest === true &&
+      generation.hasValue &&
+      this.#generation === generation &&
+      !generation.closed
+    ) {
+      // 새 구독자에게만 현재값을 동기로 재생한다. subject.next로 재생하면
+      // 기존 구독자가 값을 중복 수신하므로 subscriber에 직접 전달한다.
+      subscriber.next(generation.latest as T);
+    }
+
     let removed = false;
     const removeLocalSubscriber = (): void => {
       if (removed) {
@@ -78,6 +102,8 @@ export class LocalGeneration<T> {
               return;
             }
             const typedValue = value as T;
+            generation.hasValue = true;
+            generation.latest = typedValue;
             this.#policy.beforeNext?.(typedValue);
             generation.subject.next(typedValue);
           },
