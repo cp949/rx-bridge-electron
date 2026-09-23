@@ -57,12 +57,12 @@ payload 한도는 서버(`createBridgeServer`)가 계약 기준으로만 적용�
 
 Main은 연결된 `webContents`의 현재 문서 세션 단위로 진행 중 RPC 수, 구독(대기+활성) 수, RPC 실행 시간, retired client ID 보관량을 제한한다. `createBridgeServer(contract, implementations, { resourceLimits })` 옵션으로 설정하며 모두 세션별이다 — 서버 전역(모든 세션 합계) 상한은 없다. 한 세션이 한도를 모두 소진해도 다른 세션의 RPC·구독은 영향받지 않는다.
 
-| 옵션                              | 기본값  | 초과 시                                                          |
-| --------------------------------- | ------- | ---------------------------------------------------------------- |
-| `maxConcurrentRpc`                | 64      | 다음 RPC는 `authorize`·handler 호출 없이 `RESOURCE_EXHAUSTED`    |
-| `maxSubscriptions`                | 256     | 다음 subscribe는 `subscribed` 다음 `RESOURCE_EXHAUSTED` `error`  |
-| `maxRpcDurationMs`                | 300,000 | handler `signal` abort 후 `DEADLINE_EXCEEDED`(`Infinity`면 없음) |
-| `maxRetiredClientsPerWebContents` | 32      | 가장 오래된 retired clientId부터 기록에서 제거                   |
+| 옵션                              | 기본값  | 초과 시                                                                                     |
+| --------------------------------- | ------- | ------------------------------------------------------------------------------------------- |
+| `maxConcurrentRpc`                | 64      | 다음 RPC는 `authorize`·handler 호출 없이 `RESOURCE_EXHAUSTED`                               |
+| `maxSubscriptions`                | 256     | 다음 subscribe는 `subscribed` 다음 `RESOURCE_EXHAUSTED` `error`                             |
+| `maxRpcDurationMs`                | 300,000 | handler `signal` abort 후 `DEADLINE_EXCEEDED`(`Infinity`면 없음, 유한값 최대 2,147,483,647) |
+| `maxRetiredClientsPerWebContents` | 32      | 가장 오래된 retired clientId부터 기록에서 제거                                              |
 
 RPC 슬롯은 취소나 deadline으로 응답을 먼저 보내도 handler Promise가 실제로 끝날 때 반환한다 — `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유한다. 구독 슬롯은 unsubscribe·완료·오류·overflow·거부·세션 retire 각 경로 뒤 즉시 반환한다.
 

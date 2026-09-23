@@ -26,11 +26,19 @@ function assertPositiveSafeInteger(
     );
 }
 
+// setTimeout은 2^31-1ms를 넘는 지연을 1ms로 바꾸므로 그 이상은 즉시 deadline이 된다.
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 function assertRpcDuration(value: unknown): void {
   if (value === Number.POSITIVE_INFINITY) return;
-  if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 1)
+  if (
+    typeof value !== "number" ||
+    !Number.isSafeInteger(value) ||
+    value < 1 ||
+    value > MAX_TIMER_DELAY_MS
+  )
     throw new TypeError(
-      "Resource limit 'maxRpcDurationMs' must be a positive safe integer or Infinity.",
+      `Resource limit 'maxRpcDurationMs' must be an integer from 1 to ${MAX_TIMER_DELAY_MS} or Infinity.`,
     );
 }
 

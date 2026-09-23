@@ -68,6 +68,13 @@ describe("resolveResourceLimits", () => {
     });
   });
 
+  test("allows maxRpcDurationMs up to the setTimeout maximum", () => {
+    expect(
+      resolveResourceLimits({ maxRpcDurationMs: 2_147_483_647 })
+        .maxRpcDurationMs,
+    ).toBe(2_147_483_647);
+  });
+
   test.each([
     ["maxConcurrentRpc", 0],
     ["maxConcurrentRpc", -1],
@@ -85,6 +92,7 @@ describe("resolveResourceLimits", () => {
     ["maxRpcDurationMs", 1.5],
     ["maxRpcDurationMs", NaN],
     ["maxRpcDurationMs", "8"],
+    ["maxRpcDurationMs", 2_147_483_648],
     ["maxRetiredClientsPerWebContents", 0],
     ["maxRetiredClientsPerWebContents", -1],
     ["maxRetiredClientsPerWebContents", 1.5],

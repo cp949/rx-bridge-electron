@@ -154,7 +154,7 @@ const server = createBridgeServer(appContract, implementations, {
   resourceLimits: {
     maxConcurrentRpc: 32, // 기본 64
     maxSubscriptions: 128, // 기본 256
-    maxRpcDurationMs: 60_000, // 기본 300_000, Infinity로 deadline을 끌 수 있음
+    maxRpcDurationMs: 60_000, // 기본 300_000, 최대 2_147_483_647, Infinity로 deadline을 끌 수 있음
     maxRetiredClientsPerWebContents: 16, // 기본 32
   },
 });

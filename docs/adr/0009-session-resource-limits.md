@@ -22,13 +22,13 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 
 ### 기본값
 
-| 옵션                              | 기본값     | 비고                                  |
-| --------------------------------- | ---------- | ------------------------------------- |
-| `maxConcurrentRpc`                | 64         | 세션당 동시 진행 중 RPC 수            |
-| `maxSubscriptions`                | 256        | 세션당 대기+활성 구독 수              |
-| `maxRpcDurationMs`                | 300,000    | `Infinity` 지정 시 deadline 없음      |
-| `maxRetiredClientsPerWebContents` | 32         | `webContents`별 retired clientId 보관 |
-| `PayloadLimits.maxTotalBytes`     | 16,777,216 | 16 MiB, 근사 byte 합계                |
+| 옵션                              | 기본값     | 비고                                                        |
+| --------------------------------- | ---------- | ----------------------------------------------------------- |
+| `maxConcurrentRpc`                | 64         | 세션당 동시 진행 중 RPC 수                                  |
+| `maxSubscriptions`                | 256        | 세션당 대기+활성 구독 수                                    |
+| `maxRpcDurationMs`                | 300,000    | `Infinity` 지정 시 deadline 없음, 유한값 최대 2,147,483,647 |
+| `maxRetiredClientsPerWebContents` | 32         | `webContents`별 retired clientId 보관                       |
+| `PayloadLimits.maxTotalBytes`     | 16,777,216 | 16 MiB, 근사 byte 합계                                      |
 
 ## 대안과 기각 사유
 
