@@ -1,20 +1,13 @@
 import { describe, expect, test, vi } from "vitest";
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { DocumentSessions } from "../../src/main/document-sessions.js";
 import { resolveResourceLimits } from "../../src/main/resource-limits.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
-const value: Schema<undefined> = { parse: () => undefined };
-const domain = defineDomain("hardware", {
-  rpc: { wait: rpc({ input: value, output: value }) },
-});
+type HardwareBridge = { hardware: { rpc: { wait(): undefined } } };
+
 const request = (clientId = "document-1", requestId = "request-1") => ({
   protocolVersion: 1 as const,
   clientId,
@@ -30,11 +23,12 @@ describe("Main session lifecycle", () => {
       allow = resolve;
     });
     const handler = vi.fn(async () => undefined);
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: handler } })],
-      { authorize: () => authorization },
-    );
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl, {
+      authorize: () => authorization,
+    });
     const target = new FakeTarget();
     server.attach(target);
     const pending = server.dispatchRpc(sender(), request());
@@ -53,11 +47,12 @@ describe("Main session lifecycle", () => {
       reject = fail;
     });
     const handler = vi.fn(async () => undefined);
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: handler } })],
-      { authorize: () => authorization },
-    );
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl, {
+      authorize: () => authorization,
+    });
     const target = new FakeTarget();
     server.attach(target);
     const pending = server.dispatchRpc(sender(), request());
@@ -78,9 +73,10 @@ describe("Main session lifecycle", () => {
           reject = fail;
         }),
     );
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl);
     const target = new FakeTarget();
     server.attach(target);
     const pending = server.dispatchRpc(sender(), request());
@@ -94,9 +90,10 @@ describe("Main session lifecycle", () => {
 
   test("a stale detach cannot remove a replacement attachment", async () => {
     const handler = vi.fn(async () => undefined);
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl);
     const oldDetach = server.attach(new FakeTarget());
     await server.dispatchRpc(sender(), request());
     server.attach(new FakeTarget());
@@ -120,9 +117,10 @@ describe("Main session lifecycle", () => {
           });
         }),
     );
-    server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     void server.dispatchRpc(sender(), request());
     await Promise.resolve();
@@ -145,16 +143,15 @@ describe("Main session lifecycle", () => {
             })
           : Promise.resolve(undefined),
     );
-    server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: handler } })],
-      {
-        authorize: (context) => {
-          roles.push(context.windowRole);
-          return true;
-        },
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    server = createBridgeServer(impl, {
+      authorize: (context) => {
+        roles.push(context.windowRole);
+        return true;
       },
-    );
+    });
     server.attach(new FakeTarget(1, "old"));
     void server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
@@ -171,9 +168,10 @@ describe("Main session lifecycle", () => {
           signals.push(context.signal);
         }),
     );
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     void server.dispatchRpc(sender(), request());
     await Promise.resolve();
@@ -188,9 +186,10 @@ describe("Main session lifecycle", () => {
       (_input: BridgeValue, context: { signal: AbortSignal }) =>
         new Promise<undefined>((_resolve) => signals.push(context.signal)),
     );
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl);
     const target = new FakeTarget();
     const detach = server.attach(target);
     void server.dispatchRpc(sender(), request());
@@ -249,9 +248,10 @@ describe("Main session lifecycle", () => {
         });
       },
     );
-    server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     void server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
@@ -279,9 +279,10 @@ describe("Main session lifecycle", () => {
   });
 
   test("server.dispose() finalizes the server: attach throws, requests are rejected", async () => {
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: vi.fn(async () => undefined) } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: vi.fn(async () => undefined) } },
+    };
+    const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     server.dispose();
 
@@ -323,11 +324,12 @@ describe("Main session lifecycle", () => {
     );
     let recordCount = 0;
     const records: unknown[] = [];
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: handler } })],
-      { diagnostics: { record: (event) => records.push(event) } },
-    );
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl, {
+      diagnostics: { record: (event) => records.push(event) },
+    });
     server.attach(new FakeTarget());
     void server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
@@ -351,9 +353,10 @@ describe("Main session lifecycle", () => {
           );
         }),
     );
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: handler } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     const pending = server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
@@ -367,9 +370,10 @@ describe("Main session lifecycle", () => {
   });
 
   test("a retired clientId is rejected while the server is alive", async () => {
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { rpc: { wait: vi.fn(async () => undefined) } }),
-    ]);
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { wait: vi.fn(async () => undefined) } },
+    };
+    const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
     expect(server.handshake(sender(), "document-1")).toBeDefined();
     server.attach(new FakeTarget());

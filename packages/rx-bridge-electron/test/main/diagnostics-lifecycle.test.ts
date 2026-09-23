@@ -1,15 +1,8 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import type {
   Authorize,
@@ -27,12 +20,12 @@ import type {
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const value: Schema<undefined> = { parse: () => undefined };
-const number: Schema<number> = {
-  parse(input) {
-    if (typeof input !== "number") throw new TypeError("number required");
-    return input;
-  },
+type HardwareBridge = {
+  hardware: {
+    rpc: { wait(): undefined };
+    state: { current$: number };
+    event: { change$: number };
+  };
 };
 
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
@@ -75,15 +68,6 @@ function harness(
     overflow?: "error" | "drop-oldest" | "drop-newest";
   } = {},
 ) {
-  const domain = defineDomain("hardware", {
-    rpc: { wait: rpc({ input: value, output: value }) },
-    state: { current$: state(number) },
-    event: {
-      change$: event(number, {
-        buffer: { capacity: 2, overflow: options.overflow ?? "error" },
-      }),
-    },
-  });
   const currentSource = new BehaviorSubject(1);
   const events = new Subject<number>();
   const records: BridgeDiagnostic[] = [];
@@ -91,25 +75,24 @@ function harness(
   const handler = vi.fn((_input: BridgeValue, _context: BridgeContext) => {
     return new Promise<undefined>((resolve) => handlers.push(resolve));
   });
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts(domain),
-    [
-      implementDomain(domain, {
-        rpc: { wait: handler },
-        state: { current$: currentValueSource(currentSource) },
-        event: { change$: broadcastEvent(events) },
-      }),
-    ],
-    {
-      diagnostics: { record: (record) => records.push(record) },
-      ...(options.authorize === undefined
-        ? {}
-        : { authorize: options.authorize }),
-      ...(options.resourceLimits === undefined
-        ? {}
-        : { resourceLimits: options.resourceLimits }),
+  const impl: BridgeImpl<HardwareBridge> = {
+    hardware: {
+      rpc: { wait: handler },
+      state: { current$: currentValueSource(currentSource) },
+      event: {
+        change$: broadcastEvent(events, {
+          buffer: { capacity: 2, overflow: options.overflow ?? "error" },
+        }),
+      },
     },
-  );
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    diagnostics: { record: (record) => records.push(record) },
+    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    ...(options.resourceLimits === undefined
+      ? {}
+      : { resourceLimits: options.resourceLimits }),
+  });
   return { server, currentSource, events, records, handler, handlers };
 }
 

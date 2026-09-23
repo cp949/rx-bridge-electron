@@ -1,16 +1,9 @@
 import { Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type DiagnosticsSink,
   type WireRpcRequest,
 } from "../../src/main/index.js";
@@ -28,30 +21,15 @@ const throwingSink: DiagnosticsSink = {
   },
 };
 
-const value: Schema<undefined> = { parse: () => undefined };
-const badOutput: Schema<undefined> = {
-  parse: () => {
-    throw new Error("output invalid");
-  },
-};
-const number: Schema<number> = {
-  parse(input) {
-    if (typeof input !== "number") throw new TypeError("number required");
-    return input;
-  },
-};
-
 describe("recordDiagnostic exception isolation", () => {
   test("a throwing sink does not affect a successful RPC response", async () => {
-    const domain = defineDomain("hardware", {
-      rpc: { ping: rpc({ input: value, output: value }) },
-    });
     const handler = vi.fn(async () => undefined);
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { ping: handler } })],
-      { diagnostics: throwingSink },
-    );
+    const impl: BridgeImpl<{
+      hardware: { rpc: { ping(): undefined } };
+    }> = {
+      hardware: { rpc: { ping: handler } },
+    };
+    const server = createBridgeServer(impl, { diagnostics: throwingSink });
     server.attach(new FakeTarget());
     const request: WireRpcRequest = {
       protocolVersion: 1,
@@ -66,17 +44,28 @@ describe("recordDiagnostic exception isolation", () => {
   });
 
   test("a throwing sink does not affect an RPC output validation failure", async () => {
-    const domain = defineDomain("hardware", {
-      rpc: {
-        broken: rpc({ input: value, output: badOutput, errors: [] as const }),
-      },
-    });
     const handler = vi.fn(async () => undefined);
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { broken: handler } })],
-      { diagnostics: throwingSink },
-    );
+    const impl: BridgeImpl<{
+      hardware: { rpc: { broken(): undefined } };
+    }> = {
+      hardware: { rpc: { broken: handler } },
+    };
+    const server = createBridgeServer(impl, {
+      schemas: {
+        hardware: {
+          rpc: {
+            broken: {
+              output: {
+                parse() {
+                  throw new Error("output invalid");
+                },
+              },
+            },
+          },
+        },
+      },
+      diagnostics: throwingSink,
+    });
     server.attach(new FakeTarget());
     const request: WireRpcRequest = {
       protocolVersion: 1,
@@ -92,18 +81,16 @@ describe("recordDiagnostic exception isolation", () => {
   });
 
   test("a throwing sink does not affect a renderer cancel", async () => {
-    const domain = defineDomain("hardware", {
-      rpc: { wait: rpc({ input: value, output: value }) },
-    });
     const controls: Array<(input: undefined) => void> = [];
     const handler = vi.fn(
       () => new Promise<undefined>((resolve) => controls.push(resolve)),
     );
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: handler } })],
-      { diagnostics: throwingSink },
-    );
+    const impl: BridgeImpl<{
+      hardware: { rpc: { wait(): undefined } };
+    }> = {
+      hardware: { rpc: { wait: handler } },
+    };
+    const server = createBridgeServer(impl, { diagnostics: throwingSink });
     server.attach(new FakeTarget());
     const request: WireRpcRequest = {
       protocolVersion: 1,
@@ -128,18 +115,18 @@ describe("recordDiagnostic exception isolation", () => {
 
   test("a throwing sink does not affect an event drop-oldest overflow", async () => {
     const events = new Subject<number>();
-    const domain = defineDomain("hardware", {
-      event: {
-        change$: event(number, {
-          buffer: { capacity: 2, overflow: "drop-oldest" },
-        }),
+    const impl: BridgeImpl<{
+      hardware: { event: { change$: number } };
+    }> = {
+      hardware: {
+        event: {
+          change$: broadcastEvent(events, {
+            buffer: { capacity: 2, overflow: "drop-oldest" },
+          }),
+        },
       },
-    });
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { event: { change$: broadcastEvent(events) } })],
-      { diagnostics: throwingSink },
-    );
+    };
+    const server = createBridgeServer(impl, { diagnostics: throwingSink });
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => messages.push(message);

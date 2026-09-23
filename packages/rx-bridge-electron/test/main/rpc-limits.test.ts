@@ -1,14 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type WireRpcRequest,
 } from "../../src/main/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
@@ -21,10 +15,11 @@ import type {
 } from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
-const value: Schema<undefined> = { parse: () => undefined };
-const domain = defineDomain("hardware", {
-  rpc: { wait: rpc({ input: value, output: value }) },
-});
+type AppBridge = {
+  hardware: {
+    rpc: { wait(): undefined };
+  };
+};
 
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   protocolVersion: 1,
@@ -65,22 +60,20 @@ function setup(
   } = {},
 ) {
   const handler = options.handler ?? vi.fn(async () => undefined);
-  const implementation = implementDomain(domain, { rpc: { wait: handler } });
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts(domain),
-    [implementation],
-    {
-      ...(options.authorize === undefined
-        ? {}
-        : { authorize: options.authorize }),
-      ...(options.resourceLimits === undefined
-        ? {}
-        : { resourceLimits: options.resourceLimits }),
-      ...(options.diagnostics === undefined
-        ? {}
-        : { diagnostics: options.diagnostics }),
-    },
-  );
+  const impl: BridgeImpl<AppBridge> = {
+    hardware: { rpc: { wait: handler } },
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    ...(options.authorize === undefined
+      ? {}
+      : { authorize: options.authorize }),
+    ...(options.resourceLimits === undefined
+      ? {}
+      : { resourceLimits: options.resourceLimits }),
+    ...(options.diagnostics === undefined
+      ? {}
+      : { diagnostics: options.diagnostics }),
+  });
   server.attach(new FakeTarget());
   return { handler, server };
 }

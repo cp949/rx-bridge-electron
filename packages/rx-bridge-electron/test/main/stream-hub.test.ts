@@ -1,14 +1,7 @@
 import { BehaviorSubject, Observable, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import {
   broadcastEvent,
   currentValueSource,
@@ -22,27 +15,6 @@ import { parseBridgeValue } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
-};
-const nested: Schema<{ readonly nested: { readonly count: number } }> = {
-  parse(value) {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      !("nested" in value) ||
-      value.nested === null ||
-      typeof value.nested !== "object" ||
-      !("count" in value.nested) ||
-      typeof value.nested.count !== "number"
-    )
-      throw new TypeError("nested count required");
-    return value as { readonly nested: { readonly count: number } };
-  },
-};
 function command(
   type: "subscribe",
   subscriptionId: string,
@@ -85,26 +57,21 @@ function harness(
 ) {
   const source = new BehaviorSubject(1);
   const events = new Subject<number>();
-  const domain = defineDomain("hardware", {
-    state: { current$: state(number) },
-    event: {
-      change$: event(number, {
-        buffer: {
-          capacity: options.capacity ?? 2,
-          overflow: options.overflow ?? "error",
-        },
-      }),
-    },
-  });
   const diagnostics = { record: vi.fn() };
   const server = createBridgeServer(
-    composeContracts(domain),
-    [
-      implementDomain(domain, {
+    {
+      hardware: {
         state: { current$: currentValueSource(source) },
-        event: { change$: broadcastEvent(events) },
-      }),
-    ],
+        event: {
+          change$: broadcastEvent(events, {
+            buffer: {
+              capacity: options.capacity ?? 2,
+              overflow: options.overflow ?? "error",
+            },
+          }),
+        },
+      },
+    },
     { diagnostics },
   );
   server.attach(new FakeTarget(1));
@@ -129,12 +96,9 @@ describe("Main stream sources and sharing", () => {
         live -= 1;
       };
     });
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
+    const server = createBridgeServer({
+      hardware: { event: { change$: broadcastEvent(source) } },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { event: { change$: broadcastEvent(source) } }),
-    ]);
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => {
@@ -188,14 +152,9 @@ describe("Main stream sources and sharing", () => {
   test("delivers current State first and shares one upstream between windows", async () => {
     const source = new BehaviorSubject(7);
     const subscribe = vi.spyOn(source, "subscribe");
-    const domain = defineDomain("hardware", {
-      state: { current$: state(number) },
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(source) } },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
-        state: { current$: currentValueSource(source) },
-      }),
-    ]);
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
     const first: StreamMessage[] = [];
@@ -245,19 +204,16 @@ describe("Main stream sources and sharing", () => {
 
   test("scoped factory receives trusted role and sender only after attached subscribe", async () => {
     const contexts: unknown[] = [];
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
+    const server = createBridgeServer({
+      hardware: {
         event: {
           change$: scopedEvent((context) => {
             contexts.push(context);
             return new Subject<number>();
           }),
         },
-      }),
-    ]);
+      },
+    });
     server.attach(new FakeTarget(1, "dashboard"));
     await server.controlStream(
       sender({ origin: "https://evil.example" }),
@@ -293,14 +249,9 @@ describe("Main stream sources and sharing", () => {
 describe("Main stream flow control", () => {
   test("queued State is an immutable snapshot of the accepted schema value", async () => {
     const source = new BehaviorSubject({ nested: { count: 1 } });
-    const domain = defineDomain("hardware", {
-      state: { current$: state(nested) },
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(source) } },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
-        state: { current$: currentValueSource(source) },
-      }),
-    ]);
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => {
@@ -323,12 +274,9 @@ describe("Main stream flow control", () => {
 
   test("queued Event cannot be mutated into a non-BridgeValue before ACK", async () => {
     const source = new Subject<{ nested: { count: number } }>();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(nested) },
+    const server = createBridgeServer({
+      hardware: { event: { change$: broadcastEvent(source) } },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { event: { change$: broadcastEvent(source) } }),
-    ]);
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => {
@@ -440,11 +388,8 @@ describe("Main stream lifecycle and ordering", () => {
   test("scoped factory cannot start a source after ending its document", async () => {
     let starts = 0;
     const target = new FakeTarget();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
+    const server = createBridgeServer({
+      hardware: {
         event: {
           change$: scopedEvent(() => {
             target.endDocument();
@@ -453,8 +398,8 @@ describe("Main stream lifecycle and ordering", () => {
             });
           }),
         },
-      }),
-    ]);
+      },
+    });
     server.attach(target);
     const messages: StreamMessage[] = [];
     await server.controlStream(
@@ -472,12 +417,8 @@ describe("Main stream lifecycle and ordering", () => {
   });
   test("navigation inside subscribed delivery prevents a late error or upstream subscription", async () => {
     const source = new Subject<number>();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
     const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { event: { change$: broadcastEvent(source) } })],
+      { hardware: { event: { change$: broadcastEvent(source) } } },
       { authorize: () => false },
     );
     const target = new FakeTarget();
@@ -540,12 +481,8 @@ describe("Main stream lifecycle and ordering", () => {
       allow = resolve;
     });
     const source = new Subject<number>();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
     const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { event: { change$: broadcastEvent(source) } })],
+      { hardware: { event: { change$: broadcastEvent(source) } } },
       { authorize: () => authorization },
     );
     server.attach(new FakeTarget());
@@ -587,16 +524,8 @@ describe("Main stream lifecycle and ordering", () => {
   });
   test("a rejected subscription receives a terminal response without starting its source", async () => {
     const source = new Subject<number>();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
     const server = createBridgeServer(
-      composeContracts(domain),
-      [
-        implementDomain(domain, {
-          event: { change$: broadcastEvent(source) },
-        }),
-      ],
+      { hardware: { event: { change$: broadcastEvent(source) } } },
       { authorize: () => false },
     );
     server.attach(new FakeTarget());
@@ -621,14 +550,9 @@ describe("Main stream lifecycle and ordering", () => {
 
   test("a failing sender closes the consumer before subscribing upstream", async () => {
     const source = new Subject<number>();
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
+    const server = createBridgeServer({
+      hardware: { event: { change$: broadcastEvent(source) } },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
-        event: { change$: broadcastEvent(source) },
-      }),
-    ]);
     server.attach(new FakeTarget());
     await expect(
       server.controlStream(
@@ -674,16 +598,15 @@ describe("Main stream lifecycle and ordering", () => {
         subscriber.next(value);
       }
     });
-    const domain = defineDomain("hardware", {
-      event: {
-        change$: event(number, { buffer: { capacity: 1, overflow: "error" } }),
+    const server = createBridgeServer({
+      hardware: {
+        event: {
+          change$: broadcastEvent(source, {
+            buffer: { capacity: 1, overflow: "error" },
+          }),
+        },
       },
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, {
-        event: { change$: broadcastEvent(source) },
-      }),
-    ]);
     server.attach(new FakeTarget());
     await server.controlStream(
       sender(),
@@ -699,16 +622,13 @@ describe("Main stream lifecycle and ordering", () => {
   });
 
   test("synchronous Event emission follows subscribed and terminal follows ACK", async () => {
-    const domain = defineDomain("hardware", {
-      event: { change$: event(number) },
-    });
     const source = new Observable<number>((subscriber) => {
       subscriber.next(5);
       subscriber.complete();
     });
-    const server = createBridgeServer(composeContracts(domain), [
-      implementDomain(domain, { event: { change$: broadcastEvent(source) } }),
-    ]);
+    const server = createBridgeServer({
+      hardware: { event: { change$: broadcastEvent(source) } },
+    });
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => messages.push(message);
@@ -807,35 +727,19 @@ describe("Main stream lifecycle and ordering", () => {
   });
 
   test("a State value exceeding maxTotalBytes fails validation instead of being sent", async () => {
-    const string: Schema<string> = {
-      parse(value) {
-        if (typeof value !== "string") throw new TypeError("string required");
-        return value;
-      },
-    };
     const source = new BehaviorSubject("x".repeat(2000));
-    const domain = defineDomain("hardware", {
-      state: { current$: state(string) },
-    });
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
-      composeContracts(
-        {
-          payloadLimits: {
-            maxDepth: 4,
-            maxEntries: 10,
-            maxStringBytes: 4096,
-            maxTotalBytes: 1024,
-          },
+      { hardware: { state: { current$: currentValueSource(source) } } },
+      {
+        payloadLimits: {
+          maxDepth: 4,
+          maxEntries: 10,
+          maxStringBytes: 4096,
+          maxTotalBytes: 1024,
         },
-        domain,
-      ),
-      [
-        implementDomain(domain, {
-          state: { current$: currentValueSource(source) },
-        }),
-      ],
-      { diagnostics },
+        diagnostics,
+      },
     );
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];

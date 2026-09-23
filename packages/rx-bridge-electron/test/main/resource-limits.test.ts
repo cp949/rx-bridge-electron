@@ -1,34 +1,21 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import {
   DEFAULT_RESOURCE_LIMITS,
   resolveResourceLimits,
 } from "../../src/main/resource-limits.js";
 
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
+type AlphaBridge = {
+  alpha: {
+    rpc: { op1(input: number): number };
+    state: { current$: number };
+    event: { change$: number };
+  };
 };
-
-const alpha = defineDomain("alpha", {
-  rpc: { op1: rpc({ input: number, output: number, errors: [] as const }) },
-  state: { current$: state(number) },
-  event: { change$: event(number) },
-});
-const contract = composeContracts(alpha);
 
 function alphaSources() {
   const source = new BehaviorSubject(1);
@@ -36,15 +23,17 @@ function alphaSources() {
   return { source, events };
 }
 
-function validAlphaImplementation(
+function validAlphaImpl(
   source: BehaviorSubject<number>,
   events: Subject<number>,
-) {
-  return implementDomain(alpha, {
-    rpc: { op1: async (input: number) => input },
-    state: { current$: currentValueSource(source) },
-    event: { change$: broadcastEvent(events) },
-  });
+): BridgeImpl<AlphaBridge> {
+  return {
+    alpha: {
+      rpc: { op1: async (input: number) => input },
+      state: { current$: currentValueSource(source) },
+      event: { change$: broadcastEvent(events) },
+    },
+  };
 }
 
 describe("resolveResourceLimits", () => {
@@ -116,9 +105,9 @@ describe("createBridgeServer resourceLimits option", () => {
   test("throws TypeError for invalid resourceLimits without side effects", () => {
     const { source, events } = alphaSources();
     const subscribeSpy = vi.spyOn(source, "subscribe");
-    const alphaImplementation = validAlphaImplementation(source, events);
+    const impl = validAlphaImpl(source, events);
     expect(() =>
-      createBridgeServer(contract, [alphaImplementation], {
+      createBridgeServer(impl, {
         resourceLimits: { maxSubscriptions: 0 },
       }),
     ).toThrow(TypeError);

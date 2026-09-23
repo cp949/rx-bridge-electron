@@ -1,42 +1,22 @@
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type BridgeContext,
   type BridgeDiagnostic,
   type WireRpcRequest,
 } from "../../src/main/index.js";
+import type { PayloadLimits } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
-const object: Schema<{ readonly id: string }> = {
-  parse(value) {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      Array.isArray(value) ||
-      typeof (value as { id?: unknown }).id !== "string"
-    )
-      throw new Error("id required");
-    return value as { readonly id: string };
-  },
+type AppBridge = {
+  boundary: {
+    rpc: {
+      transform(input: { readonly id: string }): { readonly id: string };
+    };
+  };
 };
-
-const domain = defineDomain("boundary", {
-  rpc: {
-    transform: rpc({
-      input: object,
-      output: object,
-      errors: ["DEVICE_GONE"] as const,
-    }),
-  },
-});
 
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   protocolVersion: 1,
@@ -52,26 +32,19 @@ function setup(
     input: { readonly id: string },
     context: BridgeContext,
   ) => Promise<{ readonly id: string }> = async () => ({ id: "device-1" }),
-  payloadLimits?: {
-    readonly maxDepth: number;
-    readonly maxEntries: number;
-    readonly maxStringBytes: number;
-    readonly maxTotalBytes?: number;
-  },
+  payloadLimits?: Partial<PayloadLimits>,
   diagnostics: {
     record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>>;
   } = { record: vi.fn<(event: BridgeDiagnostic) => void>() },
 ) {
-  const implementation = implementDomain(domain, {
-    rpc: { transform: handler },
+  const impl: BridgeImpl<AppBridge> = {
+    boundary: { rpc: { transform: handler } },
+  };
+  const server = createBridgeServer(impl, {
+    errors: { boundary: { rpc: { transform: ["DEVICE_GONE"] } } },
+    ...(payloadLimits === undefined ? {} : { payloadLimits }),
+    diagnostics,
   });
-  const server = createBridgeServer(
-    payloadLimits === undefined
-      ? composeContracts(domain)
-      : composeContracts({ payloadLimits }, domain),
-    [implementation],
-    { diagnostics },
-  );
   server.attach(new FakeTarget());
   return { server, diagnostics };
 }
@@ -148,7 +121,7 @@ describe("RPC maxTotalBytes enforcement", () => {
     const oversized = Array.from({ length: 17 }, () => "a".repeat(1_000_000));
     const response = await server.dispatchRpc(
       sender(),
-      request({ input: { id: "device-1", oversized } }),
+      request({ input: { id: "device-1", oversized } as never }),
     );
     expect(response).toMatchObject({
       type: "error",

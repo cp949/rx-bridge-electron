@@ -1,14 +1,8 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import type {
   Authorize,
@@ -22,11 +16,11 @@ import type {
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
+type AppBridge = {
+  hardware: {
+    state: { current$: number; other$: number };
+    event: { change$: number };
+  };
 };
 
 function command(
@@ -68,15 +62,6 @@ const ack = (
   sequence,
 });
 
-function domain() {
-  return defineDomain("hardware", {
-    state: { current$: state(number), other$: state(number) },
-    event: {
-      change$: event(number, { buffer: { capacity: 1, overflow: "error" } }),
-    },
-  });
-}
-
 function setup(
   options: {
     resourceLimits?: Partial<ResourceLimits>;
@@ -86,27 +71,27 @@ function setup(
   const currentSource = new BehaviorSubject(1);
   const otherSource = new BehaviorSubject(2);
   const events = new Subject<number>();
-  const contractDomain = domain();
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts(contractDomain),
-    [
-      implementDomain(contractDomain, {
-        state: {
-          current$: currentValueSource(currentSource),
-          other$: currentValueSource(otherSource),
-        },
-        event: { change$: broadcastEvent(events) },
-      }),
-    ],
-    {
-      ...(options.authorize === undefined
-        ? {}
-        : { authorize: options.authorize }),
-      ...(options.resourceLimits === undefined
-        ? {}
-        : { resourceLimits: options.resourceLimits }),
+  const impl: BridgeImpl<AppBridge> = {
+    hardware: {
+      state: {
+        current$: currentValueSource(currentSource),
+        other$: currentValueSource(otherSource),
+      },
+      event: {
+        change$: broadcastEvent(events, {
+          buffer: { capacity: 1, overflow: "error" },
+        }),
+      },
     },
-  );
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    ...(options.authorize === undefined
+      ? {}
+      : { authorize: options.authorize }),
+    ...(options.resourceLimits === undefined
+      ? {}
+      : { resourceLimits: options.resourceLimits }),
+  });
   const target = new FakeTarget();
   server.attach(target);
   return { server, currentSource, otherSource, events, target };

@@ -2,27 +2,21 @@ import { EventEmitter } from "node:events";
 import { describe, expect, test, vi } from "vitest";
 import type { IpcMain, WebContents } from "electron";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import { BridgeProtocolError } from "../../src/protocol/index.js";
 import {
   bindElectronBridge,
   createBridgeServer,
   ELECTRON_BRIDGE_CHANNELS,
-  implementDomain,
   type BridgeDiagnostic,
 } from "../../src/main/index.js";
 import { recordAdapterRejection } from "../../src/main/diagnostics.js";
 import * as mainIndex from "../../src/main/index.js";
 
-const value: Schema<undefined> = { parse: () => undefined };
-const domain = defineDomain("hardware", {
-  rpc: { wait: rpc({ input: value, output: value }) },
-});
+type WaitBridge = { hardware: { rpc: { wait(): undefined } } };
+const waitImpl: BridgeImpl<WaitBridge> = {
+  hardware: { rpc: { wait: async () => undefined } },
+};
 
 /** Minimal fake standing in for Electron's `ipcMain`: adds `handle`/`removeHandler` over a plain EventEmitter. */
 class FakeIpcMain extends EventEmitter {
@@ -56,9 +50,7 @@ class FakeWebContents extends EventEmitter {
 }
 
 function makeBridge(ipcMain: FakeIpcMain) {
-  const server = createBridgeServer(composeContracts(domain), [
-    implementDomain(domain, { rpc: { wait: async () => undefined } }),
-  ]);
+  const server = createBridgeServer(waitImpl);
   const bridge = bindElectronBridge({
     ipcMain: ipcMain as unknown as IpcMain,
     server,
@@ -182,23 +174,15 @@ describe("Electron adapter payload limits", () => {
         return input;
       },
     };
-    const echoDomain = defineDomain("hardware", {
-      rpc: { echo: rpc({ input: stringSchema, output: stringSchema }) },
-    });
+    type EchoBridge = { hardware: { rpc: { echo(input: string): string } } };
     const handler = vi.fn(async (input: string) => input);
-    const server = createBridgeServer(
-      composeContracts(
-        {
-          payloadLimits: {
-            maxDepth: 4,
-            maxEntries: 10,
-            maxStringBytes: 2_000_000,
-          },
-        },
-        echoDomain,
-      ),
-      [implementDomain(echoDomain, { rpc: { echo: handler } })],
-    );
+    const echoImpl: BridgeImpl<EchoBridge> = {
+      hardware: { rpc: { echo: handler } },
+    };
+    const server = createBridgeServer(echoImpl, {
+      payloadLimits: { maxDepth: 4, maxEntries: 10, maxStringBytes: 2_000_000 },
+      schemas: { hardware: { rpc: { echo: { input: stringSchema, output: stringSchema } } } },
+    });
     const ipcMain = new FakeIpcMain();
     const bridge = bindElectronBridge({
       ipcMain: ipcMain as unknown as IpcMain,
@@ -232,11 +216,7 @@ describe("Electron adapter payload limits", () => {
 
 function makeDiagnosticsBridge(ipcMain: FakeIpcMain) {
   const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
-  const server = createBridgeServer(
-    composeContracts(domain),
-    [implementDomain(domain, { rpc: { wait: async () => undefined } })],
-    { diagnostics },
-  );
+  const server = createBridgeServer(waitImpl, { diagnostics });
   const bridge = bindElectronBridge({
     ipcMain: ipcMain as unknown as IpcMain,
     server,
@@ -389,16 +369,12 @@ describe("Electron adapter rejection diagnostics", () => {
   test("an RPC authorize() exception is not recorded and returns INTERNAL instead of protocolError", async () => {
     const ipcMain = new FakeIpcMain();
     const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
-    const server = createBridgeServer(
-      composeContracts(domain),
-      [implementDomain(domain, { rpc: { wait: async () => undefined } })],
-      {
-        diagnostics,
-        authorize: () => {
-          throw new Error("boom");
-        },
+    const server = createBridgeServer(waitImpl, {
+      diagnostics,
+      authorize: () => {
+        throw new Error("boom");
       },
-    );
+    });
     const bridge = bindElectronBridge({
       ipcMain: ipcMain as unknown as IpcMain,
       server,

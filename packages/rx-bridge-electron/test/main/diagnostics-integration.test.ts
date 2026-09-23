@@ -3,19 +3,11 @@ import { BehaviorSubject, Subject } from "rxjs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { IpcMain, WebContents } from "electron";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import {
   bindElectronBridge,
   createBridgeServer,
   ELECTRON_BRIDGE_CHANNELS,
-  implementDomain,
   type BridgeDiagnostic,
   type DiagnosticsSnapshot,
   type SenderIdentity,
@@ -43,23 +35,33 @@ const numberSchema: Schema<number> = {
   },
 };
 
-const domain = defineDomain("hardware", {
-  rpc: {
-    echo: rpc({ input: stringSchema, output: stringSchema }),
-    connect: rpc({
-      input: stringSchema,
-      output: stringSchema,
-      errors: ["DEVICE_GONE"] as const,
-    }),
-    slow: rpc({ input: stringSchema, output: stringSchema }),
+type IntegrationBridge = {
+  hardware: {
+    rpc: {
+      echo(input: string): string;
+      connect(input: string): string;
+      slow(input: string): string;
+    };
+    state: { current$: number };
+    event: { change$: number };
+  };
+};
+
+const integrationSchemas = {
+  hardware: {
+    rpc: {
+      echo: { input: stringSchema, output: stringSchema },
+      connect: { input: stringSchema, output: stringSchema },
+      slow: { input: stringSchema, output: stringSchema },
+    },
+    state: { current$: numberSchema },
+    event: { change$: numberSchema },
   },
-  state: { current$: state(numberSchema) },
-  event: {
-    change$: event(numberSchema, {
-      buffer: { capacity: 2, overflow: "error" },
-    }),
-  },
-});
+};
+
+const integrationErrors = {
+  hardware: { rpc: { connect: ["DEVICE_GONE"] as const } },
+};
 
 /** Minimal fake standing in for Electron's `ipcMain`, mirroring `electron-adapter.test.ts`. */
 class FakeIpcMain extends EventEmitter {
@@ -147,20 +149,23 @@ async function runScenario(mode: SinkMode): Promise<ScenarioResult> {
       }),
   );
 
-  const server = createBridgeServer(
-    composeContracts(domain),
-    [
-      implementDomain(domain, {
-        rpc: { echo: echoHandler, connect: connectHandler, slow: slowHandler },
-        state: { current$: currentValueSource(currentSource) },
-        event: { change$: broadcastEvent(events) },
-      }),
-    ],
-    {
-      resourceLimits: { maxConcurrentRpc: 1, maxRpcDurationMs: 5000 },
-      ...(diagnostics === undefined ? {} : { diagnostics }),
+  const impl: BridgeImpl<IntegrationBridge> = {
+    hardware: {
+      rpc: { echo: echoHandler, connect: connectHandler, slow: slowHandler },
+      state: { current$: currentValueSource(currentSource) },
+      event: {
+        change$: broadcastEvent(events, {
+          buffer: { capacity: 2, overflow: "error" },
+        }),
+      },
     },
-  );
+  };
+  const server = createBridgeServer(impl, {
+    schemas: integrationSchemas,
+    errors: integrationErrors,
+    resourceLimits: { maxConcurrentRpc: 1, maxRpcDurationMs: 5000 },
+    ...(diagnostics === undefined ? {} : { diagnostics }),
+  });
 
   const ipcMain = new FakeIpcMain();
   const bridge = bindElectronBridge({

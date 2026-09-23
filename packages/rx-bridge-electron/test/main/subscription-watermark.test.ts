@@ -1,39 +1,28 @@
 import { BehaviorSubject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { currentValueSource } from "../../src/main/sources.js";
 import type { ResourceLimits } from "../../src/main/index.js";
 import type { StreamMessage } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
+type AppBridge = {
+  hardware: {
+    state: { current$: number };
+  };
 };
 
 function setup(resourceLimits?: Partial<ResourceLimits>) {
   const source = new BehaviorSubject(1);
   const subscribe = vi.spyOn(source, "subscribe");
-  const domain = defineDomain("hardware", {
-    state: { current$: state(number) },
-  });
+  const impl: BridgeImpl<AppBridge> = {
+    hardware: { state: { current$: currentValueSource(source) } },
+  };
   const server = createBridgeServer(
-    composeContracts(domain),
-    [
-      implementDomain(domain, {
-        state: { current$: currentValueSource(source) },
-      }),
-    ],
+    impl,
     resourceLimits === undefined ? {} : { resourceLimits },
   );
   const target = new FakeTarget();

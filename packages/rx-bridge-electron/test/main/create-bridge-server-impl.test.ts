@@ -196,6 +196,89 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
       }),
     ).toThrow(TypeError);
   });
+
+  test("같은 도메인 안에서 카테고리를 넘나드는 operation 이름 중복은 실패한다(DELTA-07: contract.test.ts의 'duplicate paths'에서 옮김)", () => {
+    const source = new BehaviorSubject(1);
+    expect(() =>
+      createBridgeServer({
+        device: {
+          rpc: { duplicate: () => 1 },
+          state: { duplicate: currentValueSource(source) },
+        },
+      }),
+    ).toThrow(TypeError);
+  });
+
+  // DELTA-07: contract.test.ts의 `defineDomain`/`composeContracts` 이름 규칙
+  // test.each(20행)에서, walkImplNode가 defineDomain과 같은 assertDomainName/
+  // assertPathSegments를 공유해 impl 트리에도 그대로 적용됨을 보이는 대표
+  // 사례만 옮겼다. "constructor" 예약 세그먼트·"/"가 든 operation 이름·
+  // leaf/namespace 충돌은 위에서 이미 다른 이름으로 검증됐다(중복이라 다시
+  // 옮기지 않음). "도메인이 정확히 'rpc'/'state'/'event' 그 자체"인 경우는
+  // impl 트리의 최상위에서 그 키가 항상 카테고리로 해석되어 애초에 구성할 수
+  // 없다 — 대신 그 세그먼트가 경로 어딘가에 있을 때(예: "sub/rpc") 거부되는지로
+  // 같은 가드를 확인한다.
+  test.each([
+    ["empty domain segment", { "": { rpc: { x: () => 1 } } }, /empty/i],
+    [
+      "dotted domain segment",
+      { "hardware.device": { rpc: { x: () => 1 } } },
+      /dotted/i,
+    ],
+    ["reserved 'then' segment", { then: { rpc: { x: () => 1 } } }, /reserved/i],
+    [
+      "reserved '__proto__' segment",
+      { ["__proto__"]: { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+    [
+      "reserved 'prototype' segment",
+      { prototype: { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+    ["reserved 'dispose' segment", { dispose: { rpc: { x: () => 1 } } }, /reserved/i],
+    [
+      "reserved 'dispose' segment nested",
+      { "dispose/x": { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+    [
+      "reserved 'rpc' segment nested",
+      { "sub/rpc": { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+    [
+      "reserved 'state' segment nested",
+      { "device/state": { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+    [
+      "reserved 'event' segment nested",
+      { "device/event/log": { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
+  ] as const)("%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)", (_label, impl, pattern) => {
+    expect(() => createBridgeServer(impl)).toThrow(pattern);
+  });
+
+  test("카테고리 이름을 operation 이름으로 쓰는 것은 허용된다(DELTA-07: contract.test.ts의 'allows category names as operation names'에서 옮김)", () => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          rpc: { state: () => 1 },
+          event: { rpc: broadcastEvent(new Subject<number>()) },
+        },
+      }),
+    ).not.toThrow();
+  });
+
+  test("'dispose'라는 이름의 operation은 예약되지 않은 도메인 아래에서 허용된다(DELTA-07: contract.test.ts에서 옮김)", () => {
+    expect(() =>
+      createBridgeServer({
+        device: { rpc: { dispose: () => 1 } },
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe("createBridgeServer(impl, options): schemas/errors 옵션 배선", () => {
@@ -328,6 +411,15 @@ describe("createBridgeServer(impl, options): payloadLimits", () => {
         payloadLimits: { unknownLimit: 1 } as never,
       }),
     ).toThrow(/Unknown payload limit/);
+  });
+
+  test("정수가 아닌 maxTotalBytes는 생성 시점에 실패한다(DELTA-07: contract.test.ts의 'rejects a non-integer maxTotalBytes payload limit'에서 옮김)", () => {
+    const { impl } = buildImpl();
+    expect(() =>
+      createBridgeServer(impl, {
+        payloadLimits: { maxTotalBytes: 1.5 },
+      }),
+    ).toThrow(TypeError);
   });
 });
 

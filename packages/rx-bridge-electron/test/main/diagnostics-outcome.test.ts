@@ -1,14 +1,8 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl, ErrorsFor, SchemasFor } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type WireRpcRequest,
 } from "../../src/main/index.js";
 import type {
@@ -20,23 +14,33 @@ import type {
 } from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
-const value: Schema<undefined> = { parse: () => undefined };
-const badOutput: Schema<undefined> = {
-  parse: () => {
-    throw new Error("output invalid");
+type HardwareBridge = {
+  hardware: {
+    rpc: {
+      wait(): undefined;
+      broken(): undefined;
+      connect(): undefined;
+    };
+  };
+};
+
+const schemas: SchemasFor<HardwareBridge> = {
+  hardware: {
+    rpc: {
+      broken: {
+        output: {
+          parse() {
+            throw new Error("output invalid");
+          },
+        },
+      },
+    },
   },
 };
-const domain = defineDomain("hardware", {
-  rpc: {
-    wait: rpc({ input: value, output: value }),
-    broken: rpc({ input: value, output: badOutput, errors: [] as const }),
-    connect: rpc({
-      input: value,
-      output: value,
-      errors: ["DEVICE_GONE"] as const,
-    }),
-  },
-});
+
+const errors: ErrorsFor<HardwareBridge> = {
+  hardware: { rpc: { connect: ["DEVICE_GONE"] } },
+};
 
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   protocolVersion: 1,
@@ -58,27 +62,25 @@ function setup(options: {
   resourceLimits?: Partial<ResourceLimits>;
 }) {
   const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
-  const implementation = implementDomain(domain, {
-    rpc: {
-      wait: vi.fn(async () => undefined),
-      broken: vi.fn(async () => undefined),
-      connect: vi.fn(async () => undefined),
-      ...options.handlers,
+  const impl: BridgeImpl<HardwareBridge> = {
+    hardware: {
+      rpc: {
+        wait: vi.fn(async () => undefined),
+        broken: vi.fn(async () => undefined),
+        connect: vi.fn(async () => undefined),
+        ...options.handlers,
+      },
     },
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    schemas,
+    errors,
+    diagnostics,
+    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    ...(options.resourceLimits === undefined
+      ? {}
+      : { resourceLimits: options.resourceLimits }),
   });
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts(domain),
-    [implementation],
-    {
-      diagnostics,
-      ...(options.authorize === undefined
-        ? {}
-        : { authorize: options.authorize }),
-      ...(options.resourceLimits === undefined
-        ? {}
-        : { resourceLimits: options.resourceLimits }),
-    },
-  );
   server.attach(new FakeTarget());
   return { server, diagnostics };
 }

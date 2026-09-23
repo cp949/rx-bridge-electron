@@ -1,79 +1,36 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  publicManifest,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
-import { createBridgeServer, implementDomain } from "../../src/main/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
+import { createBridgeServer } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
-import type {
-  BridgeContext,
-  DomainImplementation,
-} from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-type NumberHandler = (
-  input: number,
-  context: BridgeContext,
-) => Promise<number> | number;
-const echo: NumberHandler = async (input) => input;
-
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
-};
-
-const alpha = defineDomain("alpha", {
-  rpc: { op1: rpc({ input: number, output: number, errors: [] as const }) },
-  state: { current$: state(number) },
-  event: { change$: event(number) },
-});
-const beta = defineDomain("beta", {
-  rpc: { op2: rpc({ input: number, output: number, errors: [] as const }) },
-});
-const contract = composeContracts(alpha, beta);
-
-function alphaSources() {
-  const source = new BehaviorSubject(1);
-  const events = new Subject<number>();
-  return { source, events };
-}
-
-function validAlphaImplementation(handler: NumberHandler = echo) {
-  const { source, events } = alphaSources();
-  return implementDomain(alpha, {
-    rpc: { op1: handler },
-    state: { current$: currentValueSource(source) },
-    event: { change$: broadcastEvent(events) },
-  });
-}
-
-function validBetaImplementation(handler: NumberHandler = echo) {
-  return implementDomain(beta, { rpc: { op2: handler } });
-}
-
-// Builds a raw (unvalidated) implementation object to exercise
-// registerImplementations/normalizeImplementation runtime checks directly,
-// bypassing the implementDomain() compile-time-shaped helper.
-function rawImplementation<Name extends string>(
-  domainName: Name,
-  parts: {
-    readonly rpc?: unknown;
-    readonly state?: unknown;
-    readonly event?: unknown;
-  },
-): DomainImplementation<Name> {
-  return { domainName, ...parts } as unknown as DomainImplementation<Name>;
-}
+// DELTA-07: 이 파일은 원래 descriptor 기반 registerImplementations/
+// normalizeImplementation(defineDomain + composeContracts + implementDomain의
+// "구현 배열을 계약과 대조" 모델) 자체의 런타임 검증을 다뤘다. 그 중 다음 두
+// 부류는 이번 DELTA에서 옮기지 않았다(각각 사유):
+//
+// 1. "선언된 도메인 구현이 배열에 없음/중복/다른 모양으로 재선언" 계열 — 계약과
+//    구현을 분리해 배열로 등록하는 descriptor API 고유의 아키텍처에서만 의미가
+//    있다. impl 기반 API는 단일 impl 트리가 유일한 진실 소스라 "선언은 있는데
+//    구현이 없다/중복 등록됐다"는 상태 자체가 있을 수 없다 — 대응 개념이 없다.
+// 2. "raw 구현이 선언된 handler/source를 빠뜨렸다/모르는 걸 추가했다"(Missing/
+//    Undeclared RPC handler·State source·Event source) — impl 트리에는 별도
+//    "선언"이 없으므로 이 구분 자체가 없다. 같은 취지의 정적 검사는 이미
+//    `test/contract/bridge-types.test.ts`(DELTA-02)의 누락/초과 키 `@ts-expect-error`
+//    케이스가 타입 단계에서 커버한다.
+//
+// "형태 오류"(RPC handler가 함수가 아님·State source에 현재값이 없음·Event
+// source가 Observable/adapter가 아님) 계열은 `create-bridge-server-impl.test.ts`의
+// "impl 형태 오류는 생성 시점에 실패한다" describe 블록이 이미 impl 기반 API
+// 기준으로 같은 메시지를 검증하므로 여기서도 다시 옮기지 않았다.
+//
+// 아래 남은 테스트들은 impl 기반 API에서도 여전히 의미가 있다: 카테고리 값이
+// null인 경우, 등록 실패 시 어떤 source도 구독하지 않는 원자성, manifest에
+// 실린 모든 operation이 실제로 dispatch/subscribe 가능함, 원본 impl 객체를
+// 나중에 변형해도 이미 만든 서버에 영향이 없음.
 
 const rpcRequest = (
   key: string,
@@ -88,220 +45,59 @@ const rpcRequest = (
   input,
 });
 
-describe("Domain implementation registration", () => {
-  test("throws when a declared domain implementation is missing", () => {
+describe("createBridgeServer(impl): 등록 형태 검증", () => {
+  test("카테고리 값이 null이면 실패한다", () => {
     expect(() =>
-      createBridgeServer(contract, [validAlphaImplementation()]),
-    ).toThrow(/Missing domain implementation 'beta'\./);
+      createBridgeServer({
+        hardware: {
+          rpc: { ping: () => 1 },
+          state: null,
+        },
+      }),
+    ).toThrow(/state implementations for 'hardware' must be an object\./);
   });
 
-  test("throws when the same domain is registered twice", () => {
-    expect(() =>
-      createBridgeServer(contract, [
-        validAlphaImplementation(),
-        validAlphaImplementation(),
-        validBetaImplementation(),
-      ]),
-    ).toThrow(/Duplicate domain implementation 'alpha'\./);
-  });
-
-  test("throws when an implementation names a domain absent from the contract", () => {
-    const gamma = defineDomain("gamma", {
-      rpc: { op3: rpc({ input: number, output: number, errors: [] as const }) },
-    });
-    const gammaImplementation = implementDomain(gamma, {
-      rpc: { op3: async (input) => input },
-    });
-    expect(() =>
-      createBridgeServer(contract, [
-        validAlphaImplementation(),
-        validBetaImplementation(),
-        gammaImplementation as unknown as DomainImplementation<
-          "alpha" | "beta"
-        >,
-      ]),
-    ).toThrow(/Unknown domain implementation 'gamma'\./);
-  });
-
-  test("throws when a raw implementation is missing a declared RPC handler", () => {
-    const { source, events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: {},
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Missing RPC handler 'alpha\/op1'\./);
-  });
-
-  test("throws when a raw implementation declares an unknown RPC handler", () => {
-    const { source, events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input, extra: async () => 1 },
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Undeclared RPC handler 'alpha\/extra'\./);
-  });
-
-  test("throws when a raw implementation is missing a declared State source", () => {
-    const { events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: {},
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Missing State source 'alpha\/current\$'\./);
-  });
-
-  test("throws when a raw implementation declares an unknown State source", () => {
-    const { source, events } = alphaSources();
-    const extraSource = currentValueSource(new BehaviorSubject(2));
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: currentValueSource(source), extra: extraSource },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Undeclared State source 'alpha\/extra'\./);
-  });
-
-  test("throws when a raw implementation is missing a declared Event source", () => {
-    const { source } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: currentValueSource(source) },
-      event: {},
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Missing Event source 'alpha\/change\$'\./);
-  });
-
-  test("throws when a raw implementation declares an unknown Event source", () => {
-    const { source, events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events), extra: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/Undeclared Event source 'alpha\/extra'\./);
-  });
-
-  test("throws when an RPC handler is not a function", () => {
-    const { source, events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: "not-a-function" },
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/RPC handler 'alpha\/op1' must be a function\./);
-  });
-
-  test("throws when a State source has no current value", () => {
-    const { events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: new Subject<number>() },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/State source 'alpha\/current\$' must have a current value\./);
-  });
-
-  test("throws when an Event source is not an Observable or source adapter", () => {
-    const { source } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: currentValueSource(source) },
-      event: { change$: { mode: "broadcast", source: 1 } },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(
-      /Event source 'alpha\/change\$' must be an Observable or source adapter\./,
-    );
-  });
-
-  test("throws the contract message when an Event source is null", () => {
-    const { source } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: { current$: currentValueSource(source) },
-      event: { change$: null },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(
-      /Event source 'alpha\/change\$' must be an Observable or source adapter\./,
-    );
-  });
-
-  test("throws when a same-named domain implementation declares a different operation set", () => {
-    const alphaShadow = defineDomain("alpha", {
-      rpc: {
-        differentOp: rpc({
-          input: number,
-          output: number,
-          errors: [] as const,
-        }),
-      },
-    });
-    const shadowImplementation = implementDomain(alphaShadow, {
-      rpc: { differentOp: async (input) => input },
-    });
-    expect(() =>
-      createBridgeServer(contract, [
-        shadowImplementation,
-        validBetaImplementation(),
-      ]),
-    ).toThrow(TypeError);
-  });
-
-  test("throws when a category value is null", () => {
-    const { events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: { op1: async (input: number) => input },
-      state: null,
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() =>
-      createBridgeServer(contract, [raw, validBetaImplementation()]),
-    ).toThrow(/state implementations for 'alpha' must be an object\./);
-  });
-
-  test("does not subscribe to any source when registration fails", () => {
-    const { source, events } = alphaSources();
+  test("등록이 실패하면 어떤 source도 구독하지 않는다(원자성)", () => {
+    const source = new BehaviorSubject(1);
     const subscribeSpy = vi.spyOn(source, "subscribe");
-    const alphaImplementation = implementDomain(alpha, {
-      rpc: { op1: async (input) => input },
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events) },
-    });
-    expect(() => createBridgeServer(contract, [alphaImplementation])).toThrow(
-      /Missing domain implementation 'beta'\./,
-    );
+    expect(() =>
+      createBridgeServer({
+        alphaBad: { rpc: { op1: "not-a-function" } },
+        betaGood: { state: { current$: currentValueSource(source) } },
+      }),
+    ).toThrow(/RPC handler 'alphaBad\/op1' must be a function\./);
     expect(subscribeSpy).not.toHaveBeenCalled();
   });
+});
 
-  test("registers every manifest operation for RPC dispatch and stream subscription", async () => {
-    const server = createBridgeServer(contract, [
-      validAlphaImplementation(),
-      validBetaImplementation(),
-    ]);
+type AlphaBetaBridge = {
+  alpha: {
+    rpc: { op1(input: number): number };
+    state: { current$: number };
+    event: { change$: number };
+  };
+  beta: {
+    rpc: { op2(input: number): number };
+  };
+};
+
+describe("createBridgeServer(impl): manifest과 실제 dispatch/subscribe의 일치", () => {
+  test("manifest에 실린 모든 operation이 NOT_FOUND 없이 dispatch/subscribe된다", async () => {
+    const alphaSource = new BehaviorSubject(1);
+    const alphaEvents = new Subject<number>();
+    const impl: BridgeImpl<AlphaBetaBridge> = {
+      alpha: {
+        rpc: { op1: async (input) => input },
+        state: { current$: currentValueSource(alphaSource) },
+        event: { change$: broadcastEvent(alphaEvents) },
+      },
+      beta: { rpc: { op2: async (input) => input } },
+    };
+    const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
-    const manifest = publicManifest(contract);
+    const handshake = server.handshake(sender(), "document-1");
+    if (handshake === undefined) throw new Error("expected a handshake");
+    const manifest = handshake.manifest;
     for (const key of manifest.rpc) {
       const response = await server.dispatchRpc(sender(), rpcRequest(key, 1));
       expect(response).not.toMatchObject({ error: { code: "NOT_FOUND" } });
@@ -332,20 +128,11 @@ describe("Domain implementation registration", () => {
     }
   });
 
-  test("ignores later mutation of the original implementation object", async () => {
+  test("나중에 원본 impl 객체를 변형해도 이미 만든 서버는 영향받지 않는다", async () => {
     const original = vi.fn(async (input: number) => input);
     const replacement = vi.fn(async (input: number) => input * 2);
     const rpcRecord: Record<string, unknown> = { op1: original };
-    const { source, events } = alphaSources();
-    const raw = rawImplementation("alpha", {
-      rpc: rpcRecord,
-      state: { current$: currentValueSource(source) },
-      event: { change$: broadcastEvent(events) },
-    });
-    const server = createBridgeServer(contract, [
-      raw,
-      validBetaImplementation(),
-    ]);
+    const server = createBridgeServer({ alpha: { rpc: rpcRecord } });
     rpcRecord.op1 = replacement;
     server.attach(new FakeTarget());
     await server.dispatchRpc(sender(), rpcRequest("rpc:alpha/op1", 1));

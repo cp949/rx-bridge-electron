@@ -1,32 +1,27 @@
 import { BehaviorSubject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl, Schema, SchemasFor } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type Authorize,
   type BridgeDiagnostic,
   type ResourceLimits,
   type WireRpcRequest,
 } from "../../src/main/index.js";
+import { currentValueSource } from "../../src/main/sources.js";
 import type { WireStreamCommand } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
+type HardwareBridge = {
+  hardware: {
+    rpc: { connect(input: { readonly id: string }): { readonly id: string } };
+    state: { current$: number };
+  };
 };
-const object: Schema<{ readonly id: string }> = {
+
+const objectSchema: Schema<{ readonly id: string }> = {
   parse(value) {
     if (
       value === null ||
@@ -39,12 +34,9 @@ const object: Schema<{ readonly id: string }> = {
   },
 };
 
-const domain = defineDomain("hardware", {
-  rpc: {
-    connect: rpc({ input: object, output: object, errors: [] as const }),
-  },
-  state: { current$: state(number) },
-});
+const schemas: SchemasFor<HardwareBridge> = {
+  hardware: { rpc: { connect: { input: objectSchema } } },
+};
 
 function setup(options: {
   readonly authorize?: Authorize;
@@ -61,25 +53,23 @@ function setup(options: {
 }) {
   const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
   const handler = options.handler ?? (async (input) => input);
-  const implementation = implementDomain(domain, {
-    rpc: { connect: handler },
-    state: { current$: new BehaviorSubject(1) },
-  });
-  const server = createBridgeServer(
-    options.payloadLimits === undefined
-      ? composeContracts(domain)
-      : composeContracts({ payloadLimits: options.payloadLimits }, domain),
-    [implementation],
-    {
-      ...(options.authorize === undefined
-        ? {}
-        : { authorize: options.authorize }),
-      diagnostics,
-      ...(options.resourceLimits === undefined
-        ? {}
-        : { resourceLimits: options.resourceLimits }),
+  const impl: BridgeImpl<HardwareBridge> = {
+    hardware: {
+      rpc: { connect: handler },
+      state: { current$: currentValueSource(new BehaviorSubject(1)) },
     },
-  );
+  };
+  const server = createBridgeServer(impl, {
+    schemas,
+    ...(options.payloadLimits === undefined
+      ? {}
+      : { payloadLimits: options.payloadLimits }),
+    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    diagnostics,
+    ...(options.resourceLimits === undefined
+      ? {}
+      : { resourceLimits: options.resourceLimits }),
+  });
   server.attach(new FakeTarget());
   return { server, diagnostics };
 }

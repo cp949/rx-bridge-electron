@@ -1,23 +1,15 @@
 import { describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
+  type Authorize,
+  type BridgeContext,
+  type BridgeDiagnostic,
+  type StreamBridgeServer,
   type WireRpcRequest,
 } from "../../src/main/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
-import type {
-  Authorize,
-  BridgeContext,
-  BridgeDiagnostic,
-  StreamBridgeServer,
-} from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
 const limits = { maxDepth: 3, maxEntries: 8, maxStringBytes: 32 };
@@ -39,15 +31,15 @@ const object: Schema<{ readonly id: string }> = {
     return value as { readonly id: string };
   },
 };
-const domain = defineDomain("hardware", {
-  rpc: {
-    connect: rpc({
-      input: object,
-      output: string,
-      errors: ["DEVICE_GONE"] as const,
-    }),
-  },
-});
+
+type HardwareBridge = {
+  hardware: {
+    rpc: {
+      connect(input: { readonly id: string }): string;
+    };
+  };
+};
+
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   protocolVersion: 1,
   clientId: "document-1",
@@ -61,12 +53,17 @@ function setup(
   handler = vi.fn(async () => "connected"),
   authorize?: Authorize,
 ) {
-  const implementation = implementDomain(domain, { rpc: { connect: handler } });
-  const server = createBridgeServer(
-    composeContracts({ payloadLimits: limits }, domain),
-    [implementation],
-    authorize === undefined ? {} : { authorize },
-  );
+  const impl: BridgeImpl<HardwareBridge> = {
+    hardware: { rpc: { connect: handler } },
+  };
+  const server = createBridgeServer(impl, {
+    payloadLimits: limits,
+    schemas: {
+      hardware: { rpc: { connect: { input: object, output: string } } },
+    },
+    errors: { hardware: { rpc: { connect: ["DEVICE_GONE"] } } },
+    ...(authorize === undefined ? {} : { authorize }),
+  });
   server.attach(new FakeTarget());
   return { handler, server };
 }
@@ -74,6 +71,14 @@ function setup(
 const transformRequest = (
   overrides: Partial<WireRpcRequest> = {},
 ): WireRpcRequest => request({ key: "rpc:boundary/transform", ...overrides });
+
+type BoundaryBridge = {
+  boundary: {
+    rpc: {
+      transform(input: { readonly id: string }): BridgeValue;
+    };
+  };
+};
 
 function setupOutput(
   output: Schema<BridgeValue>,
@@ -87,23 +92,15 @@ function setupOutput(
     record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>>;
   } = { record: vi.fn<(event: BridgeDiagnostic) => void>() },
 ) {
-  const transformDomain = defineDomain("boundary", {
-    rpc: {
-      transform: rpc({
-        input: object,
-        output,
-        errors: ["DEVICE_GONE"] as const,
-      }),
-    },
+  const impl: BridgeImpl<BoundaryBridge> = {
+    boundary: { rpc: { transform: handler } },
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    payloadLimits: limits,
+    schemas: { boundary: { rpc: { transform: { input: object, output } } } },
+    errors: { boundary: { rpc: { transform: ["DEVICE_GONE"] } } },
+    diagnostics,
   });
-  const implementation = implementDomain(transformDomain, {
-    rpc: { transform: handler },
-  });
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts({ payloadLimits: limits }, transformDomain),
-    [implementation],
-    { diagnostics },
-  );
   server.attach(new FakeTarget());
   return { handler, server, diagnostics };
 }

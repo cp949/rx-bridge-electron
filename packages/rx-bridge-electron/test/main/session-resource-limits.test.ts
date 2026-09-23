@@ -1,17 +1,9 @@
 import { BehaviorSubject, Subject } from "rxjs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import {
-  composeContracts,
-  defineDomain,
-  event,
-  rpc,
-  state,
-  type Schema,
-} from "../../src/contract/index.js";
+import type { BridgeImpl } from "../../src/contract/index.js";
 import {
   createBridgeServer,
-  implementDomain,
   type BridgeContext,
   type ResourceLimits,
   type StreamBridgeServer,
@@ -25,40 +17,20 @@ import type {
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-const voidSchema: Schema<undefined> = { parse: () => undefined };
-const number: Schema<number> = {
-  parse(value) {
-    if (typeof value !== "number") throw new TypeError("number required");
-    return value;
-  },
+type AppBridge = {
+  resource: {
+    rpc: {
+      wait(): undefined;
+      echo(input: { readonly id: string }): { readonly id: string };
+    };
+    state: {
+      current$: number;
+      other$: number;
+      status$: number;
+    };
+    event: { change$: number };
+  };
 };
-const object: Schema<{ readonly id: string }> = {
-  parse(value) {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      Array.isArray(value) ||
-      typeof (value as { id?: unknown }).id !== "string"
-    )
-      throw new Error("id required");
-    return value as { readonly id: string };
-  },
-};
-
-const domain = defineDomain("resource", {
-  rpc: {
-    wait: rpc({ input: voidSchema, output: voidSchema }),
-    echo: rpc({ input: object, output: object }),
-  },
-  state: {
-    current$: state(number),
-    other$: state(number),
-    status$: state(number),
-  },
-  event: {
-    change$: event(number, { buffer: { capacity: 1, overflow: "error" } }),
-  },
-});
 
 const rpcRequest = (
   overrides: Partial<WireRpcRequest> = {},
@@ -122,31 +94,26 @@ function setup() {
     maxSubscriptions: 2,
     maxRpcDurationMs: 1000,
   };
-  const server: StreamBridgeServer = createBridgeServer(
-    composeContracts(
-      {
-        payloadLimits: {
-          maxDepth: 8,
-          maxEntries: 100,
-          maxStringBytes: 2048,
-          maxTotalBytes: 1024,
-        },
+  const impl: BridgeImpl<AppBridge> = {
+    resource: {
+      rpc: { wait: waitHandler, echo: echoHandler },
+      state: {
+        current$: currentValueSource(currentSource),
+        other$: currentValueSource(otherSource),
+        status$: currentValueSource(statusSource),
       },
-      domain,
-    ),
-    [
-      implementDomain(domain, {
-        rpc: { wait: waitHandler, echo: echoHandler },
-        state: {
-          current$: currentValueSource(currentSource),
-          other$: currentValueSource(otherSource),
-          status$: currentValueSource(statusSource),
-        },
-        event: { change$: broadcastEvent(changeEvents) },
-      }),
-    ],
-    { resourceLimits },
-  );
+      event: { change$: broadcastEvent(changeEvents) },
+    },
+  };
+  const server: StreamBridgeServer = createBridgeServer(impl, {
+    payloadLimits: {
+      maxDepth: 8,
+      maxEntries: 100,
+      maxStringBytes: 2048,
+      maxTotalBytes: 1024,
+    },
+    resourceLimits,
+  });
   const targetA = new FakeTarget(1, "main");
   const targetB = new FakeTarget(2, "main");
   server.attach(targetA);
