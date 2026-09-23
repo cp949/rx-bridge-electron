@@ -11,17 +11,17 @@ import {
   type Schema,
 } from "../../src/contract/index.js";
 import { createBridgeServer, implementDomain } from "../../src/main/index.js";
-import {
-  broadcastEvent,
-  currentValueSource,
-} from "../../src/main/sources.js";
-import type { DomainImplementation } from "../../src/main/index.js";
-import type { BridgeValue } from "../../src/protocol/index.js";
+import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
+import type {
+  BridgeContext,
+  DomainImplementation,
+} from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
 type NumberHandler = (
-  input: BridgeValue,
-) => Promise<BridgeValue> | BridgeValue;
+  input: number,
+  context: BridgeContext,
+) => Promise<number> | number;
 const echo: NumberHandler = async (input) => input;
 
 const number: Schema<number> = {
@@ -63,11 +63,15 @@ function validBetaImplementation(handler: NumberHandler = echo) {
 // Builds a raw (unvalidated) implementation object to exercise
 // registerImplementations/normalizeImplementation runtime checks directly,
 // bypassing the implementDomain() compile-time-shaped helper.
-function rawImplementation(
-  domainName: string,
-  parts: { readonly rpc?: unknown; readonly state?: unknown; readonly event?: unknown },
-): DomainImplementation {
-  return { domainName, ...parts } as unknown as DomainImplementation;
+function rawImplementation<Name extends string>(
+  domainName: Name,
+  parts: {
+    readonly rpc?: unknown;
+    readonly state?: unknown;
+    readonly event?: unknown;
+  },
+): DomainImplementation<Name> {
+  return { domainName, ...parts } as unknown as DomainImplementation<Name>;
 }
 
 const rpcRequest = (
@@ -111,7 +115,9 @@ describe("Domain implementation registration", () => {
       createBridgeServer(contract, [
         validAlphaImplementation(),
         validBetaImplementation(),
-        gammaImplementation as unknown as DomainImplementation,
+        gammaImplementation as unknown as DomainImplementation<
+          "alpha" | "beta"
+        >,
       ]),
     ).toThrow(/Unknown domain implementation 'gamma'\./);
   });
@@ -230,7 +236,11 @@ describe("Domain implementation registration", () => {
   test("throws when a same-named domain implementation declares a different operation set", () => {
     const alphaShadow = defineDomain("alpha", {
       rpc: {
-        differentOp: rpc({ input: number, output: number, errors: [] as const }),
+        differentOp: rpc({
+          input: number,
+          output: number,
+          errors: [] as const,
+        }),
       },
     });
     const shadowImplementation = implementDomain(alphaShadow, {
@@ -238,7 +248,7 @@ describe("Domain implementation registration", () => {
     });
     expect(() =>
       createBridgeServer(contract, [
-        shadowImplementation as unknown as DomainImplementation,
+        shadowImplementation,
         validBetaImplementation(),
       ]),
     ).toThrow(TypeError);
@@ -264,9 +274,9 @@ describe("Domain implementation registration", () => {
       state: { current$: currentValueSource(source) },
       event: { change$: broadcastEvent(events) },
     });
-    expect(() =>
-      createBridgeServer(contract, [alphaImplementation]),
-    ).toThrow(/Missing domain implementation 'beta'\./);
+    expect(() => createBridgeServer(contract, [alphaImplementation])).toThrow(
+      /Missing domain implementation 'beta'\./,
+    );
     expect(subscribeSpy).not.toHaveBeenCalled();
   });
 
@@ -278,10 +288,7 @@ describe("Domain implementation registration", () => {
     server.attach(new FakeTarget());
     const manifest = publicManifest(contract);
     for (const key of manifest.rpc) {
-      const response = await server.dispatchRpc(
-        sender(),
-        rpcRequest(key, 1),
-      );
+      const response = await server.dispatchRpc(sender(), rpcRequest(key, 1));
       expect(response).not.toMatchObject({ error: { code: "NOT_FOUND" } });
     }
     for (const key of [...manifest.state, ...manifest.event]) {

@@ -9,6 +9,7 @@ export type {
 } from "./electron-adapter.js";
 export type { StreamBridgeServer } from "./create-bridge-server.js";
 export { implementDomain } from "./implement-domain.js";
+export type { DomainHandlers } from "./implement-domain.js";
 export { broadcastEvent, currentValueSource, scopedEvent } from "./sources.js";
 export type { CurrentValueSource } from "./sources.js";
 export type {

@@ -39,9 +39,11 @@ export interface StreamBridgeServer extends BridgeServer {
   ): Promise<void>;
 }
 
-export function createBridgeServer(
-  contract: ComposedContract,
-  implementations: readonly DomainImplementation[],
+export function createBridgeServer<Contract extends ComposedContract>(
+  contract: Contract,
+  implementations: readonly DomainImplementation<
+    keyof Contract["domains"] & string
+  >[],
   options: {
     readonly authorize?: Authorize;
     readonly diagnostics?: DiagnosticsSink;
