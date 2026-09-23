@@ -135,6 +135,8 @@ api.dispose();
 - `current`: Main의 현재값을 받았습니다. 구독자에게 알리기 전에 snapshot에 반영됩니다.
 - `stale`: 값이 존재한 상태에서 마지막 구독자가 구독을 해제했습니다. 오래된 데이터는 이후 generation의 새 값으로 재생하지 않습니다.
 
+같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 1회 받습니다. `undefined`도 유효한 현재값으로 전달됩니다. 아직 값을 받지 못한 `connecting` 상태(첫 로컬 구독자가 원격 구독을 열었지만 첫 값이 도착하기 전)에서 늦게 구독하면 즉시 아무 값도 받지 않고 첫 값을 기다립니다.
+
 하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다.
 
 ## 검증, 한도, 범위 밖 기능
