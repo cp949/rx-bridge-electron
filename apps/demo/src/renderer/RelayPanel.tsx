@@ -25,7 +25,7 @@ function errorText(error: unknown): string {
 }
 
 export function RelayPanel({ api, readOnly = false }: Props) {
-  const snapshot = useRemoteState(api.relay.status);
+  const snapshot = useRemoteState(api.relay.state.status);
   const status =
     snapshot.status === "current" || snapshot.status === "stale"
       ? snapshot.value
@@ -34,7 +34,7 @@ export function RelayPanel({ api, readOnly = false }: Props) {
   const [operationError, setOperationError] = useState("");
 
   useEffect(() => {
-    const subscription = api.relay.fault.subscribe((value) =>
+    const subscription = api.relay.event.fault.subscribe((value) =>
       setFault(`${value.code}: ${value.message}`),
     );
     return () => subscription.unsubscribe();
@@ -55,21 +55,23 @@ export function RelayPanel({ api, readOnly = false }: Props) {
       <h2>Relay: {label(status, snapshot.status)}</h2>
       {snapshot.status === "stale" && <p>Relay subscription stale</p>}
       {readOnly ? (
-        <button onClick={() => void invoke(() => api.relay.turnOff())}>
+        <button onClick={() => void invoke(() => api.relay.rpc.turnOff())}>
           Try Relay Off
         </button>
       ) : (
         <div className="button-row">
-          <button onClick={() => void invoke(() => api.relay.turnOn())}>
+          <button onClick={() => void invoke(() => api.relay.rpc.turnOn())}>
             Relay On
           </button>
-          <button onClick={() => void invoke(() => api.relay.turnOff())}>
+          <button onClick={() => void invoke(() => api.relay.rpc.turnOff())}>
             Relay Off
           </button>
-          <button onClick={() => void invoke(() => api.relay.simulateFault())}>
+          <button
+            onClick={() => void invoke(() => api.relay.rpc.simulateFault())}
+          >
             Simulate Relay Fault
           </button>
-          <button onClick={() => void invoke(() => api.relay.reset())}>
+          <button onClick={() => void invoke(() => api.relay.rpc.reset())}>
             Reset Relay
           </button>
         </div>

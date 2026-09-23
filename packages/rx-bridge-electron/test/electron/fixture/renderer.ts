@@ -4,7 +4,9 @@ import {
 } from "../../../src/renderer/index.js";
 
 interface FixtureApi {
-  readonly device: { readonly ping: (input: string) => Promise<string> };
+  readonly device: {
+    readonly rpc: { readonly ping: (input: string) => Promise<string> };
+  };
 }
 
 declare global {
@@ -20,7 +22,7 @@ declare global {
 void createRendererApi<FixtureApi>(window.rxBridge)
   .then((api) => {
     window.fixtureRendererResult = {
-      ready: typeof api.device.ping === "function",
+      ready: typeof api.device.rpc.ping === "function",
     };
   })
   .catch((error: unknown) => {

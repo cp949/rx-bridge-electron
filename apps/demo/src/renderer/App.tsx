@@ -43,15 +43,15 @@ function SnapshotLabel<T>({
   );
 }
 function useDeviceView(api: RendererApi<AppBridge>) {
-  const connection = useRemoteState(api.device.connection);
-  const temperature = useRemoteState(api.device.temperature);
-  const signal = useRemoteState(api.device.signalStrength);
-  const packets = useRemoteState(api.device.packetCount);
-  const metrics = useRemoteState(api.device.metrics);
+  const connection = useRemoteState(api.device.state.connection);
+  const temperature = useRemoteState(api.device.state.temperature);
+  const signal = useRemoteState(api.device.state.signalStrength);
+  const packets = useRemoteState(api.device.state.packetCount);
+  const metrics = useRemoteState(api.device.state.metrics);
   const [displayTemperature, setDisplayTemperature] = useState<number>();
   const [renderedCount, setRenderedCount] = useState(0);
   useEffect(() => {
-    const subscription = api.device.temperature
+    const subscription = api.device.state.temperature
       .pipe(sampleTime(100))
       .subscribe((value) => {
         setDisplayTemperature(value);
@@ -172,10 +172,10 @@ export function MainMonitorApp({ api }: Props) {
   const report = (error: unknown) =>
     setErrors((current) => [...current.slice(-19), errorText(error)]);
   useEffect(() => {
-    const data = api.device.data.subscribe((line) =>
+    const data = api.device.event.data.subscribe((line) =>
       setTerminal((lines) => appendTerminalLine(lines, line)),
     );
-    const error = api.device.error.subscribe((value) =>
+    const error = api.device.event.error.subscribe((value) =>
       setErrors((current) => [
         ...current.slice(-19),
         `${value.code}: ${value.message}`,
@@ -212,7 +212,9 @@ export function MainMonitorApp({ api }: Props) {
         <div className="button-row">
           <button
             onClick={() =>
-              void invoke((signal) => api.device.connect(undefined, { signal }))
+              void invoke((signal) =>
+                api.device.rpc.connect(undefined, { signal }),
+              )
             }
           >
             Connect
@@ -220,7 +222,7 @@ export function MainMonitorApp({ api }: Props) {
           <button
             onClick={() =>
               void invoke((signal) =>
-                api.device.disconnect(undefined, { signal }),
+                api.device.rpc.disconnect(undefined, { signal }),
               )
             }
           >
@@ -228,12 +230,14 @@ export function MainMonitorApp({ api }: Props) {
           </button>
           <button
             onClick={() =>
-              void invoke(() => api.device.simulateCableDisconnect())
+              void invoke(() => api.device.rpc.simulateCableDisconnect())
             }
           >
             Simulate Cable Disconnect
           </button>
-          <button onClick={() => void invoke(() => api.device.triggerError())}>
+          <button
+            onClick={() => void invoke(() => api.device.rpc.triggerError())}
+          >
             Trigger Error
           </button>
           <button onClick={() => pending.current?.abort()}>
@@ -251,7 +255,9 @@ export function MainMonitorApp({ api }: Props) {
           </label>
           <button
             onClick={() =>
-              void invoke((signal) => api.device.send({ command }, { signal }))
+              void invoke((signal) =>
+                api.device.rpc.send({ command }, { signal }),
+              )
             }
           >
             Send
@@ -269,7 +275,7 @@ export function MainMonitorApp({ api }: Props) {
                 );
                 if (selected === undefined) return;
                 void invoke(() =>
-                  api.device.setRate({ messagesPerSecond: selected.value }),
+                  api.device.rpc.setRate({ messagesPerSecond: selected.value }),
                 );
               }}
             >
@@ -291,7 +297,7 @@ export function MainMonitorApp({ api }: Props) {
                 );
                 if (selected === undefined) return;
                 void invoke(() =>
-                  api.device.setSourceSampling({
+                  api.device.rpc.setSourceSampling({
                     milliseconds: selected.value,
                   }),
                 );
@@ -346,10 +352,10 @@ export function SensorMonitorApp({ api }: Props) {
   const [rxCount, setRxCount] = useState(0);
   const [lastError, setLastError] = useState("");
   useEffect(() => {
-    const data = api.device.data.subscribe((line) => {
+    const data = api.device.event.data.subscribe((line) => {
       if (line.kind === "rx") setRxCount((count) => count + 1);
     });
-    const errors = api.device.error.subscribe((error) => {
+    const errors = api.device.event.error.subscribe((error) => {
       setLastError(`${error.code}: ${error.message}`);
     });
     return () => {
@@ -380,7 +386,7 @@ export function SensorMonitorApp({ api }: Props) {
         <p>State and Event streams are readable. Control RPCs are denied.</p>
         <button
           onClick={() =>
-            void api.device
+            void api.device.rpc
               .disconnect()
               .catch((error) => setPolicy(errorText(error)))
           }

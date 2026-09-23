@@ -14,7 +14,9 @@ import type {
 import { useRemoteState } from "../src/renderer/use-remote-state.js";
 
 interface StateBridge {
-  readonly hardware: { readonly sensor: RemoteState<number> };
+  readonly hardware: {
+    readonly state: { readonly sensor: RemoteState<number> };
+  };
 }
 
 async function stateHarness(): Promise<{
@@ -44,7 +46,7 @@ async function stateHarness(): Promise<{
   };
   const api = await createRendererApi<StateBridge>(transport);
   return {
-    state: api.hardware.sensor,
+    state: api.hardware.state.sensor,
     controls,
     emit(message) {
       for (const listener of listeners) listener(message);
