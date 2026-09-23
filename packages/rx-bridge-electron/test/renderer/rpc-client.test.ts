@@ -9,22 +9,29 @@ import {
   type CallOptions,
   type RendererApi,
 } from "../../src/renderer/index.js";
+import type { RemoteState } from "../../src/contract/index.js";
 import { FakeTransport, deferred } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
-    connect(
-      input: { readonly deviceId: string },
-      options?: CallOptions,
-    ): Promise<{ readonly connected: boolean }>;
+    readonly rpc: {
+      connect(
+        input: { readonly deviceId: string },
+        options?: CallOptions,
+      ): Promise<{ readonly connected: boolean }>;
+    };
   };
 }
 
 interface InferredBridgeShape {
   readonly hardware: {
-    connect(input: { readonly deviceId: string }): Promise<boolean>;
-    disconnect(): Promise<boolean>;
-    readonly fault: Observable<string>;
+    readonly rpc: {
+      connect(input: { readonly deviceId: string }): Promise<boolean>;
+      disconnect(): Promise<boolean>;
+    };
+    readonly event: {
+      readonly fault: Observable<string>;
+    };
   };
 }
 
@@ -50,16 +57,16 @@ describe("renderer handshake and API proxy", () => {
   test("adds CallOptions only to inferred RPC methods", () => {
     type Api = RendererApi<InferredBridgeShape>;
 
-    expectTypeOf<Api["hardware"]["connect"]>().toEqualTypeOf<
+    expectTypeOf<Api["hardware"]["rpc"]["connect"]>().toEqualTypeOf<
       (
         input: { readonly deviceId: string },
         options?: CallOptions,
       ) => Promise<boolean>
     >();
-    expectTypeOf<Api["hardware"]["disconnect"]>().toEqualTypeOf<
+    expectTypeOf<Api["hardware"]["rpc"]["disconnect"]>().toEqualTypeOf<
       (input?: undefined, options?: CallOptions) => Promise<boolean>
     >();
-    expectTypeOf<Api["hardware"]["fault"]>().toEqualTypeOf<
+    expectTypeOf<Api["hardware"]["event"]["fault"]>().toEqualTypeOf<
       Observable<string>
     >();
   });
@@ -84,7 +91,7 @@ describe("renderer handshake and API proxy", () => {
       clientId: "client-1",
       manifest: { rpc: ["rpc:hardware/connect"], state: [], event: [] },
     });
-    await expect(apiPromise).resolves.toHaveProperty("hardware.connect");
+    await expect(apiPromise).resolves.toHaveProperty("hardware.rpc.connect");
   });
 
   test.each([
@@ -137,6 +144,30 @@ describe("renderer handshake and API proxy", () => {
         },
       },
     ],
+    [
+      "reserved category root segment",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: { rpc: ["rpc:rpc/x"], state: [], event: [] },
+      },
+    ],
+    [
+      "reserved category nested domain segment",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: { rpc: [], state: ["state:hardware/state/x"], event: [] },
+      },
+    ],
+    [
+      "reserved category deep domain segment",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: { rpc: [], state: [], event: ["event:hardware/event/log/x"] },
+      },
+    ],
   ])(
     "rejects a malformed or unsupported handshake: %s",
     async (_label, value) => {
@@ -169,13 +200,13 @@ describe("renderer handshake and API proxy", () => {
     const transport = new FakeTransport();
     const api = await createRendererApi<AppBridge>(transport);
 
-    expect("connect" in api.hardware).toBe(true);
-    expect("missing" in api.hardware).toBe(false);
+    expect("connect" in api.hardware.rpc).toBe(true);
+    expect("missing" in api.hardware.rpc).toBe(false);
     expect(
-      (api.hardware as unknown as { readonly then?: unknown }).then,
+      (api.hardware.rpc as unknown as { readonly then?: unknown }).then,
     ).toBeUndefined();
 
-    const resultPromise = api.hardware.connect({ deviceId: "demo" });
+    const resultPromise = api.hardware.rpc.connect({ deviceId: "demo" });
     const invocation = transport.invocations[0];
     expect(invocation).toMatchObject({
       key: "rpc:hardware/connect",
@@ -183,6 +214,45 @@ describe("renderer handshake and API proxy", () => {
     });
     transport.resolveInvocation(0, success(invocation!.requestId));
     await expect(resultPromise).resolves.toEqual({ connected: true });
+  });
+
+  test("groups manifest entries by category under each domain path", async () => {
+    const transport = new FakeTransport();
+    transport.handshake = Promise.resolve({
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: {
+        rpc: ["rpc:hardware/connect", "rpc:hardware/serial/open"],
+        state: ["state:hardware/status"],
+        event: [],
+      },
+    });
+    const api = await createRendererApi<{
+      readonly hardware: {
+        readonly rpc: { connect(): Promise<string> };
+        readonly state: { readonly status: RemoteState<string> };
+        readonly serial: { readonly rpc: { open(): Promise<string> } };
+      };
+    }>(transport);
+
+    expect(Object.keys(api.hardware).sort()).toEqual([
+      "rpc",
+      "serial",
+      "state",
+    ]);
+    expect(Object.keys(api.hardware.serial)).toEqual(["rpc"]);
+    expect(
+      (api.hardware as unknown as { readonly event?: unknown }).event,
+    ).toBeUndefined();
+    expect(
+      (api.hardware as unknown as { readonly connect?: unknown }).connect,
+    ).toBeUndefined();
+    expect(typeof api.hardware.state.status.subscribe).toBe("function");
+
+    void api.hardware.serial.rpc.open();
+    expect(transport.invocations[0]).toMatchObject({
+      key: "rpc:hardware/serial/open",
+    });
   });
 
   test("exposes root dispose without listing it and keeps nested dispose operations", async () => {
@@ -197,14 +267,14 @@ describe("renderer handshake and API proxy", () => {
       },
     });
     const api = await createRendererApi<{
-      readonly hardware: { dispose(): Promise<string> };
+      readonly hardware: { readonly rpc: { dispose(): Promise<string> } };
     }>(transport);
 
     expect("dispose" in api).toBe(true);
     expect(Object.keys(api)).toEqual(["hardware"]);
-    expect(api.hardware.dispose).not.toBe(api.dispose);
+    expect(api.hardware.rpc.dispose).not.toBe(api.dispose);
 
-    const resultPromise = api.hardware.dispose();
+    const resultPromise = api.hardware.rpc.dispose();
     const invocation = transport.invocations[0];
     expect(invocation).toMatchObject({ key: "rpc:hardware/dispose" });
     transport.resolveInvocation(0, {
@@ -219,7 +289,7 @@ describe("renderer handshake and API proxy", () => {
     }).not.toThrow();
 
     const invocationCountAfterDispose = transport.invocations.length;
-    await expect(api.hardware.dispose()).rejects.toMatchObject({
+    await expect(api.hardware.rpc.dispose()).rejects.toMatchObject({
       code: "CANCELLED",
     });
     expect(transport.invocations).toHaveLength(invocationCountAfterDispose);
@@ -230,7 +300,7 @@ describe("renderer handshake and API proxy", () => {
     const api = await createRendererApi<AppBridge>(transport);
     const controller = new AbortController();
 
-    const resultPromise = api.hardware.connect(
+    const resultPromise = api.hardware.rpc.connect(
       { deviceId: "demo" },
       { signal: controller.signal, timeoutMs: Number.POSITIVE_INFINITY },
     );

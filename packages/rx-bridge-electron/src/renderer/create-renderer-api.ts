@@ -49,10 +49,12 @@ interface ManifestLeaf {
   readonly key: string;
 }
 
-interface ManifestNode {
-  leaf?: ManifestLeaf;
-  readonly children: Map<string, ManifestNode>;
+interface PathNode<Leaf> {
+  leaf?: Leaf;
+  readonly children: Map<string, PathNode<Leaf>>;
 }
+
+type ManifestNode = PathNode<ManifestLeaf>;
 
 function internal(message: string): RemoteError {
   return new RemoteError("INTERNAL", message);
@@ -96,20 +98,23 @@ function parseSegments(
         segment.length === 0 ||
         segment.includes(".") ||
         reservedSegments.has(segment),
-    )
+    ) ||
+    segments
+      .slice(0, -1)
+      .some((segment) => (categories as readonly string[]).includes(segment))
   ) {
     throw internal("Manifest entry has an invalid path.");
   }
   return segments;
 }
 
-function addManifestPath(
-  root: ManifestNode,
-  category: ManifestLeaf["category"],
-  key: string,
+function addPath<Leaf>(
+  root: PathNode<Leaf>,
+  segments: readonly string[],
+  leaf: Leaf,
 ): void {
   let node = root;
-  for (const segment of parseSegments(key, category)) {
+  for (const segment of segments) {
     if (node.leaf !== undefined) {
       throw internal("Manifest contains a leaf/namespace collision.");
     }
@@ -123,7 +128,23 @@ function addManifestPath(
   if (node.leaf !== undefined || node.children.size > 0) {
     throw internal("Manifest contains duplicate or colliding paths.");
   }
-  node.leaf = { category, key };
+  node.leaf = leaf;
+}
+
+function addManifestPath(
+  paths: PathNode<true>,
+  root: ManifestNode,
+  category: ManifestLeaf["category"],
+  key: string,
+): void {
+  const segments = parseSegments(key, category);
+  // 와이어 경로 기준 충돌 검사는 Main의 composeContracts 규칙과 같다.
+  addPath(paths, segments, true);
+  const operation = segments[segments.length - 1]!;
+  addPath(root, [...segments.slice(0, -1), category, operation], {
+    category,
+    key,
+  });
 }
 
 function parseHandshake(value: unknown): {
@@ -154,6 +175,7 @@ function parseHandshake(value: unknown): {
   assertExactKeys(manifestRecord, categories);
   const manifest = {} as Record<(typeof categories)[number], readonly string[]>;
   const tree: ManifestNode = { children: new Map() };
+  const paths: PathNode<true> = { children: new Map() };
 
   for (const category of categories) {
     const entries = manifestRecord[category];
@@ -165,7 +187,7 @@ function parseHandshake(value: unknown): {
       if (typeof entry !== "string") {
         throw internal("Manifest entries must be strings.");
       }
-      addManifestPath(tree, category, entry);
+      addManifestPath(paths, tree, category, entry);
       copied.push(entry);
     }
     manifest[category] = Object.freeze(copied);

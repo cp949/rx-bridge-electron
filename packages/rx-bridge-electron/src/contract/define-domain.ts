@@ -75,9 +75,25 @@ export function assertPathSegments(
   return segments;
 }
 
+const categorySegments = new Set(["rpc", "state", "event"]);
+
 export function assertDomainName(name: string): void {
-  if (assertPathSegments(name, "Domain name")[0] === "dispose") {
+  const segments = assertPathSegments(name, "Domain name");
+  if (segments[0] === "dispose") {
     throw new TypeError("Domain name contains reserved segment 'dispose'.");
+  }
+  for (const segment of segments) {
+    if (categorySegments.has(segment)) {
+      throw new TypeError(
+        `Domain name contains reserved segment '${segment}'.`,
+      );
+    }
+  }
+}
+
+export function assertOperationName(name: string, label: string): void {
+  if (assertPathSegments(name, label).length !== 1) {
+    throw new TypeError(`${label} '${name}' cannot be a nested path.`);
   }
 }
 
@@ -91,7 +107,7 @@ function assertDescriptors(
   }
   assertOwnDataRecord(entries, `${category} definitions`);
   for (const name of Object.keys(entries)) {
-    assertPathSegments(name, `${category} operation`);
+    assertOperationName(name, `${category} operation`);
     const descriptor = entries[name];
     if (
       descriptor === null ||

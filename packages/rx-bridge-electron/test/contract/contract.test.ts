@@ -131,9 +131,56 @@ describe("contract composition", () => {
     ["reserved constructor segment", () => defineDomain("constructor", {})],
     ["reserved dispose domain segment", () => defineDomain("dispose", {})],
     ["reserved dispose/x domain segment", () => defineDomain("dispose/x", {})],
+    ["reserved rpc domain segment", () => defineDomain("rpc", {})],
+    ["reserved state domain segment", () => defineDomain("device/state", {})],
+    [
+      "reserved event domain segment",
+      () => defineDomain("device/event/log", {}),
+    ],
+    [
+      "nested operation path",
+      () =>
+        defineDomain("hardware", {
+          rpc: {
+            "serial/open": rpc({ input: stringSchema, output: stringSchema }),
+          },
+        }),
+    ],
   ])("rejects %s", (_label, create) => {
-    expect(create).toThrow(/duplicate|collision|empty|dot|reserved/i);
+    expect(create).toThrow(/duplicate|collision|empty|dot|reserved|nested/i);
   });
+
+  test("allows category names as operation names", () => {
+    const domain = defineDomain("device", {
+      rpc: { state: rpc({ input: stringSchema, output: stringSchema }) },
+      event: { rpc: event(stringSchema) },
+    });
+
+    expect(domain.definitions.rpc?.state).toBeDefined();
+    expect(domain.definitions.event?.rpc).toBeDefined();
+  });
+
+  test("rejects a nested operation path assembled without defineDomain", () => {
+    const forged = {
+      name: "hardware",
+      definitions: {
+        rpc: {
+          "serial/open": rpc({ input: stringSchema, output: stringSchema }),
+        },
+      },
+    } as unknown as DomainContract;
+
+    expect(() => composeContracts(forged)).toThrow(/nested path/);
+  });
+
+  test.each(["rpc", "device/state", "device/event"])(
+    "rejects a reserved category domain '%s' assembled without defineDomain",
+    (name) => {
+      const forged = { name, definitions: {} } as unknown as DomainContract;
+
+      expect(() => composeContracts(forged)).toThrow(/reserved segment/);
+    },
+  );
 
   test("allows an operation named 'dispose' under a non-reserved domain", () => {
     const domain = defineDomain("device", {

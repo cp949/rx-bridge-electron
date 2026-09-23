@@ -15,9 +15,15 @@ import { FakeTransport } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
-    connect(): Promise<{ readonly connected: boolean }>;
-    readonly status$: RemoteState<string | undefined>;
-    readonly log$: Observable<string>;
+    readonly rpc: {
+      connect(): Promise<{ readonly connected: boolean }>;
+    };
+    readonly state: {
+      readonly status$: RemoteState<string | undefined>;
+    };
+    readonly event: {
+      readonly log$: Observable<string>;
+    };
   };
 }
 
@@ -87,13 +93,13 @@ describe("api.dispose() root shutdown", () => {
   test("진행 중 RPC를 CANCELLED로 확정하고 활성 State·Event 구독을 complete한다", async () => {
     const { transport, api } = await setup();
 
-    const rpcPromise = api.hardware.connect();
+    const rpcPromise = api.hardware.rpc.connect();
     const invocation = transport.invocations[0]!;
 
     let stateErrored: unknown;
     let stateCompleted = 0;
     const stateValues: Array<string | undefined> = [];
-    api.hardware.status$.subscribe({
+    api.hardware.state.status$.subscribe({
       next: (value) => stateValues.push(value),
       error: (error) => {
         stateErrored = error;
@@ -103,9 +109,7 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(
-      message(stateId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
       message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
@@ -113,7 +117,7 @@ describe("api.dispose() root shutdown", () => {
     let eventErrored: unknown;
     let eventCompleted = 0;
     const eventValues: string[] = [];
-    api.hardware.log$.subscribe({
+    api.hardware.event.log$.subscribe({
       next: (value) => eventValues.push(value),
       error: (error) => {
         eventErrored = error;
@@ -123,9 +127,7 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     const eventId = subscriptionIdFor(transport, "event:hardware/log$");
-    transport.emitStream(
-      message(eventId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
 
     api.dispose();
 
@@ -154,7 +156,7 @@ describe("api.dispose() root shutdown", () => {
     expect(stateErrored).toBeUndefined();
     expect(eventErrored).toBeUndefined();
 
-    expect(api.hardware.status$.snapshot).toEqual({
+    expect(api.hardware.state.status$.snapshot).toEqual({
       status: "stale",
       active: false,
       value: "connected",
@@ -166,9 +168,9 @@ describe("api.dispose() root shutdown", () => {
   test("반복 dispose는 no-op이다", async () => {
     const { transport, api } = await setup();
 
-    api.hardware.connect().catch(() => {});
-    api.hardware.status$.subscribe({ error: () => {} });
-    api.hardware.log$.subscribe({ error: () => {} });
+    api.hardware.rpc.connect().catch(() => {});
+    api.hardware.state.status$.subscribe({ error: () => {} });
+    api.hardware.event.log$.subscribe({ error: () => {} });
 
     api.dispose();
     const controlsAfterFirst = transport.controls.length;
@@ -187,7 +189,7 @@ describe("api.dispose() root shutdown", () => {
   test("재진입: complete 콜백 안에서 dispose·RPC·subscribe를 호출해도 안전하다", async () => {
     const { transport, api } = await setup();
 
-    const rpcPromise = api.hardware.connect();
+    const rpcPromise = api.hardware.rpc.connect();
     const invocation = transport.invocations[0]!;
     const invocationCountBeforeDispose = transport.invocations.length;
 
@@ -198,7 +200,7 @@ describe("api.dispose() root shutdown", () => {
     let innerDisposeAddedControls: boolean | undefined;
     let innerDisposeAddedCancellations: boolean | undefined;
 
-    api.hardware.status$.subscribe({
+    api.hardware.state.status$.subscribe({
       error: () => {},
       complete: () => {
         const controlsBefore = transport.controls.length;
@@ -209,15 +211,15 @@ describe("api.dispose() root shutdown", () => {
         innerDisposeAddedCancellations =
           transport.cancellations.length !== cancellationsBefore;
 
-        reentrantRpcPromise = api.hardware.connect();
+        reentrantRpcPromise = api.hardware.rpc.connect();
 
         const controlsBeforeReentrantSubscribe = transport.controls.length;
-        api.hardware.status$.subscribe({
+        api.hardware.state.status$.subscribe({
           error: (error) => {
             reentrantStateError = error;
           },
         });
-        api.hardware.log$.subscribe({
+        api.hardware.event.log$.subscribe({
           error: (error) => {
             reentrantEventError = error;
           },
@@ -247,17 +249,13 @@ describe("api.dispose() root shutdown", () => {
   test("재진입: 아직 complete되지 않은 활성 generation에 합류하는 subscribe도 동기 CANCELLED다", async () => {
     const { transport, api } = await setup();
 
-    api.hardware.log$.subscribe({ error: () => {} });
+    api.hardware.event.log$.subscribe({ error: () => {} });
     const eventId = subscriptionIdFor(transport, "event:hardware/log$");
-    transport.emitStream(
-      message(eventId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
 
-    api.hardware.status$.subscribe({ error: () => {} });
+    api.hardware.state.status$.subscribe({ error: () => {} });
     const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(
-      message(stateId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
       message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
@@ -272,11 +270,11 @@ describe("api.dispose() root shutdown", () => {
 
     // Event generation이 먼저 열렸으므로 dispose 루프에서 먼저 complete된다.
     // 그 시점에 State generation과 늦게 합류할 Event 구독은 아직 루프가 처리하지 않았다.
-    api.hardware.log$.subscribe({
+    api.hardware.event.log$.subscribe({
       error: () => {},
       complete: () => {
         controlsBeforeJoin = transport.controls.length;
-        api.hardware.status$.subscribe({
+        api.hardware.state.status$.subscribe({
           next: (value) => joinedStateValues.push(value),
           error: (error) => {
             joinedStateError = error;
@@ -285,7 +283,7 @@ describe("api.dispose() root shutdown", () => {
             joinedStateCompleted = true;
           },
         });
-        api.hardware.log$.subscribe({
+        api.hardware.event.log$.subscribe({
           error: (error) => {
             joinedEventError = error;
           },
@@ -305,7 +303,7 @@ describe("api.dispose() root shutdown", () => {
     expect(joinedEventError).toMatchObject({ code: "CANCELLED" });
     expect(joinedEventCompleted).toBe(false);
     expect(controlsAfterJoin).toBe(controlsBeforeJoin);
-    expect(api.hardware.status$.snapshot).toEqual({
+    expect(api.hardware.state.status$.snapshot).toEqual({
       status: "stale",
       active: false,
       value: "connected",
@@ -315,11 +313,11 @@ describe("api.dispose() root shutdown", () => {
   test("종료 후 subscribe는 이전에 받은 State 값을 stale로 유지한다", async () => {
     const { transport, api } = await setup();
 
-    const subscription = api.hardware.status$.subscribe({ error: () => {} });
+    const subscription = api.hardware.state.status$.subscribe({
+      error: () => {},
+    });
     const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(
-      message(stateId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
       message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
@@ -328,13 +326,13 @@ describe("api.dispose() root shutdown", () => {
     api.dispose();
 
     let stateError: unknown;
-    api.hardware.status$.subscribe({
+    api.hardware.state.status$.subscribe({
       error: (error) => {
         stateError = error;
       },
     });
     expect(stateError).toMatchObject({ code: "CANCELLED" });
-    expect(api.hardware.status$.snapshot).toEqual({
+    expect(api.hardware.state.status$.snapshot).toEqual({
       status: "stale",
       active: false,
       value: "connected",
@@ -349,26 +347,26 @@ describe("api.dispose() root shutdown", () => {
     const controlsAfterDispose = transport.controls.length;
     const invocationsAfterDispose = transport.invocations.length;
 
-    await expect(api.hardware.connect()).rejects.toMatchObject({
+    await expect(api.hardware.rpc.connect()).rejects.toMatchObject({
       code: "CANCELLED",
     });
     expect(transport.invocations).toHaveLength(invocationsAfterDispose);
 
     let stateError: RemoteError | undefined;
-    api.hardware.status$.subscribe({
+    api.hardware.state.status$.subscribe({
       error: (error) => {
         stateError = error as RemoteError;
       },
     });
     expect(stateError).toBeInstanceOf(RemoteError);
     expect(stateError).toMatchObject({ code: "CANCELLED" });
-    expect(api.hardware.status$.snapshot).toEqual({
+    expect(api.hardware.state.status$.snapshot).toEqual({
       status: "uninitialized",
       active: false,
     });
 
     let eventError: RemoteError | undefined;
-    api.hardware.log$.subscribe({
+    api.hardware.event.log$.subscribe({
       error: (error) => {
         eventError = error as RemoteError;
       },
@@ -381,20 +379,18 @@ describe("api.dispose() root shutdown", () => {
   test("늦은 응답: dispose 뒤 도착한 RPC 응답과 스트림 메시지는 구독자에게 전달되지 않는다", async () => {
     const { transport, api } = await setup();
 
-    const rpcPromise = api.hardware.connect();
+    const rpcPromise = api.hardware.rpc.connect();
     const invocation = transport.invocations[0]!;
 
     let stateNextCalled = false;
-    api.hardware.status$.subscribe({
+    api.hardware.state.status$.subscribe({
       next: () => {
         stateNextCalled = true;
       },
       error: () => {},
     });
     const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(
-      message(stateId, { type: "subscribed", sequence: 0 }),
-    );
+    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
 
     const lateListener = [...transport.streamListeners][0]!;
 

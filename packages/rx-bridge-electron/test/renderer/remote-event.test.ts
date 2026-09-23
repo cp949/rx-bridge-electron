@@ -10,7 +10,9 @@ import { FakeTransport } from "./fake-transport.js";
 
 interface EventBridge {
   readonly hardware: {
-    readonly fault$: Observable<string>;
+    readonly event: {
+      readonly fault$: Observable<string>;
+    };
   };
 }
 
@@ -63,7 +65,7 @@ describe("renderer remote Event", () => {
     const transport = eventTransport();
     const api = await createRendererApi<EventBridge>(transport);
     const firstValues: string[] = [];
-    const first = api.hardware.fault$.subscribe((value) =>
+    const first = api.hardware.event.fault$.subscribe((value) =>
       firstValues.push(value),
     );
     const id = subscriptions(transport)[0]!.subscriptionId;
@@ -78,7 +80,7 @@ describe("renderer remote Event", () => {
     expect(firstValues).toEqual(["first"]);
 
     const secondValues: string[] = [];
-    const second = api.hardware.fault$.subscribe((value) =>
+    const second = api.hardware.event.fault$.subscribe((value) =>
       secondValues.push(value),
     );
     expect(subscriptions(transport)).toHaveLength(1);
@@ -109,7 +111,7 @@ describe("renderer remote Event", () => {
         timeline.push(`ack:${command.sequence}`);
       }
     };
-    const subscription = api.hardware.fault$.subscribe((value) =>
+    const subscription = api.hardware.event.fault$.subscribe((value) =>
       timeline.push(value),
     );
     const id = subscriptions(transport)[0]!.subscriptionId;
@@ -142,8 +144,8 @@ describe("renderer remote Event", () => {
         timeline.push("acknowledge");
       }
     };
-    let subscription!: ReturnType<typeof api.hardware.fault$.subscribe>;
-    subscription = api.hardware.fault$.subscribe((value) => {
+    let subscription!: ReturnType<typeof api.hardware.event.fault$.subscribe>;
+    subscription = api.hardware.event.fault$.subscribe((value) => {
       timeline.push(value);
       subscription.unsubscribe();
     });
@@ -162,7 +164,7 @@ describe("renderer remote Event", () => {
     const api = await createRendererApi<EventBridge>(transport);
     const firstValues: string[] = [];
     let completed = 0;
-    api.hardware.fault$.subscribe({
+    api.hardware.event.fault$.subscribe({
       next: (value) => firstValues.push(value),
       complete: () => {
         completed += 1;
@@ -185,7 +187,9 @@ describe("renderer remote Event", () => {
     expect(completed).toBe(1);
 
     const errors: unknown[] = [];
-    api.hardware.fault$.subscribe({ error: (error) => errors.push(error) });
+    api.hardware.event.fault$.subscribe({
+      error: (error) => errors.push(error),
+    });
     const secondId = subscriptions(transport)[1]!.subscriptionId;
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
@@ -211,9 +215,9 @@ describe("renderer remote Event", () => {
     const api = await createRendererApi<EventBridge>(transport);
     const nextValues: string[] = [];
 
-    api.hardware.fault$.subscribe({
+    api.hardware.event.fault$.subscribe({
       error: () => {
-        api.hardware.fault$.subscribe((value) => nextValues.push(value));
+        api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
       },
     });
     const firstId = subscriptions(transport)[0]!.subscriptionId;
@@ -264,7 +268,7 @@ describe("renderer remote Event", () => {
     };
     const api = await createRendererApi<EventBridge>(transport);
 
-    const subscription = api.hardware.fault$.subscribe((value) =>
+    const subscription = api.hardware.event.fault$.subscribe((value) =>
       wireOrder.push(value),
     );
 

@@ -1,5 +1,6 @@
 import {
   assertDomainName,
+  assertOperationName,
   assertPathSegments,
   type DomainContract,
 } from "./define-domain.js";
@@ -82,6 +83,7 @@ export function composeContracts(
         continue;
       }
       for (const operation of Object.keys(definitions)) {
+        assertOperationName(operation, `${category} operation`);
         addPath(paths, `${domain.name}/${operation}`);
       }
     }

@@ -31,16 +31,34 @@ type InferState<Descriptor> =
 type InferEvent<Descriptor> =
   Descriptor extends EventDescriptor<infer T> ? Observable<T> : never;
 
+type InferCategory<Category extends string, Entries, Leaf> = [
+  keyof Entries,
+] extends [never]
+  ? unknown
+  : { readonly [Key in Category]: Leaf };
+
 type InferDefinitions<Definitions> = (Definitions extends {
-  readonly rpc?: infer Rpc;
+  readonly rpc: infer Rpc;
 }
-  ? { readonly [Key in keyof Rpc]: InferRpc<Rpc[Key]> }
+  ? InferCategory<
+      "rpc",
+      Rpc,
+      { readonly [Key in keyof Rpc]: InferRpc<Rpc[Key]> }
+    >
   : unknown) &
-  (Definitions extends { readonly state?: infer State }
-    ? { readonly [Key in keyof State]: InferState<State[Key]> }
+  (Definitions extends { readonly state: infer State }
+    ? InferCategory<
+        "state",
+        State,
+        { readonly [Key in keyof State]: InferState<State[Key]> }
+      >
     : unknown) &
-  (Definitions extends { readonly event?: infer Event }
-    ? { readonly [Key in keyof Event]: InferEvent<Event[Key]> }
+  (Definitions extends { readonly event: infer Event }
+    ? InferCategory<
+        "event",
+        Event,
+        { readonly [Key in keyof Event]: InferEvent<Event[Key]> }
+      >
     : unknown);
 
 type UnionToIntersection<Value> = (

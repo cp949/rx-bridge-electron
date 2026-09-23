@@ -30,25 +30,36 @@ const app = composeContracts(
     state: { connection: state(output) },
     event: { fault: event(output) },
   }),
+  defineDomain("hardware/serial", {
+    rpc: { open: rpc({ input: noInput, output }) },
+    event: {},
+  }),
 );
 
 type AppBridge = InferBridge<typeof app>;
 
 test("infers renderer bridge contract types", () => {
-  expectTypeOf<AppBridge["hardware"]["connect"]>().toEqualTypeOf<
+  expectTypeOf<AppBridge["hardware"]["rpc"]["connect"]>().toEqualTypeOf<
     (input: {
       readonly deviceId: string;
     }) => Promise<{ readonly connected: boolean }>
   >();
-  expectTypeOf<AppBridge["hardware"]["disconnect"]>().toEqualTypeOf<
+  expectTypeOf<AppBridge["hardware"]["rpc"]["disconnect"]>().toEqualTypeOf<
     () => Promise<{ readonly connected: boolean }>
   >();
-  expectTypeOf<AppBridge["hardware"]["connection"]>().toEqualTypeOf<
+  expectTypeOf<AppBridge["hardware"]["state"]["connection"]>().toEqualTypeOf<
     RemoteState<{ readonly connected: boolean }>
   >();
-  expectTypeOf<AppBridge["hardware"]["fault"]>().toEqualTypeOf<
+  expectTypeOf<AppBridge["hardware"]["event"]["fault"]>().toEqualTypeOf<
     Observable<{ readonly connected: boolean }>
   >();
+  expectTypeOf<AppBridge["hardware"]["serial"]["rpc"]["open"]>().toEqualTypeOf<
+    () => Promise<{ readonly connected: boolean }>
+  >();
+  expectTypeOf<keyof AppBridge["hardware"]>().toEqualTypeOf<
+    "rpc" | "state" | "event" | "serial"
+  >();
+  expectTypeOf<keyof AppBridge["hardware"]["serial"]>().toEqualTypeOf<"rpc">();
   expectTypeOf<RemoteStateSnapshot<string>>().toMatchTypeOf<{
     readonly status: "uninitialized" | "connecting" | "current" | "stale";
   }>();
@@ -70,7 +81,11 @@ if (false) {
   };
   void [dateSchema, functionSchema, classSchema];
   // @ts-expect-error RPC input must match its schema type.
-  void api.hardware.connect({ deviceId: 1 });
+  void api.hardware.rpc.connect({ deviceId: 1 });
   // @ts-expect-error No-input RPCs do not accept an input argument.
-  void api.hardware.disconnect(undefined);
+  void api.hardware.rpc.disconnect(undefined);
+  // @ts-expect-error Operations live under their category, not the domain.
+  void api.hardware.connect;
+  // @ts-expect-error Domains without events expose no event category.
+  void api.hardware.serial.event;
 }
