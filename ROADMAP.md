@@ -31,6 +31,20 @@
 
 - [x] **RD-009 — `authorize` 예외 응답 코드 통일과 overflow 종료 시점 문서화.** RPC 경로는 `authorize` 예외를 adapter까지 다시 던져 `INVALID_ARGUMENT "Invalid bridge request."`로 응답하고, stream 경로는 `INTERNAL`로 응답한다. 앱 권한 콜백의 실패는 요청 형식 오류가 아니므로 두 경로를 `INTERNAL "Internal bridge error."`로 통일하고, 요청이 이미 취소됐으면 `CANCELLED`가 우선한다. 와이어 형식과 오류 코드 집합은 바꾸지 않는다. 함께 `error` 정책 overflow의 종료 통지가 대기 값 전달 뒤에 오고 구독 슬롯은 그 종료 뒤 반환된다는 동작을 문서에 명시한다(동작 변경 없음). 출처: `.scratch/authorize-exception-code`, `.scratch/overflow-slot-timing`. **완료 기준:** RPC `authorize` 동기 throw·비동기 reject가 `INTERNAL`, abort 중 예외가 `CANCELLED`, 예외 뒤 RPC 슬롯 반환, adapter 경유 응답도 `INTERNAL`임을 테스트로 검증하고, ADR·architecture·README가 두 경로의 분류와 overflow 종료 순서를 일치하게 기술한다. **결과:** 완료 조건 전부 충족, 편차 없음. 결정은 [ADR 0011](docs/adr/0011-authorize-exception-internal.md). overflow 문서 보정은 완료·upstream 오류까지 같은 순서로 넓혀 기술했다.
 
+### 경량 계약 (명세: [.scratch/lightweight-contract/spec.md](.scratch/lightweight-contract/spec.md))
+
+초기 구현의 사용자 코드량을 raw IPC 수준으로 줄인다. 계약은 타입만으로 두고 도메인 스키마는 operation 단위로 선택·점진 도입한다. 사용자 코드가 필요 없는 구조·크기 검사, 세션 자원 한도, origin/sender 검사는 기본 유지한다. 기존 descriptor API는 호환 계층 없이 대체한다(외부 소비자 없음). **공통 측정 기준:** README hello-world(RPC 1개, State 1개)에서 계약 타입 5줄 이하, 스키마 0줄, zod 의존성 0.
+
+- [ ] **RD-010 — 경량 계약 결정 문서화.** 타입만의 계약, `createBridgeServer<AppBridge>(impl, options)`, impl 키 기반 manifest, 선택 `schemas`·`errors` map, Main source의 buffer 옵션을 신규 ADR로 기록한다. ADR 0004는 도메인 스키마를 선택으로 바꾸고 구조·크기 검사는 모든 operation에 유지한다고 개정한다. ADR 0008은 런타임 계약·등록 일치 검사를 컴파일 단계 검사로 대체한다. **완료 기준:** 신규 ADR과 개정·대체 ADR, architecture가 새 계약과 검증 순서를 일치하게 기술한다.
+
+- [ ] **RD-011 — 타입 계약과 impl 기반 서버.** `createBridgeServer<AppBridge>(impl)`가 스키마 없이 RPC·State·Event를 제공한다. manifest는 impl 키에서 만들고, Event buffer는 source 옵션(생략 시 `capacity: 100`, `overflow: "error"`), 허용 에러 코드는 `options.errors` 중첩 map(목록 밖 코드는 안전한 오류)으로 받는다. 이 단계에서는 기존 descriptor API와 공존한다. **완료 기준:** 스키마 없는 RPC·State·Event가 동작하고, impl의 누락·초과 operation과 잘못된 handler·source 타입이 타입 검사에서 실패하며, `parseBridgeValue`·payload 한도·세션 한도가 그대로 적용된다.
+
+- [ ] **RD-012 — 선택 스키마 map.** `options.schemas`를 `SchemasFor<AppBridge>` 부분 map으로 받아 생성 시 경로→스키마 테이블로 평탄화하고 dispatcher(입력·출력)와 stream-hub(State·Event 출력)에 적용한다. `satisfies`로 별도 파일에 둘 수 있다. **완료 기준:** 일부 operation에만 스키마를 적용할 수 있고, 경로 오타와 스키마 출력 타입 불일치가 컴파일 에러이며, 입력 스키마 실패는 `INVALID_ARGUMENT`, 출력 스키마 실패는 `INTERNAL`로 끝난다.
+
+- [ ] **RD-013 — descriptor API 제거와 소비자 이전.** `defineDomain`·`rpc`·`state`·`event`·`composeContracts`·`implementDomain`을 제거하고 demo·Electron fixture·README를 새 형태로 옮긴다. demo 스키마는 `main/`으로 이동해 Renderer 번들에서 빠진다. **완료 기준:** 공통 측정 기준을 README에서 달성하고, 전체 검증과 Electron acceptance가 통과한다.
+
+- [ ] **RD-014 — 배선 코드 축약.** `bindElectronBridge`·`attach`, preload `exposeBridgeInMainWorld`, Renderer 초기화(`declare global`, `createRendererApi`, `dispose` 등록)의 코드량을 줄인다. origin·role 보안 설정과 얽혀 있으므로 착수 전에 별도 설계 그릴링으로 범위와 완료 기준을 확정한다.
+
 ## 현재 범위 밖의 확장
 
-Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
+Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
