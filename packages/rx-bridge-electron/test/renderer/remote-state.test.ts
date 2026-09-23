@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, expectTypeOf, test } from "vitest";
 
 import type { RemoteState } from "../../src/contract/index.js";
 import {
@@ -232,8 +232,40 @@ describe("renderer RemoteState", () => {
     expect(subscription.closed).toBe(true);
   });
 
+  test("exposes dispose() as the same function reference as Symbol.dispose", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+
+    expect(typeof api.dispose).toBe("function");
+    expect(api.dispose).toBe(api[Symbol.dispose]);
+  });
+
+  test("api.dispose() tears down active stream subscriptions", async () => {
+    const transport = stateTransport();
+    transport.controlHook = (command) => {
+      if (command.type !== "subscribe") {
+        return;
+      }
+      transport.emitStream(
+        message(command.subscriptionId, { type: "subscribed", sequence: 0 }),
+      );
+    };
+    const api = await createRendererApi<StateBridge>(transport);
+    api.hardware.connection$.subscribe(() => {});
+
+    expect(transport.streamListeners.size).toBe(1);
+    api.dispose();
+    expect(transport.streamListeners.size).toBe(0);
+  });
+
   test("preserves stream types while adding renderer RPC options", () => {
     expectTypeAssignment({} as RendererApi<StateBridge>);
+  });
+
+  test("types dispose() as a callable returning void", () => {
+    expectTypeOf<RendererApi<StateBridge>["dispose"]>().toEqualTypeOf<
+      () => void
+    >();
   });
 });
 

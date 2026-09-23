@@ -41,7 +41,8 @@ type AddCallOptions<Value> =
         ? { readonly [Key in keyof Value]: AddCallOptions<Value[Key]> }
         : Value;
 
-export type RendererApi<Bridge> = AddCallOptions<Bridge> & Disposable;
+export type RendererApi<Bridge> = AddCallOptions<Bridge> &
+  Disposable & { readonly dispose: () => void };
 
 interface ManifestLeaf {
   readonly category: (typeof categories)[number];
@@ -191,7 +192,10 @@ function createProxy(
 
   return new Proxy(Object.create(null) as object, {
     get: (_target, property) => {
-      if (property === Symbol.dispose) {
+      if (
+        dispose !== undefined &&
+        (property === Symbol.dispose || property === "dispose")
+      ) {
         return dispose;
       }
       if (property === "then") {
@@ -225,12 +229,15 @@ function createProxy(
       return value;
     },
     has: (_target, property) =>
-      typeof property === "string" && manifestNode.children.has(property),
+      (dispose !== undefined && property === "dispose") ||
+      (typeof property === "string" && manifestNode.children.has(property)),
     ownKeys: () => [...manifestNode.children.keys()],
     getOwnPropertyDescriptor: (_target, property) =>
-      typeof property === "string" && manifestNode.children.has(property)
-        ? { configurable: true, enumerable: true }
-        : undefined,
+      dispose !== undefined && property === "dispose"
+        ? { configurable: true, enumerable: false }
+        : typeof property === "string" && manifestNode.children.has(property)
+          ? { configurable: true, enumerable: true }
+          : undefined,
     set: () => false,
     defineProperty: () => false,
     deleteProperty: () => false,
