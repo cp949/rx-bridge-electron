@@ -91,6 +91,8 @@ const server = createBridgeServer(
 );
 ```
 
+`implementDomain`의 rpc handler 입출력 타입과 state/event 소스 값 타입은 넘긴 도메인 계약에서 추론됩니다 — 위 예제의 `connect`/`connection`처럼 캐스팅 없이 그대로 씁니다. 계약에 선언된 operation 키는 모두 필수이고 초과 키는 타입 검사(excess property check)에서 걸립니다. `createBridgeServer`는 생성 시 넘긴 구현 배열을 합성된 계약과 이름 집합 기준으로 재검증합니다: 도메인 누락·중복·계약에 없는 도메인, 도메인별 rpc·state·event 각각의 누락·초과 키, handler·소스 형태(함수 여부, `getValue` 존재 여부 등)가 하나라도 어긋나면 서버 생성이 `TypeError`로 실패합니다(호출 시점이 아니라 시작 시점입니다). `implementDomain`을 거친 값도 다시 검사합니다. 이전에는 handler 안에서 `input as ...`으로 입력을 캐스팅했고 계약에 구현을 넘기지 않은 도메인이 있어도 서버 생성은 성공했습니다 — 근거와 이전 방법은 [ADR 0008](../../docs/adr/0008-contract-registration-match.md)에 있습니다.
+
 ```ts
 // Preload — exposeBridgeInMainWorld()를 호출한 다음 Renderer를 비동기로 초기화합니다.
 import { contextBridge, ipcRenderer } from "electron";
