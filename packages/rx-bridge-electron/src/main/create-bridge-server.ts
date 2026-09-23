@@ -168,12 +168,11 @@ export function createBridgeServer<Contract extends ComposedContract>(
               options.authorize === undefined
                 ? true
                 : await options.authorize(context, envelope.key);
-          } catch (cause) {
-            if (controller.signal.aborted) {
-              response = error(envelope, "CANCELLED", "Request cancelled.");
-              return response;
-            }
-            throw cause;
+          } catch {
+            response = controller.signal.aborted
+              ? error(envelope, "CANCELLED", "Request cancelled.")
+              : error(envelope, "INTERNAL", "Internal bridge error.");
+            return response;
           }
           if (
             controller.signal.aborted ||

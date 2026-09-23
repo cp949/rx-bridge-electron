@@ -366,3 +366,86 @@ describe("Main RPC deadline", () => {
     ]);
   });
 });
+
+describe("RPC authorize 예외", () => {
+  test("authorize가 동기로 던지면 INTERNAL로 응답하고 handler를 호출하지 않는다", async () => {
+    const handler = vi.fn(async () => undefined);
+    const { server } = setup({
+      handler,
+      authorize: () => {
+        throw new Error("authorize boom");
+      },
+    });
+    await expect(
+      server.dispatchRpc(sender(), request()),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  test("authorize가 reject하면 INTERNAL로 응답한다", async () => {
+    const { server } = setup({
+      authorize: () => Promise.reject(new Error("authorize boom")),
+    });
+    await expect(
+      server.dispatchRpc(sender(), request()),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+  });
+
+  test("취소된 뒤 authorize가 reject하면 CANCELLED가 우선한다", async () => {
+    let fail!: (cause: unknown) => void;
+    const authorize = vi.fn(
+      () =>
+        new Promise<boolean>((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const { server } = setup({ authorize });
+    const p1 = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    fail(new Error("authorize boom"));
+    await expect(p1).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED" },
+    });
+  });
+
+  test("authorize 예외 뒤 RPC 슬롯이 반환된다", async () => {
+    let calls = 0;
+    const { server } = setup({
+      resourceLimits: { maxConcurrentRpc: 1 },
+      authorize: () => {
+        if (calls++ === 0) throw new Error("authorize boom");
+        return true;
+      },
+    });
+    await expect(
+      server.dispatchRpc(sender(), request({ requestId: "r1" })),
+    ).resolves.toMatchObject({ type: "error", error: { code: "INTERNAL" } });
+    await expect(
+      server.dispatchRpc(sender(), request({ requestId: "r2" })),
+    ).resolves.toMatchObject({ type: "success" });
+  });
+
+  test("Main deadline이 걸린 상태에서도 authorize 예외는 INTERNAL이다", async () => {
+    const { server } = setup({
+      resourceLimits: { maxRpcDurationMs: 1000 },
+      authorize: () => {
+        throw new Error("authorize boom");
+      },
+    });
+    await expect(
+      server.dispatchRpc(sender(), request()),
+    ).resolves.toMatchObject({ type: "error", error: { code: "INTERNAL" } });
+  });
+});

@@ -262,17 +262,23 @@ describe("rpc-finished.outcome 판정", () => {
     ]);
   });
 
-  test("authorize 예외(work throw)는 outcome: error", async () => {
+  test("authorize 예외는 INTERNAL 응답과 outcome: error이고 rejected는 기록하지 않는다", async () => {
     const { server, diagnostics } = setup({
       authorize: () => {
         throw new Error("authorize boom");
       },
     });
-    await expect(server.dispatchRpc(sender(), request())).rejects.toThrow(
-      "authorize boom",
-    );
+    await expect(
+      server.dispatchRpc(sender(), request()),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
     expect(finishedEvents(diagnostics)).toEqual([
       expect.objectContaining({ outcome: "error" }),
     ]);
+    expect(diagnostics.record).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: "rejected" }),
+    );
   });
 });

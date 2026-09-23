@@ -386,7 +386,7 @@ describe("Electron adapter rejection diagnostics", () => {
     expect(response).toMatchObject({ type: "error" });
   });
 
-  test("an RPC authorize() exception is not recorded and keeps returning protocolError", async () => {
+  test("an RPC authorize() exception is not recorded and returns INTERNAL instead of protocolError", async () => {
     const ipcMain = new FakeIpcMain();
     const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
     const server = createBridgeServer(
@@ -423,7 +423,11 @@ describe("Electron adapter rejection diagnostics", () => {
     );
 
     expect(rejections(diagnostics)).toEqual([]);
-    expect(response).toMatchObject({ type: "error" });
+    expect(response).toMatchObject({
+      requestId: "request-1",
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
   });
 
   test("bindElectronBridge works against a StreamBridgeServer without the adapter Symbol method", async () => {
