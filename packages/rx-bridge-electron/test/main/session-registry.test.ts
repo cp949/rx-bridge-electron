@@ -216,6 +216,7 @@ describe("Main session lifecycle", () => {
     let server!: ReturnType<typeof createBridgeServer>;
     const signals: AbortSignal[] = [];
     const reentrantDispatches: Promise<unknown>[] = [];
+    const attachErrors: unknown[] = [];
     let reentrantAttempts = 0;
     const handler = vi.fn(
       (
@@ -227,7 +228,11 @@ describe("Main session lifecycle", () => {
           context.signal.addEventListener("abort", () => {
             if (reentrantAttempts >= 2) return;
             reentrantAttempts += 1;
-            server.attach(new FakeTarget());
+            try {
+              server.attach(new FakeTarget());
+            } catch (error) {
+              attachErrors.push(error);
+            }
             reentrantDispatches.push(
               server.dispatchRpc(
                 sender(),
@@ -255,6 +260,12 @@ describe("Main session lifecycle", () => {
     expect(handler).toHaveBeenCalledOnce();
     expect(signals).toHaveLength(1);
     expect(signals[0]?.aborted).toBe(true);
+    expect(attachErrors).toHaveLength(1);
+    expect(attachErrors[0]).toMatchObject({
+      name: "BridgeProtocolError",
+      code: "FORBIDDEN",
+      message: "Bridge server is disposed.",
+    });
     expect(reentrantDispatches).toHaveLength(1);
     await expect(Promise.all(reentrantDispatches)).resolves.toMatchObject([
       { type: "error", error: { code: "FORBIDDEN" } },
@@ -262,6 +273,108 @@ describe("Main session lifecycle", () => {
     expect(server.handshake(sender(), "document-3")).toBeUndefined();
     await expect(
       server.dispatchRpc(sender(), request("document-3", "request-3")),
+    ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
+  });
+
+  test("server.dispose() finalizes the server: attach throws, requests are rejected", async () => {
+    const server = createBridgeServer(composeContracts(domain), [
+      implementDomain(domain, { rpc: { wait: vi.fn(async () => undefined) } }),
+    ]);
+    server.attach(new FakeTarget());
+    server.dispose();
+
+    expect(() => server.attach(new FakeTarget())).toThrowError(
+      expect.objectContaining({
+        name: "BridgeProtocolError",
+        code: "FORBIDDEN",
+        message: "Bridge server is disposed.",
+      }),
+    );
+    expect(server.handshake(sender(), "document-9")).toBeUndefined();
+    await expect(
+      server.dispatchRpc(sender(), request("document-9", "request-9")),
+    ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
+
+    const send = vi.fn();
+    await server.controlStream(
+      sender(),
+      {
+        protocolVersion: 1,
+        clientId: "document-9",
+        type: "subscribe",
+        subscriptionId: "sub-9",
+        key: "state:hardware/current$",
+      },
+      send,
+    );
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  test("repeated server.dispose() calls are no-ops", async () => {
+    const handler = vi.fn(
+      (_input: BridgeValue, context: { signal: AbortSignal }) =>
+        new Promise<undefined>(() => {
+          context.signal.addEventListener("abort", () => {
+            recordCount += 1;
+          });
+        }),
+    );
+    let recordCount = 0;
+    const records: unknown[] = [];
+    const server = createBridgeServer(
+      composeContracts(domain),
+      [implementDomain(domain, { rpc: { wait: handler } })],
+      { diagnostics: { record: (event) => records.push(event) } },
+    );
+    server.attach(new FakeTarget());
+    void server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
+
+    server.dispose();
+    expect(recordCount).toBe(1);
+    const diagnosticsAfterFirstDispose = records.length;
+
+    expect(() => server.dispose()).not.toThrow();
+    expect(() => server.dispose()).not.toThrow();
+    expect(recordCount).toBe(1);
+    expect(records).toHaveLength(diagnosticsAfterFirstDispose);
+  });
+
+  test("server.dispose() cancels an in-flight RPC handler", async () => {
+    const handler = vi.fn(
+      (_input: BridgeValue, context: { signal: AbortSignal }) =>
+        new Promise<undefined>((_resolve, reject) => {
+          context.signal.addEventListener("abort", () =>
+            reject(new Error("aborted")),
+          );
+        }),
+    );
+    const server = createBridgeServer(composeContracts(domain), [
+      implementDomain(domain, { rpc: { wait: handler } }),
+    ]);
+    server.attach(new FakeTarget());
+    const pending = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(handler).toHaveBeenCalledOnce());
+
+    server.dispose();
+
+    await expect(pending).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED" },
+    });
+  });
+
+  test("a retired clientId is rejected while the server is alive", async () => {
+    const server = createBridgeServer(composeContracts(domain), [
+      implementDomain(domain, { rpc: { wait: vi.fn(async () => undefined) } }),
+    ]);
+    server.attach(new FakeTarget());
+    expect(server.handshake(sender(), "document-1")).toBeDefined();
+    server.attach(new FakeTarget());
+
+    expect(server.handshake(sender(), "document-1")).toBeUndefined();
+    await expect(
+      server.dispatchRpc(sender(), request("document-1", "request-1")),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
   });
 });

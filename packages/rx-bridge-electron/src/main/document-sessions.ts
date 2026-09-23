@@ -1,3 +1,4 @@
+import { BridgeProtocolError } from "../protocol/index.js";
 import type {
   AttachedTarget,
   DiagnosticsSink,
@@ -31,14 +32,18 @@ export class DocumentSessions {
   readonly #retiredClients = new Map<number, Set<string>>();
   readonly #states = new WeakMap<DocumentSession, SessionState>();
   readonly #diagnostics: DiagnosticsSink | undefined;
-  #disposing = false;
+  #disposed = false;
 
   public constructor(diagnostics?: DiagnosticsSink) {
     this.#diagnostics = diagnostics;
   }
 
   public attach(target: AttachedTarget): () => void {
-    if (this.#disposing) return () => {};
+    if (this.#disposed)
+      throw new BridgeProtocolError(
+        "FORBIDDEN",
+        "Bridge server is disposed.",
+      );
     this.#detach(target.webContentsId);
     if (this.#attachments.has(target.webContentsId)) return () => {};
     const attachment: Attachment = {
@@ -57,7 +62,7 @@ export class DocumentSessions {
     sender: SenderIdentity,
     clientId: string,
   ): DocumentSession | undefined {
-    if (this.#disposing) return undefined;
+    if (this.#disposed) return undefined;
     const attachment = this.#attachments.get(sender.webContentsId);
     if (
       attachment === undefined ||
@@ -96,7 +101,7 @@ export class DocumentSessions {
     sender: SenderIdentity,
     clientId: string,
   ): DocumentSession | undefined {
-    if (this.#disposing) return undefined;
+    if (this.#disposed) return undefined;
     const attachment = this.#attachments.get(sender.webContentsId);
     if (
       attachment === undefined ||
@@ -178,14 +183,9 @@ export class DocumentSessions {
   }
 
   public dispose(): void {
-    if (this.#disposing) return;
-    this.#disposing = true;
-    try {
-      for (const id of [...this.#attachments.keys()]) this.#detach(id);
-      this.#retiredClients.clear();
-    } finally {
-      this.#disposing = false;
-    }
+    if (this.#disposed) return;
+    this.#disposed = true;
+    for (const id of [...this.#attachments.keys()]) this.#detach(id);
   }
 
   #detach(id: number): void {

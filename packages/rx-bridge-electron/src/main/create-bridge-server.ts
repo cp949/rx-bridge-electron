@@ -47,6 +47,7 @@ export function createBridgeServer(
     readonly diagnostics?: DiagnosticsSink;
   } = {},
 ): StreamBridgeServer {
+  let disposed = false;
   const sessions = new DocumentSessions(options.diagnostics);
   const manifest = publicManifest(contract);
   const limits = contract.payloadLimits ?? defaultLimits;
@@ -225,6 +226,8 @@ export function createBridgeServer(
       );
     },
     dispose(): void {
+      if (disposed) return;
+      disposed = true;
       sessions.dispose();
       streams.dispose();
     },
