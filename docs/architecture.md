@@ -24,7 +24,7 @@ Contract는 프로세스 중립 선언이다. handler, Electron 객체, 자격�
 3. Main은 연결된 문서 세션과 도메인 계약을 확인하고 권한 함수를 적용한다.
 4. RPC 입력과 출력, handshake 및 stream envelope는 프로토콜 파서와 payload 한도를 통과해야 한다. RPC handler와 stream source가 만든 값은 원시 값 검사 → 출력 스키마 변환 → 변환 결과 재검사 → 복제 → 복제본 검사 순서를 모두 통과해야 전송된다. 이 순서는 `src/main/output-boundary.ts`의 `parseOutput` 하나로 구현되어 RPC 출력과 stream 값(State/Event)이 공유하며, 두 번째 검사(복제 전)는 accessor·함수 값이 `structuredClone` 단계로 새는 것을 막고 복제는 검증 이후 handler·스키마가 쥔 참조로 값을 바꾸는 TOCTOU를 막는다.
 5. 오류 응답은 안전한 프로토콜 오류 코드로 직렬화한다. 내부 예외나 원문 payload를 진단 정보에 기록하지 않는다.
-6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수)를 넘으면 같은 `INTERNAL`로 대체된다. 선언된 도메인 에러의 `details`도 검사 → 복제 → 복제본 검사를 거치며, `code`·`message`·`details`는 한 번만 읽어 검사한 값을 그대로 전송한다. 이 필드를 읽다 예외가 나도 `INTERNAL`이다. 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다.
+6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수·전체 byte)를 넘으면 같은 `INTERNAL`로 대체된다. 선언된 도메인 에러의 `details`도 검사 → 복제 → 복제본 검사를 거치며, `code`·`message`·`details`는 한 번만 읽어 검사한 값을 그대로 전송한다. 이 필드를 읽다 예외가 나도 `INTERNAL`이다. 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다. 세션별 자원 한도(동시 RPC·구독 수) 초과는 `RESOURCE_EXHAUSTED`, Main이 스스로 설정한 RPC 실행 시간 상한 초과는 `DEADLINE_EXCEEDED`다 — 아래 "세션 자원 한도" 참고.
 
 Electron 어댑터는 `allowedOrigins`를 받고 현재 main frame과 허용 origin을 검사한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
@@ -34,7 +34,7 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 
 이 소유 단위는 창이 아니라 렌더러 문서다. 한 창에서 reload/navigation이 발생하면 이전 문서에서 시작한 비동기 작업이 새 문서로 넘어가지 않아야 한다.
 
-`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `undefined`, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
+`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `undefined`, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `destroyed` 수명 사건이 오면 해당 `webContentsId`의 retired 기록 전체를 지운다(그 `webContents`는 다시 살아나지 않는다). 살아 있는 `webContents`의 retired 기록은 최근 `maxRetiredClientsPerWebContents`개(기본 32)만 보관하고, 그보다 오래된 clientId는 기록에서 빠진다 — 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다. 근거는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
 
 ## RPC와 스트림 계약
 
@@ -47,7 +47,28 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 
 ## Payload 및 제한
 
-v1 payload는 `undefined`, `null`, boolean, number, bigint, string, 배열, 일반 객체로 제한한다. 함수, symbol, 순환 참조, 사용자 정의 prototype, accessor/non-enumerable property, symbol key는 거부한다. 기본 한도는 깊이 32, 전체 항목 10,000개, 문자열 및 key UTF-8 길이 1,000,000 byte다. 계약별 payload 한도를 지정하면 기본값 대신 그 설정을 사용한다.
+v1 payload는 `undefined`, `null`, boolean, number, bigint, string, 배열, 일반 객체로 제한한다. 함수, symbol, 순환 참조, 사용자 정의 prototype, accessor/non-enumerable property, symbol key는 거부한다. 기본 한도는 깊이 32, 전체 항목 10,000개, 문자열 및 key UTF-8 길이 1,000,000 byte, 전체 크기 16 MiB(16,777,216 byte, `maxTotalBytes`)다. 계약별 payload 한도(`payloadLimits`)를 지정하면 해당 필드만 기본값을 덮어쓴다(병합).
+
+전체 크기는 순회 중 근사 byte를 누적해 계산한다: 노드마다(원시값·배열·객체·`null`·`undefined` 모두) 8 byte, 문자열은 추가로 UTF-8 byte 길이, object key는 UTF-8 byte 길이(배열 `length`는 제외하지만 배열 원소의 index 문자열 키는 포함), bigint는 추가로 `ceil(abs(value).toString(16).length / 2)` byte. 실제 V8 structured clone 크기와는 다를 수 있는 근사값이다. 누적값이 `maxTotalBytes`를 넘으면 다른 payload 규칙과 같은 실패 분류를 따른다: RPC 입력은 `INVALID_ARGUMENT`, RPC 출력·stream 값·도메인 에러 `details`는 `INTERNAL`.
+
+payload 한도는 서버(`createBridgeServer`)가 계약 기준으로만 적용한다. Electron 어댑터와 preload는 envelope 구조(순환 참조·함수·prototype 등 값 프로필)만 검사하고 크기 한도는 강제하지 않는다(근거: [ADR 0004](adr/0004-validated-bounded-payloads.md)).
+
+## 세션 자원 한도
+
+Main은 연결된 `webContents`의 현재 문서 세션 단위로 진행 중 RPC 수, 구독(대기+활성) 수, RPC 실행 시간, retired client ID 보관량을 제한한다. `createBridgeServer(contract, implementations, { resourceLimits })` 옵션으로 설정하며 모두 세션별이다 — 서버 전역(모든 세션 합계) 상한은 없다. 한 세션이 한도를 모두 소진해도 다른 세션의 RPC·구독은 영향받지 않는다.
+
+| 옵션                              | 기본값  | 초과 시                                                          |
+| --------------------------------- | ------- | ---------------------------------------------------------------- |
+| `maxConcurrentRpc`                | 64      | 다음 RPC는 `authorize`·handler 호출 없이 `RESOURCE_EXHAUSTED`    |
+| `maxSubscriptions`                | 256     | 다음 subscribe는 `subscribed` 다음 `RESOURCE_EXHAUSTED` `error`  |
+| `maxRpcDurationMs`                | 300,000 | handler `signal` abort 후 `DEADLINE_EXCEEDED`(`Infinity`면 없음) |
+| `maxRetiredClientsPerWebContents` | 32      | 가장 오래된 retired clientId부터 기록에서 제거                   |
+
+RPC 슬롯은 취소나 deadline으로 응답을 먼저 보내도 handler Promise가 실제로 끝날 때 반환한다 — `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유한다. 구독 슬롯은 unsubscribe·완료·오류·overflow·거부·세션 retire 각 경로 뒤 즉시 반환한다.
+
+stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 세션별 워터마크(마지막으로 수락한 sequence)로 판정한다. `subscriptionId`는 `<nonce>:<scope>:<seq base36>` 형식(`createOpaqueId` 산출 형식)이어야 하며, 형식 오류는 `INVALID_ARGUMENT`, 워터마크 이하는 메시지 없이 무시한다. RPC `requestId`는 워터마크 대상이 아니다.
+
+근거와 대안 비교는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다.
 
 ## 데모와 증거 범위
 

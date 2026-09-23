@@ -34,7 +34,7 @@
 - `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw한다. 종료가 진행되는 도중(dispose 처리 자체가 아직 끝나지 않은 시점)에 재진입한 `attach()` 호출도 같다 — "종료 중"과 "종료됨"을 호출자 입장에서 구분할 이유가 없다.
 - `establish()`와 `current()`는 예외를 던지지 않고 `undefined`를 반환한다. 이 두 함수는 종료 전에도 세션이 없을 때 `undefined`를 반환하는 함수이므로, 종료 후 상태를 같은 반환값으로 흡수한다.
 - 반복 `dispose()` 호출은 no-op이다.
-- `#retiredClients.clear()` 호출은 제거한다. `docs/architecture.md`는 "retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다"고 규정하며, 서버 dispose 자체가 이 세션들이 다시 살아날 수 없게 만드는 사건이므로 retired 기록을 지울 이유가 없다. 지우면 (이론상 재사용이 없다는 전제가 깨졌을 때) 재사용 방지가 조용히 무력화된다.
+- `#retiredClients.clear()` 호출은 제거한다. `docs/architecture.md`는 "retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다"고 규정하며, 서버 dispose 자체가 이 세션들이 다시 살아날 수 없게 만드는 사건이므로 retired 기록을 지울 이유가 없다. 지우면 (이론상 재사용이 없다는 전제가 깨졌을 때) 재사용 방지가 조용히 무력화된다. `destroyed` 수명 사건(해당 `webContents`가 실제로 파괴됨)이 오면 그 `webContentsId`의 기록은 지운다 — 재사용될 `webContents`가 더는 없기 때문이다. 살아 있는 `webContents`의 retired 기록은 무한히 쌓이지 않도록 `webContents`별 최근 N개(`maxRetiredClientsPerWebContents`, 기본 32)만 보관한다. 그보다 오래된 clientId는 기록에서 빠지지만, 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다(오래된 문서는 이미 현재 main frame이 아니다). 세부 근거는 [ADR 0009](0009-session-resource-limits.md)에 있다.
 
 종료 후 도착하는 요청은 새 오류 경로를 추가하지 않고 기존 거부 경로를 재사용한다. handshake는 `establish()`가 `undefined`를 반환하는 기존 분기를 타므로 `bindElectronBridge`의 handshake 핸들러가 이를 `protocolError` 폴백으로 잡아 `INVALID_ARGUMENT`(`BridgeProtocolError`)로 응답한다(`electron-adapter.ts`의 현행 handshake 오류 처리 경로, 변경 없음). RPC는 `establish()`가 `undefined`를 반환하므로 `dispatchRpc`가 이미 쓰는 `FORBIDDEN "Bridge sender is not authorized."` 응답으로 귀결된다. stream subscribe는 `controlStream`이 `establish()`/`current()`의 `undefined`를 만나 무시하는 기존 흐름을 그대로 탄다.
 
