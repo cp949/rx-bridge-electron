@@ -112,8 +112,8 @@ declare global {
   }
 }
 const api = await createRendererApi<AppBridge>(window.appBridge);
-await api.device.connect();
-api.device.connection.subscribe(console.log);
+await api.device.rpc.connect();
+api.device.state.connection.subscribe(console.log);
 // 진행 중 RPC를 취소하고 활성 구독을 정리합니다. api[Symbol.dispose]()와 같은 함수입니다.
 window.addEventListener("pagehide", () => api.dispose(), { once: true });
 ```
@@ -122,9 +122,9 @@ window.addEventListener("pagehide", () => api.dispose(), { once: true });
 
 ## 런타임 동작
 
-`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 계층형 `rpc`/`state`/`event` 접두사 없이 평면 `api.<domain path>.<operation>`을 유지합니다(근거: [ADR 0005](../../docs/adr/0005-renderer-api-shape.md)).
+`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 도메인 아래에 종류 계층을 두는 `api.<domain path>.rpc|state|event.<operation>`입니다(`api.device.rpc.connect()`, `api.device.state.connection`, `api.device.event.data`). 도메인에 정의가 없는 종류는 노출하지 않습니다. operation 이름은 `/`를 포함할 수 없고, 묶음은 도메인 경로(`defineDomain("device/serial", ...)` → `api.device.serial.rpc.open()`)로 표현합니다. 도메인 경로의 segment로 `rpc`, `state`, `event`를 쓸 수 없습니다(근거: [ADR 0007](../../docs/adr/0007-hierarchical-renderer-api.md)).
 
-루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출은 되돌릴 수 없는 최종 종료입니다(근거: [ADR 0006](../../docs/adr/0006-shutdown-contract.md)). 진행 중인 RPC는 `RemoteError("CANCELLED", "Renderer API is disposed.")`로 즉시 reject되고, 이미 Main에 전송된 요청에는 best-effort cancel을 보냅니다. 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`됩니다(`error`가 아닙니다). 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝납니다. 반복 `dispose()` 호출은 no-op입니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 첫 segment가 `dispose`인 도메인 이름(`defineDomain("dispose", ...)`, `defineDomain("dispose/x", ...)`)은 거부됩니다. 하위 segment나 operation 이름으로는 계속 쓸 수 있습니다(예: `device/dispose` 도메인, `api.device.dispose`).
+루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출은 되돌릴 수 없는 최종 종료입니다(근거: [ADR 0006](../../docs/adr/0006-shutdown-contract.md)). 진행 중인 RPC는 `RemoteError("CANCELLED", "Renderer API is disposed.")`로 즉시 reject되고, 이미 Main에 전송된 요청에는 best-effort cancel을 보냅니다. 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`됩니다(`error`가 아닙니다). 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝납니다. 반복 `dispose()` 호출은 no-op입니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 첫 segment가 `dispose`인 도메인 이름(`defineDomain("dispose", ...)`, `defineDomain("dispose/x", ...)`)은 거부됩니다. 하위 segment나 operation 이름으로는 계속 쓸 수 있습니다(예: `device/dispose` 도메인, `api.device.rpc.dispose`).
 
 각 RPC는 structured clone이 가능한 입력값 하나를 받습니다. `AbortSignal`과 `timeoutMs`는 별도 `CallOptions`로 전달합니다. 취소, timeout, 응답 중 하나만 최종 결과가 됩니다. 원격 실패는 `FORBIDDEN`, `INVALID_ARGUMENT`, `CANCELLED`, `DEADLINE_EXCEEDED` 같은 프로토콜 코드를 가진 `RemoteError` 값으로 전달됩니다.
 
