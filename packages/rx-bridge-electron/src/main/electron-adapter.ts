@@ -16,8 +16,11 @@ import {
   type StreamMessage,
 } from "../protocol/index.js";
 import type { StreamSender } from "./stream-hub.js";
-import type { StreamBridgeServer } from "./create-bridge-server.js";
-import type { AttachedTarget, SenderIdentity } from "./types.js";
+import {
+  recordAdapterRejection,
+  type StreamBridgeServer,
+} from "./create-bridge-server.js";
+import type { AttachedTarget, RejectReason, SenderIdentity } from "./types.js";
 
 const limits = {
   maxDepth: Number.MAX_SAFE_INTEGER,
@@ -76,6 +79,10 @@ function senderIdentity(
     isMainFrame: event.sender.mainFrame === frame,
     origin: originOf(frame),
   };
+}
+
+function recordRejection(server: StreamBridgeServer, reason: RejectReason): void {
+  server[recordAdapterRejection]?.(reason);
 }
 
 function protocolError(value: unknown): RpcResponse {
@@ -145,24 +152,27 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       event.senderFrame?.send(channels.stream, message);
     };
   options.ipcMain.handle(channels.handshake, (event, value: unknown) => {
+    let request;
     try {
-      const request = parseHandshakeRequest(value, limits);
+      request = parseHandshakeRequest(value, limits);
+    } catch {
+      recordRejection(options.server, "malformed-envelope");
+      return protocolError(value);
+    }
+    try {
       const identity = senderIdentity(event);
-      if (
-        !identity.isMainFrame ||
-        !options.allowedOrigins.includes(identity.origin)
-      ) {
-        throw new BridgeProtocolError(
-          "FORBIDDEN",
-          "Bridge sender is not authorized.",
-        );
+      if (!identity.isMainFrame) {
+        recordRejection(options.server, "frame-not-main");
+        return protocolError(value);
+      }
+      if (!options.allowedOrigins.includes(identity.origin)) {
+        recordRejection(options.server, "origin-not-allowed");
+        return protocolError(value);
       }
       const response = options.server.handshake(identity, request.clientId);
       if (response === undefined) {
-        throw new BridgeProtocolError(
-          "FORBIDDEN",
-          "Bridge sender is not authorized.",
-        );
+        // server already recorded `sender-unauthorized` for this rejection.
+        return protocolError(value);
       }
       return response;
     } catch {
@@ -170,28 +180,43 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
     }
   });
   options.ipcMain.handle(channels.rpc, async (event, value: unknown) => {
+    let request;
     try {
-      return await options.server.dispatchRpc(
-        senderIdentity(event),
-        parseWireRpcRequest(value, limits),
-      );
+      request = parseWireRpcRequest(value, limits);
+    } catch {
+      recordRejection(options.server, "malformed-envelope");
+      return protocolError(value);
+    }
+    try {
+      return await options.server.dispatchRpc(senderIdentity(event), request);
     } catch {
       return protocolError(value);
     }
   });
   const onCancel = (event: IpcMainEvent, value: unknown) => {
+    let request;
     try {
-      options.server.cancel(
-        senderIdentity(event),
-        parseWireCancelRequest(value, limits),
-      );
+      request = parseWireCancelRequest(value, limits);
+    } catch {
+      recordRejection(options.server, "malformed-envelope");
+      return;
+    }
+    try {
+      options.server.cancel(senderIdentity(event), request);
     } catch {}
   };
   const onControl = (event: IpcMainEvent, value: unknown) => {
+    let command;
+    try {
+      command = parseWireStreamCommand(value, limits);
+    } catch {
+      recordRejection(options.server, "malformed-envelope");
+      return;
+    }
     try {
       void options.server.controlStream(
         senderIdentity(event),
-        parseWireStreamCommand(value, limits),
+        command,
         streamSender(event),
       );
     } catch {}

@@ -24,6 +24,7 @@ import type {
   BridgeServer,
   DiagnosticsSink,
   DomainImplementation,
+  RejectReason,
   SenderIdentity,
 } from "./types.js";
 
@@ -33,6 +34,14 @@ const defaultLimits: PayloadLimits = {
   maxStringBytes: 1_000_000,
   maxTotalBytes: 16_777_216,
 };
+
+/**
+ * Adapter-only recording pathway for rejections the adapter itself judges
+ * (`frame-not-main`, `origin-not-allowed`, `malformed-envelope`). Not exported
+ * from `./index.js` so user-defined `StreamBridgeServer` implementations never
+ * need to know about it.
+ */
+export const recordAdapterRejection = Symbol("recordAdapterRejection");
 
 export interface StreamBridgeServer extends BridgeServer {
   handshake(
@@ -44,6 +53,7 @@ export interface StreamBridgeServer extends BridgeServer {
     command: WireStreamCommand,
     send: StreamSender,
   ): Promise<void>;
+  [recordAdapterRejection]?(reason: RejectReason): void;
 }
 
 export function createBridgeServer<Contract extends ComposedContract>(
@@ -86,6 +96,9 @@ export function createBridgeServer<Contract extends ComposedContract>(
     error: { code, message },
   });
   return {
+    [recordAdapterRejection](reason: RejectReason): void {
+      recordDiagnostic(options.diagnostics, { type: "rejected", reason });
+    },
     handshake(sender, clientId) {
       if (sessions.establish(sender, clientId) === undefined) {
         recordDiagnostic(options.diagnostics, {

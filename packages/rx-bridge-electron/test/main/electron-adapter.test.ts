@@ -14,7 +14,10 @@ import {
   createBridgeServer,
   ELECTRON_BRIDGE_CHANNELS,
   implementDomain,
+  type BridgeDiagnostic,
 } from "../../src/main/index.js";
+import { recordAdapterRejection } from "../../src/main/create-bridge-server.js";
+import * as mainIndex from "../../src/main/index.js";
 
 const value: Schema<undefined> = { parse: () => undefined };
 const domain = defineDomain("hardware", {
@@ -224,5 +227,253 @@ describe("Electron adapter payload limits", () => {
 
     expect(response).toMatchObject({ type: "success", result: bigString });
     expect(handler).toHaveBeenCalledTimes(1);
+  });
+});
+
+function makeDiagnosticsBridge(ipcMain: FakeIpcMain) {
+  const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+  const server = createBridgeServer(
+    composeContracts(domain),
+    [implementDomain(domain, { rpc: { wait: async () => undefined } })],
+    { diagnostics },
+  );
+  const bridge = bindElectronBridge({
+    ipcMain: ipcMain as unknown as IpcMain,
+    server,
+    namespace: "test",
+    allowedOrigins: ["app://local"],
+  });
+  return { server, bridge, diagnostics };
+}
+
+function rejections(diagnostics: { record: ReturnType<typeof vi.fn> }) {
+  return diagnostics.record.mock.calls
+    .map(([event]) => event as BridgeDiagnostic)
+    .filter((event): event is Extract<BridgeDiagnostic, { type: "rejected" }> =>
+      event.type === "rejected",
+    );
+}
+
+describe("Electron adapter rejection diagnostics", () => {
+  test("frame-not-main: senderFrame is not the attached WebContents' main frame", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+    bridge.attach(contents as unknown as WebContents, "main");
+
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: { routingId: 999, url: "app://local" } },
+      { protocolVersion: 1, clientId: "client-1" },
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "frame-not-main" },
+    ]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("origin-not-allowed: main frame with a disallowed origin", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://evil");
+    bridge.attach(contents as unknown as WebContents, "main");
+
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      { protocolVersion: 1, clientId: "client-1" },
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "origin-not-allowed" },
+    ]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("malformed-envelope: handshake parse failure", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      {},
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "malformed-envelope" },
+    ]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("malformed-envelope: rpc parse failure (authorize exception path stays unrecorded)", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+
+    const rpcHandler = ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").rpc)!;
+    const response = await rpcHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      {},
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "malformed-envelope" },
+    ]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("malformed-envelope: cancel parse failure", () => {
+    const ipcMain = new FakeIpcMain();
+    const { diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+
+    ipcMain.emit(
+      ELECTRON_BRIDGE_CHANNELS("test").cancel,
+      { sender: contents, senderFrame: contents.mainFrame },
+      {},
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "malformed-envelope" },
+    ]);
+  });
+
+  test("malformed-envelope: control parse failure", () => {
+    const ipcMain = new FakeIpcMain();
+    const { diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+
+    ipcMain.emit(
+      ELECTRON_BRIDGE_CHANNELS("test").control,
+      { sender: contents, senderFrame: contents.mainFrame },
+      {},
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "malformed-envelope" },
+    ]);
+  });
+
+  test("a server-side handshake rejection (unattached webContents) is recorded exactly once", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+    // Intentionally not attached: session establish fails on the server side.
+
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      { protocolVersion: 1, clientId: "client-1" },
+    );
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("an RPC authorize() exception is not recorded and keeps returning protocolError", async () => {
+    const ipcMain = new FakeIpcMain();
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const server = createBridgeServer(
+      composeContracts(domain),
+      [implementDomain(domain, { rpc: { wait: async () => undefined } })],
+      {
+        diagnostics,
+        authorize: () => {
+          throw new Error("boom");
+        },
+      },
+    );
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      namespace: "test",
+      allowedOrigins: ["app://local"],
+    });
+    const contents = new UrlWebContents("app://local");
+    bridge.attach(contents as unknown as WebContents, "main");
+
+    const rpcHandler = ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").rpc)!;
+    const response = await rpcHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        requestId: "request-1",
+        key: "rpc:hardware/wait",
+        input: undefined,
+      },
+    );
+
+    expect(rejections(diagnostics)).toEqual([]);
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("bindElectronBridge works against a StreamBridgeServer without the adapter Symbol method", async () => {
+    const ipcMain = new FakeIpcMain();
+    const fakeServer = {
+      attach: () => () => {},
+      dispatchRpc: async (
+        _sender: unknown,
+        envelope: { clientId: string; requestId: string },
+      ) => ({
+        protocolVersion: 1,
+        clientId: envelope.clientId,
+        requestId: envelope.requestId,
+        type: "success",
+        result: undefined,
+      }),
+      cancel: () => {},
+      dispose: () => {},
+      handshake: (_sender: unknown, clientId: string) => ({
+        protocolVersion: 1,
+        clientId,
+        manifest: { domains: {} },
+      }),
+      controlStream: async () => {},
+      // no [recordAdapterRejection] method
+    };
+
+    expect(() =>
+      bindElectronBridge({
+        ipcMain: ipcMain as unknown as IpcMain,
+        server: fakeServer as never,
+        namespace: "test",
+        allowedOrigins: ["app://local"],
+      }),
+    ).not.toThrow();
+
+    const contents = new UrlWebContents("app://evil");
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      { protocolVersion: 1, clientId: "client-1" },
+    );
+
+    expect(response).toMatchObject({ type: "error" });
+  });
+
+  test("the adapter Symbol is not part of the public main index export", () => {
+    const ipcMain = new FakeIpcMain();
+    const { server } = makeDiagnosticsBridge(ipcMain);
+
+    expect(Object.getOwnPropertySymbols(server)).toContain(
+      recordAdapterRejection,
+    );
+    expect(Object.values(mainIndex)).not.toContain(recordAdapterRejection);
   });
 });
