@@ -15,7 +15,10 @@ import {
   type WireRpcRequest,
 } from "../../src/main/index.js";
 import { broadcastEvent } from "../../src/main/sources.js";
-import type { StreamMessage, WireStreamCommand } from "../../src/protocol/index.js";
+import type {
+  StreamMessage,
+  WireStreamCommand,
+} from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
@@ -57,9 +60,9 @@ describe("recordDiagnostic exception isolation", () => {
       key: "rpc:hardware/ping",
       input: undefined,
     };
-    await expect(server.dispatchRpc(sender(), request)).resolves.toMatchObject(
-      { type: "success" },
-    );
+    await expect(server.dispatchRpc(sender(), request)).resolves.toMatchObject({
+      type: "success",
+    });
   });
 
   test("a throwing sink does not affect an RPC output validation failure", async () => {
@@ -82,9 +85,10 @@ describe("recordDiagnostic exception isolation", () => {
       key: "rpc:hardware/broken",
       input: undefined,
     };
-    await expect(server.dispatchRpc(sender(), request)).resolves.toMatchObject(
-      { type: "error", error: { code: "INTERNAL" } },
-    );
+    await expect(server.dispatchRpc(sender(), request)).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL" },
+    });
   });
 
   test("a throwing sink does not affect a renderer cancel", async () => {

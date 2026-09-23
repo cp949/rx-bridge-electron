@@ -81,7 +81,10 @@ function senderIdentity(
   };
 }
 
-function recordRejection(server: StreamBridgeServer, reason: RejectReason): void {
+function recordRejection(
+  server: StreamBridgeServer,
+  reason: RejectReason,
+): void {
   server[recordAdapterRejection]?.(reason);
 }
 

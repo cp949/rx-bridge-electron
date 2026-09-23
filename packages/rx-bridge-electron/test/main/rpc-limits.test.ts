@@ -361,6 +361,7 @@ describe("Main RPC deadline", () => {
         type: "rpc-finished",
         key: "rpc:hardware/wait",
         durationMs: expect.any(Number),
+        outcome: "error",
       },
     ]);
   });

@@ -62,7 +62,7 @@ export type BridgeDiagnostic =
       readonly type: "rpc-finished";
       readonly key: string;
       readonly durationMs: number;
-      readonly outcome?: "ok" | "error";
+      readonly outcome: "ok" | "error";
     }
   | { readonly type: "rpc-timed-out"; readonly key: string }
   | { readonly type: "rpc-cancelled"; readonly key: string }

@@ -166,6 +166,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
       };
       const started = performance.now();
       const work = (async (): Promise<RpcResponse> => {
+        let response: RpcResponse | undefined;
         try {
           let allowed: boolean;
           try {
@@ -174,34 +175,40 @@ export function createBridgeServer<Contract extends ComposedContract>(
                 ? true
                 : await options.authorize(context, envelope.key);
           } catch (cause) {
-            if (controller.signal.aborted)
-              return error(envelope, "CANCELLED", "Request cancelled.");
+            if (controller.signal.aborted) {
+              response = error(envelope, "CANCELLED", "Request cancelled.");
+              return response;
+            }
             throw cause;
           }
           if (
             controller.signal.aborted ||
             sessions.current(sender, envelope.clientId) !== session
-          )
-            return error(envelope, "CANCELLED", "Request cancelled.");
+          ) {
+            response = error(envelope, "CANCELLED", "Request cancelled.");
+            return response;
+          }
           if (!allowed) {
             recordDiagnostic(options.diagnostics, {
               type: "rejected",
               reason: "authorize-denied",
               key: envelope.key,
             });
-            return error(
+            response = error(
               envelope,
               "FORBIDDEN",
               "Bridge operation is forbidden.",
             );
+            return response;
           }
-          return await dispatchRegistered(
+          response = await dispatchRegistered(
             registration,
             envelope,
             context,
             limits,
             options.diagnostics,
           );
+          return response;
         } finally {
           sessions.finishRpc(session, id, controller);
           sessions.releaseRpc(session);
@@ -209,6 +216,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
             type: "rpc-finished",
             key: envelope.key,
             durationMs: performance.now() - started,
+            outcome: response?.type === "success" ? "ok" : "error",
           });
         }
       })();
@@ -217,6 +225,10 @@ export function createBridgeServer<Contract extends ComposedContract>(
       const deadline = new Promise<RpcResponse>((resolve) => {
         timer = setTimeout(() => {
           controller.abort();
+          recordDiagnostic(options.diagnostics, {
+            type: "rpc-timed-out",
+            key: envelope.key,
+          });
           resolve(
             error(
               envelope,
@@ -358,9 +370,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
         recordDiagnostic(options.diagnostics, {
           type: "rejected",
           reason: "authorize-denied",
-          ...(streams.isRegistered(command.key)
-            ? { key: command.key }
-            : {}),
+          ...(streams.isRegistered(command.key) ? { key: command.key } : {}),
         });
         streams.reject(
           sender,

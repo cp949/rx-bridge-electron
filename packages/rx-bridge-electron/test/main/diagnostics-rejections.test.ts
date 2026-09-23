@@ -71,7 +71,9 @@ function setup(options: {
       : composeContracts({ payloadLimits: options.payloadLimits }, domain),
     [implementation],
     {
-      ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+      ...(options.authorize === undefined
+        ? {}
+        : { authorize: options.authorize }),
       diagnostics,
       ...(options.resourceLimits === undefined
         ? {}
@@ -104,13 +106,14 @@ const subscribeCommand = (
   ...overrides,
 });
 
-const rejections = (
-  diagnostics: { record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>> },
-) =>
+const rejections = (diagnostics: {
+  record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>>;
+}) =>
   diagnostics.record.mock.calls
     .map(([event]) => event)
-    .filter((event): event is Extract<BridgeDiagnostic, { type: "rejected" }> =>
-      event.type === "rejected",
+    .filter(
+      (event): event is Extract<BridgeDiagnostic, { type: "rejected" }> =>
+        event.type === "rejected",
     );
 
 describe("rejected diagnostic reasons", () => {
@@ -126,7 +129,12 @@ describe("rejected diagnostic reasons", () => {
     const { server, diagnostics } = setup({});
     await server.controlStream(
       sender({ webContentsId: 99 }),
-      { protocolVersion: 1, clientId: "client-1", type: "unsubscribe", subscriptionId: testSubscriptionId(1) },
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        type: "unsubscribe",
+        subscriptionId: testSubscriptionId(1),
+      },
       () => {},
     );
     expect(rejections(diagnostics)).toEqual([
@@ -138,7 +146,11 @@ describe("rejected diagnostic reasons", () => {
     const { server, diagnostics } = setup({ authorize: () => false });
     await server.dispatchRpc(sender(), rpcRequest());
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "authorize-denied", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "authorize-denied",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -146,7 +158,11 @@ describe("rejected diagnostic reasons", () => {
     const { server, diagnostics } = setup({ authorize: () => false });
     await server.controlStream(sender(), subscribeCommand(), () => {});
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "authorize-denied", key: "state:hardware/current$" },
+      {
+        type: "rejected",
+        reason: "authorize-denied",
+        key: "state:hardware/current$",
+      },
     ]);
   });
 
@@ -184,7 +200,10 @@ describe("rejected diagnostic reasons", () => {
 
   test("RPC unknown-operation", async () => {
     const { server, diagnostics } = setup({});
-    await server.dispatchRpc(sender(), rpcRequest({ key: "rpc:hardware/missing" }));
+    await server.dispatchRpc(
+      sender(),
+      rpcRequest({ key: "rpc:hardware/missing" }),
+    );
     expect(rejections(diagnostics)).toEqual([
       { type: "rejected", reason: "unknown-operation" },
     ]);
@@ -218,20 +237,33 @@ describe("rejected diagnostic reasons", () => {
     const { server, diagnostics } = setup({});
     await server.dispatchRpc(sender(), rpcRequest({ input: { id: 42 } }));
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "invalid-input", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "invalid-input",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
   test("RPC payload-too-large: maxTotalBytes exceeded", async () => {
     const { server, diagnostics } = setup({
-      payloadLimits: { maxDepth: 8, maxEntries: 100, maxStringBytes: 2048, maxTotalBytes: 64 },
+      payloadLimits: {
+        maxDepth: 8,
+        maxEntries: 100,
+        maxStringBytes: 2048,
+        maxTotalBytes: 64,
+      },
     });
     await server.dispatchRpc(
       sender(),
       rpcRequest({ input: { id: "x".repeat(200) } }),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "payload-too-large", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "payload-too-large",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -244,7 +276,11 @@ describe("rejected diagnostic reasons", () => {
       rpcRequest({ input: { id: "x".repeat(200) } }),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "payload-too-large", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "payload-too-large",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -257,7 +293,11 @@ describe("rejected diagnostic reasons", () => {
       rpcRequest({ input: { id: { nested: "device-1" } } as never }),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "payload-too-large", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "payload-too-large",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -270,7 +310,11 @@ describe("rejected diagnostic reasons", () => {
       rpcRequest({ input: { id: "device-1", extra: "x" } as never }),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "payload-too-large", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "payload-too-large",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -281,7 +325,11 @@ describe("rejected diagnostic reasons", () => {
       rpcRequest({ input: { id: Symbol("bad") } as never }),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "invalid-input", key: "rpc:hardware/connect" },
+      {
+        type: "rejected",
+        reason: "invalid-input",
+        key: "rpc:hardware/connect",
+      },
     ]);
   });
 
@@ -290,7 +338,9 @@ describe("rejected diagnostic reasons", () => {
     const { server, diagnostics } = setup({
       resourceLimits: { maxConcurrentRpc: 1 },
       handler: () =>
-        new Promise((resolve) => controls.push(() => resolve({ id: "device-1" }))),
+        new Promise((resolve) =>
+          controls.push(() => resolve({ id: "device-1" })),
+        ),
     });
     const first = server.dispatchRpc(sender(), rpcRequest({ requestId: "r1" }));
     await vi.waitFor(() => expect(controls).toHaveLength(1));
@@ -303,7 +353,9 @@ describe("rejected diagnostic reasons", () => {
   });
 
   test("stream subscription-limit omits the key", async () => {
-    const { server, diagnostics } = setup({ resourceLimits: { maxSubscriptions: 1 } });
+    const { server, diagnostics } = setup({
+      resourceLimits: { maxSubscriptions: 1 },
+    });
     await server.controlStream(
       sender(),
       subscribeCommand({ subscriptionId: testSubscriptionId(1) }),

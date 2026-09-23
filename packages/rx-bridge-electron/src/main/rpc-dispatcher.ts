@@ -78,7 +78,9 @@ export async function dispatchRegistered(
     recordDiagnostic(diagnostics, {
       type: "rejected",
       reason:
-        cause instanceof PayloadLimitError ? "payload-too-large" : "invalid-input",
+        cause instanceof PayloadLimitError
+          ? "payload-too-large"
+          : "invalid-input",
       key: envelope.key,
     });
     return respond({

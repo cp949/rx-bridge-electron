@@ -249,8 +249,9 @@ function makeDiagnosticsBridge(ipcMain: FakeIpcMain) {
 function rejections(diagnostics: { record: ReturnType<typeof vi.fn> }) {
   return diagnostics.record.mock.calls
     .map(([event]) => event as BridgeDiagnostic)
-    .filter((event): event is Extract<BridgeDiagnostic, { type: "rejected" }> =>
-      event.type === "rejected",
+    .filter(
+      (event): event is Extract<BridgeDiagnostic, { type: "rejected" }> =>
+        event.type === "rejected",
     );
 }
 
@@ -319,7 +320,9 @@ describe("Electron adapter rejection diagnostics", () => {
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
     const contents = new UrlWebContents("app://local");
 
-    const rpcHandler = ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").rpc)!;
+    const rpcHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").rpc,
+    )!;
     const response = await rpcHandler(
       { sender: contents, senderFrame: contents.mainFrame },
       {},
@@ -405,7 +408,9 @@ describe("Electron adapter rejection diagnostics", () => {
     const contents = new UrlWebContents("app://local");
     bridge.attach(contents as unknown as WebContents, "main");
 
-    const rpcHandler = ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").rpc)!;
+    const rpcHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").rpc,
+    )!;
     const response = await rpcHandler(
       { sender: contents, senderFrame: contents.mainFrame },
       {

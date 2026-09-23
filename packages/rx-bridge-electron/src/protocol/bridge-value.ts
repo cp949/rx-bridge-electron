@@ -221,9 +221,7 @@ export function parseBridgeValue(
     );
     entries += keys.length;
     if (entries > limits.maxEntries) {
-      limitExceeded(
-        "Bridge value exceeds the configured maximum entry count.",
-      );
+      limitExceeded("Bridge value exceeds the configured maximum entry count.");
     }
     addBytes(keyBytesTotal);
 
