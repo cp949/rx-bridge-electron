@@ -29,6 +29,8 @@
 
 - [x] **RD-008 — 다중 Renderer와 장시간 실행 검증.** 위 변경을 합친 뒤 실제 Electron에서 두 창의 세션·권한·업스트림 공유와 느린 소비자 격리를 확인한다. 반복 구독·해제, reload, 동시 RPC, overflow를 포함한다. **완료 기준:** 단위 및 타입 검사와 실제 Electron 실행 결과를 구분해 기록하고, 검증한 런타임·플랫폼·빌드 형태를 명시한다. **결과:** [docs/verification/rd-008.md](docs/verification/rd-008.md)
 
+- [x] **RD-009 — `authorize` 예외 응답 코드 통일과 overflow 종료 시점 문서화.** RPC 경로는 `authorize` 예외를 adapter까지 다시 던져 `INVALID_ARGUMENT "Invalid bridge request."`로 응답하고, stream 경로는 `INTERNAL`로 응답한다. 앱 권한 콜백의 실패는 요청 형식 오류가 아니므로 두 경로를 `INTERNAL "Internal bridge error."`로 통일하고, 요청이 이미 취소됐으면 `CANCELLED`가 우선한다. 와이어 형식과 오류 코드 집합은 바꾸지 않는다. 함께 `error` 정책 overflow의 종료 통지가 대기 값 전달 뒤에 오고 구독 슬롯은 그 종료 뒤 반환된다는 동작을 문서에 명시한다(동작 변경 없음). 출처: `.scratch/authorize-exception-code`, `.scratch/overflow-slot-timing`. **완료 기준:** RPC `authorize` 동기 throw·비동기 reject가 `INTERNAL`, abort 중 예외가 `CANCELLED`, 예외 뒤 RPC 슬롯 반환, adapter 경유 응답도 `INTERNAL`임을 테스트로 검증하고, ADR·architecture·README가 두 경로의 분류와 overflow 종료 순서를 일치하게 기술한다. **결과:** 완료 조건 전부 충족, 편차 없음. 결정은 [ADR 0011](docs/adr/0011-authorize-exception-internal.md). overflow 문서 보정은 완료·upstream 오류까지 같은 순서로 넓혀 기술했다.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.

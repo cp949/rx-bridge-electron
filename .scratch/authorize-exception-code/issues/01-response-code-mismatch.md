@@ -1,6 +1,6 @@
 # authorize 예외의 응답 코드 불일치 (RPC INVALID_ARGUMENT vs stream INTERNAL)
 
-- Status: open
+- Status: closed (RD-009)
 - 출처: `_works/20260924-05-operational-diagnostics/`(RD-007 운영 진단 작업 중 범위 밖으로 확인, checklist.md
   "범위(제외)" 및 "확정된 설계 결정" 17).
 
@@ -26,3 +26,7 @@ RD-007 작업(DELTA-02, DELTA-03)에서 이 두 경로의 거부 사유를 진�
 
 착수 여부와 우선순위는 아직 정하지 않았다. 착수하기로 결정하면 새 ROADMAP 항목으로 승격할지, 이
 `.scratch/` 항목으로 계속 진행할지 그때 판단한다.
+
+## Comments
+
+- 2026-09-24: RD-009에서 처리. RPC 경로는 예외를 adapter까지 다시 던져 `protocolError`의 `INVALID_ARGUMENT "Invalid bridge request."`가 되고 있었다. 두 경로 모두 `INTERNAL "Internal bridge error."`로 통일했다(취소된 요청은 `CANCELLED` 우선). 근거: [ADR 0011](../../../docs/adr/0011-authorize-exception-internal.md).

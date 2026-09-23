@@ -51,7 +51,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
    - `sender-unauthorized`: server `handshake`/`dispatchRpc`/`controlStream`의 `establish`/`current` 실패(frame·origin 불일치, retired clientId 등). adapter handshake에서 `server.handshake`가 `undefined`인 경우도 server 쪽에서 기록한다(아래 "중복 방지").
    - `authorize-denied`: `authorize`가 false.
    - `version-mismatch`: RPC·stream의 protocolVersion 불일치.
-   - `malformed-envelope`: adapter의 handshake·rpc·cancel·control 4채널 `parse*` 실패만. `dispatchRpc`가 던진 예외(`authorize` 예외)는 기록하지 않는다.
+   - `malformed-envelope`: adapter의 handshake·rpc·cancel·control 4채널 `parse*` 실패만. `dispatchRpc`가 던진 예외는 기록하지 않는다. `authorize` 예외는 [ADR 0011](0011-authorize-exception-internal.md) 이후 `dispatchRpc`가 직접 `INTERNAL`로 응답하며 `rejected` 대상이 아니다.
    - `unknown-operation`: 미등록 RPC·stream key.
    - `invalid-input`: 입력 스키마 검증 실패, subscriptionId 형식 오류.
    - `payload-too-large`: 입력의 `PayloadLimits` 초과(`invalid-input`과 별개 코드).
@@ -63,7 +63,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 
 7. **`payload-too-large` / `invalid-input` 구분**: 메시지 문자열 매칭으로 판정하지 않는다. `src/protocol/bridge-value.ts`에 `PayloadLimitError extends BridgeProtocolError`를 추가해 `maxTotalBytes`·`maxStringBytes`·`maxDepth`·`maxEntries` 초과 지점만 이 서브클래스를 던지고, `rpc-dispatcher.ts`가 `instanceof PayloadLimitError`로 분기한다. 구조 오류(허용되지 않는 값 타입·symbol 키 등)는 기존 `BridgeProtocolError`를 그대로 던져 `invalid-input`으로 분류된다. 공개 `BridgeProtocolError`의 `name`·`code`(`INVALID_ARGUMENT`)·`message` 계약은 바뀌지 않는다 — `PayloadLimitError`는 내부 판정 표식일 뿐이며 `./protocol` 공개 entry에서 export하지 않는다. 요청이 이미 취소된 상태(aborted)면 기존대로 `CANCELLED`를 응답하고 이벤트는 기록하지 않는다.
 
-8. **`rpc-timed-out`과 `outcome`**: Main deadline 만료는 `{ type: "rpc-timed-out", key }` 1회만 기록하고 `rpc-cancelled`는 기록하지 않는다(기존 동작 유지). 순서는 `rpc-timed-out` → (handler가 실제로 끝날 때) `rpc-finished`. `rpc-finished.outcome`은 handler work의 실제 응답이 성공(`RpcResponse`의 성공 타입)이면 `"ok"`, 그 외(도메인 에러, 출력 검증 실패, `authorize` false, 취소, `authorize` 예외로 work가 throw)는 `"error"`다. deadline이 먼저 응답했어도 outcome은 handler 쪽 work의 실제 결과로 판정한다(deadline 응답 시점이 아니다).
+8. **`rpc-timed-out`과 `outcome`**: Main deadline 만료는 `{ type: "rpc-timed-out", key }` 1회만 기록하고 `rpc-cancelled`는 기록하지 않는다(기존 동작 유지). 순서는 `rpc-timed-out` → (handler가 실제로 끝날 때) `rpc-finished`. `rpc-finished.outcome`은 handler work의 실제 응답이 성공(`RpcResponse`의 성공 타입)이면 `"ok"`, 그 외(도메인 에러, 출력 검증 실패, `authorize` false, 취소, `authorize` 예외 — [ADR 0011](0011-authorize-exception-internal.md) 이후 work가 `INTERNAL`로 응답)는 `"error"`다. deadline이 먼저 응답했어도 outcome은 handler 쪽 work의 실제 결과로 판정한다(deadline 응답 시점이 아니다).
 
 9. **수명주기 이벤트**: `session-opened`는 `DocumentSessions.establish`가 새 `DocumentSession`을 만들어 attachment의 현재 세션으로 등록한 직후, `session-closed`는 `#retire`에서 세션이 존재할 때 1회(detach, lifecycle 사건, 같은 webContents의 새 clientId, dispose 모두 이 단일 지점을 거친다 — dispose 반복 호출은 추가 이벤트를 내지 않는다). `subscription-opened`는 `StreamHub.subscribe`가 consumer를 등록한 직후(`subscribed` 전송 전, key 포함), `subscription-closed`는 `#close`에서 `closed`가 처음 true가 될 때(key 포함). `authorize` 대기 중인 구독(`pendingStreams`)은 opened/closed 이벤트 대상이 아니다 — 승인·거부·세션 retire로 최종 확정될 때만 해당 경로의 이벤트가 발생한다.
 
@@ -96,7 +96,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 
 ## 범위 밖
 
-Renderer 진단(후속: `.scratch/renderer-diagnostics/issues/`), `authorize` 예외의 응답 코드 불일치(RPC는 `INVALID_ARGUMENT`, stream은 `INTERNAL`) 수정(후속: `.scratch/authorize-exception-code/issues/`), 누적 카운터, `stream-queue` 기록 빈도 변경, 워터마크 이하 subscriptionId·중복 구독의 조용한 무시에 이벤트 추가, RPC 시작 이벤트.
+Renderer 진단(후속: `.scratch/renderer-diagnostics/issues/`), `authorize` 예외의 응답 코드 불일치(RPC는 `INVALID_ARGUMENT`, stream은 `INTERNAL`) 수정(후속으로 [ADR 0011](0011-authorize-exception-internal.md)에서 둘 다 `INTERNAL`로 통일), 누적 카운터, `stream-queue` 기록 빈도 변경, 워터마크 이하 subscriptionId·중복 구독의 조용한 무시에 이벤트 추가, RPC 시작 이벤트.
 
 ## 이전(migration)
 
