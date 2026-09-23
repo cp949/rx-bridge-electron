@@ -33,13 +33,15 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 
 이 소유 단위는 창이 아니라 렌더러 문서다. 한 창에서 reload/navigation이 발생하면 이전 문서에서 시작한 비동기 작업이 새 문서로 넘어가지 않아야 한다.
 
+`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `undefined`, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
+
 ## RPC와 스트림 계약
 
 - **RPC**: 하나의 clone-safe 입력과 결과를 주고받는다. `AbortSignal`과 `timeoutMs`는 입력값과 분리된 호출 옵션이며 취소·timeout·응답 중 하나만 최종 결과가 된다.
 - **State**: 현재값을 나타낸다. Renderer의 `RemoteState`는 `uninitialized`, `connecting`, `current`, `stale` snapshot을 제공한다. 마지막 로컬 구독자가 해제된 뒤 값이 있었으면 snapshot은 `stale`가 되며, 새 구독 generation에 예전 값을 현재값처럼 재생하지 않는다. `undefined`도 유효한 값이다. 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 받는다. 아직 값을 받지 못한 `connecting` 상태에서는 첫 값을 기다린다.
 - **Event**: 과거 값을 재생하지 않는 발생 스트림이다. 명시적인 buffer capacity와 `error`, `drop-oldest`, `drop-newest` 중 overflow 정책을 계약에 둔다. 구독 확인 이후 sequence와 acknowledgement로 전송을 제어한다.
 - 같은 Renderer 문서의 여러 로컬 구독자는 하나의 local generation을 공유한다. Main의 non-scoped State/Event source는 operation key별로 활성 consumer 사이에서 공유한다. 문서별 Event source는 각 구독 context로 생성한다. 마지막 consumer가 나가면 더는 쓰지 않는 upstream을 정리한다.
-- Renderer 공개 호출은 계층형 `rpc`/`state`/`event` 접두사 없이 평면 `api.<domain path>.<operation>`을 유지한다. 루트 API는 `dispose`를 예약 도메인 이름으로 두고 `api.dispose()`를 `api[Symbol.dispose]`와 같은 함수로 노출한다. 비교와 근거는 [ADR 0005](adr/0005-renderer-api-shape.md)에 있다.
+- Renderer 공개 호출은 계층형 `rpc`/`state`/`event` 접두사 없이 평면 `api.<domain path>.<operation>`을 유지한다. 루트 API는 `dispose`를 예약 도메인 이름으로 두고 `api.dispose()`를 `api[Symbol.dispose]`와 같은 함수로 노출한다. 비교와 근거는 [ADR 0005](adr/0005-renderer-api-shape.md)에 있다. `api.dispose()`는 되돌릴 수 없는 종료다: 진행 중인 RPC는 로컬에서 즉시 `CANCELLED`로 확정되고(Main에는 best-effort cancel을 보낸다), 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`된다. 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝난다. 의미와 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
 
 ## Payload 및 제한
 
