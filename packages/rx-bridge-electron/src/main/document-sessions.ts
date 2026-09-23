@@ -16,12 +16,18 @@ interface SessionState {
   readonly controller: AbortController;
   readonly usedStreamIds: Set<string>;
   readonly pendingStreams: Map<string, AbortController>;
+  readonly subscriptions: Set<string>;
   readonly active: Map<
     string,
     { readonly key: string; readonly controller: AbortController }
   >;
   runningRpc: number;
 }
+
+export type BeginStreamResult =
+  | { readonly kind: "ok"; readonly controller: AbortController }
+  | { readonly kind: "duplicate" }
+  | { readonly kind: "exhausted" };
 
 interface Attachment {
   readonly target: AttachedTarget;
@@ -95,6 +101,7 @@ export class DocumentSessions {
       controller,
       usedStreamIds: new Set(),
       pendingStreams: new Map(),
+      subscriptions: new Set(),
       active: new Map(),
       runningRpc: 0,
     });
@@ -165,16 +172,22 @@ export class DocumentSessions {
     this.#diagnostics?.record({ type: "rpc-cancelled", key: work.key });
   }
 
-  public beginStream(
-    session: DocumentSession,
-    id: string,
-  ): AbortController | undefined {
+  public beginStream(session: DocumentSession, id: string): BeginStreamResult {
     const state = this.#states.get(session);
-    if (state === undefined || state.usedStreamIds.has(id)) return undefined;
+    if (state === undefined || state.usedStreamIds.has(id))
+      return { kind: "duplicate" };
     state.usedStreamIds.add(id);
+    if (state.subscriptions.size >= this.#resourceLimits.maxSubscriptions)
+      return { kind: "exhausted" };
+    state.subscriptions.add(id);
     const controller = new AbortController();
     state.pendingStreams.set(id, controller);
-    return controller;
+    return { kind: "ok", controller };
+  }
+
+  public releaseStream(session: DocumentSession, id: string): void {
+    const state = this.#states.get(session);
+    state?.subscriptions.delete(id);
   }
 
   public finishStream(
@@ -198,6 +211,7 @@ export class DocumentSessions {
     const controller = state?.pendingStreams.get(id);
     if (controller === undefined) return;
     state?.pendingStreams.delete(id);
+    this.releaseStream(session, id);
     controller.abort();
   }
 

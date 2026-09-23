@@ -212,8 +212,22 @@ export function createBridgeServer<Contract extends ComposedContract>(
       const session = sessions.establish(sender, command.clientId);
       if (session === undefined) return;
       const id = keyOf(sender, command.clientId, command.subscriptionId);
-      const controller = sessions.beginStream(session, id);
-      if (controller === undefined) return;
+      const begin = sessions.beginStream(session, id);
+      if (begin.kind === "duplicate") return;
+      if (begin.kind === "exhausted") {
+        streams.reject(
+          sender,
+          command,
+          send,
+          {
+            code: "RESOURCE_EXHAUSTED",
+            message: "Too many bridge subscriptions.",
+          },
+          session.signal,
+        );
+        return;
+      }
+      const controller = begin.controller;
       const context: BridgeContext = {
         requestId: command.subscriptionId,
         clientId: command.clientId,
@@ -242,13 +256,16 @@ export function createBridgeServer<Contract extends ComposedContract>(
             },
             session.signal,
           );
+        sessions.releaseStream(session, id);
         return;
       }
       if (
         !sessions.finishStream(session, id, controller) ||
         sessions.current(sender, command.clientId) !== session
-      )
+      ) {
+        sessions.releaseStream(session, id);
         return;
+      }
       if (!allowed) {
         streams.reject(
           sender,
@@ -260,6 +277,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
           },
           session.signal,
         );
+        sessions.releaseStream(session, id);
         return;
       }
       streams.subscribe(
@@ -269,6 +287,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
         command,
         send,
         session.signal,
+        () => sessions.releaseStream(session, id),
       );
     },
     dispose(): void {

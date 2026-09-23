@@ -58,6 +58,7 @@ interface Consumer {
   readonly controller: AbortController;
   readonly sessionSignal: AbortSignal;
   readonly onSessionAbort: () => void;
+  readonly onClose: () => void;
   readonly shared?: SharedSource;
   sourceDetached: boolean;
   own?: Subscription;
@@ -133,6 +134,7 @@ export class StreamHub {
     command: Extract<WireStreamCommand, { type: "subscribe" }>,
     send: StreamSender,
     sessionSignal: AbortSignal,
+    onClose: () => void,
   ): void {
     const registration = this.#registrations.get(command.key);
     if (registration === undefined) {
@@ -146,10 +148,14 @@ export class StreamHub {
         },
         sessionSignal,
       );
+      onClose();
       return;
     }
     const id = this.#id(sender, clientId, command.subscriptionId);
-    if (!this.#reserve(id, sessionSignal)) return;
+    if (!this.#reserve(id, sessionSignal)) {
+      onClose();
+      return;
+    }
     const controller = new AbortController();
     const consumer: Consumer = {
       id,
@@ -162,6 +168,7 @@ export class StreamHub {
       controller,
       sessionSignal,
       onSessionAbort: () => this.#close(consumer),
+      onClose,
       sourceDetached: false,
       pendingState: undefined,
       hasPendingState: false,
@@ -510,5 +517,6 @@ export class StreamHub {
     this.#consumers.delete(consumer.id);
     consumer.controller.abort();
     this.#detachSource(consumer);
+    consumer.onClose();
   }
 }
