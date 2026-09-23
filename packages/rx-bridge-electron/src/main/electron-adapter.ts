@@ -1,0 +1,219 @@
+import type {
+  IpcMain,
+  IpcMainEvent,
+  IpcMainInvokeEvent,
+  WebContents,
+  WebFrameMain,
+} from "electron";
+
+import {
+  BridgeProtocolError,
+  parseHandshakeRequest,
+  parseWireCancelRequest,
+  parseWireRpcRequest,
+  parseWireStreamCommand,
+  type RpcResponse,
+  type StreamMessage,
+} from "../protocol/index.js";
+import type { StreamSender } from "./stream-hub.js";
+import type { StreamBridgeServer } from "./create-bridge-server.js";
+import type { AttachedTarget, SenderIdentity } from "./types.js";
+
+const limits = { maxDepth: 32, maxEntries: 10_000, maxStringBytes: 1_000_000 };
+
+export interface ElectronBridgeChannels {
+  readonly handshake: string;
+  readonly rpc: string;
+  readonly cancel: string;
+  readonly control: string;
+  readonly stream: string;
+}
+
+export function ELECTRON_BRIDGE_CHANNELS(
+  namespace: string,
+): ElectronBridgeChannels {
+  const prefix = `rx-bridge-electron:v1:${namespace}`;
+  return {
+    handshake: `${prefix}:handshake`,
+    rpc: `${prefix}:rpc`,
+    cancel: `${prefix}:cancel`,
+    control: `${prefix}:control`,
+    stream: `${prefix}:stream`,
+  };
+}
+
+export interface BindElectronBridgeOptions {
+  readonly ipcMain: IpcMain;
+  readonly server: StreamBridgeServer;
+  readonly namespace: string;
+  readonly allowedOrigins: readonly string[];
+}
+
+function originOf(frame: WebFrameMain): string {
+  const url = new URL(frame.url);
+  return url.origin === "null" ? `${url.protocol}//${url.host}` : url.origin;
+}
+
+function senderIdentity(
+  event: IpcMainEvent | IpcMainInvokeEvent,
+): SenderIdentity {
+  const frame = event.senderFrame;
+  if (frame === null) {
+    return {
+      webContentsId: event.sender.id,
+      frameId: -1,
+      isMainFrame: false,
+      origin: "invalid://",
+    };
+  }
+  return {
+    webContentsId: event.sender.id,
+    frameId: frame.routingId,
+    isMainFrame: event.sender.mainFrame === frame,
+    origin: originOf(frame),
+  };
+}
+
+function protocolError(value: unknown): RpcResponse {
+  const record = value !== null && typeof value === "object" ? value : {};
+  const clientValue = (record as Record<string, unknown>).clientId;
+  const requestValue = (record as Record<string, unknown>).requestId;
+  const clientId =
+    typeof clientValue === "string" ? clientValue : "invalid-client";
+  const requestId =
+    typeof requestValue === "string" ? requestValue : "invalid-request";
+  return {
+    protocolVersion: 1,
+    clientId,
+    requestId,
+    type: "error",
+    error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
+  };
+}
+
+function targetFor(
+  contents: WebContents,
+  role: string,
+  allowedOrigins: readonly string[],
+): AttachedTarget {
+  return {
+    webContentsId: contents.id,
+    role,
+    isCurrentMainFrame: (sender) =>
+      sender.webContentsId === contents.id &&
+      sender.isMainFrame &&
+      contents.mainFrame.routingId === sender.frameId,
+    isAllowedOrigin: (origin) => allowedOrigins.includes(origin),
+    onLifecycle(listener) {
+      const navigation = (
+        _event: Electron.Event,
+        _url: string,
+        _inPlace: boolean,
+        isMainFrame: boolean,
+      ) => {
+        if (isMainFrame) listener("main-frame-navigation");
+      };
+      const gone = () => listener("render-process-gone");
+      const destroyed = () => listener("destroyed");
+      contents.on("did-start-navigation", navigation);
+      contents.on("render-process-gone", gone);
+      contents.once("destroyed", destroyed);
+      return () => {
+        contents.removeListener("did-start-navigation", navigation);
+        contents.removeListener("render-process-gone", gone);
+        contents.removeListener("destroyed", destroyed);
+      };
+    },
+  };
+}
+
+/** Binds fixed Electron channels; renderer code receives no Electron objects. */
+export function bindElectronBridge(options: BindElectronBridgeOptions): {
+  readonly channels: ElectronBridgeChannels;
+  attach(contents: WebContents, role: string): () => void;
+  dispose(): void;
+} {
+  const channels = ELECTRON_BRIDGE_CHANNELS(options.namespace);
+  const attached = new Map<number, () => void>();
+  const streamSender =
+    (event: IpcMainEvent): StreamSender =>
+    (message: StreamMessage) => {
+      event.senderFrame?.send(channels.stream, message);
+    };
+  options.ipcMain.handle(channels.handshake, (event, value: unknown) => {
+    try {
+      const request = parseHandshakeRequest(value, limits);
+      const identity = senderIdentity(event);
+      if (
+        !identity.isMainFrame ||
+        !options.allowedOrigins.includes(identity.origin)
+      ) {
+        throw new BridgeProtocolError(
+          "FORBIDDEN",
+          "Bridge sender is not authorized.",
+        );
+      }
+      const response = options.server.handshake(identity, request.clientId);
+      if (response === undefined) {
+        throw new BridgeProtocolError(
+          "FORBIDDEN",
+          "Bridge sender is not authorized.",
+        );
+      }
+      return response;
+    } catch {
+      return protocolError(value);
+    }
+  });
+  options.ipcMain.handle(channels.rpc, async (event, value: unknown) => {
+    try {
+      return await options.server.dispatchRpc(
+        senderIdentity(event),
+        parseWireRpcRequest(value, limits),
+      );
+    } catch {
+      return protocolError(value);
+    }
+  });
+  options.ipcMain.on(channels.cancel, (event, value: unknown) => {
+    try {
+      options.server.cancel(
+        senderIdentity(event),
+        parseWireCancelRequest(value, limits),
+      );
+    } catch {}
+  });
+  options.ipcMain.on(channels.control, (event, value: unknown) => {
+    try {
+      void options.server.controlStream(
+        senderIdentity(event),
+        parseWireStreamCommand(value, limits),
+        streamSender(event),
+      );
+    } catch {}
+  });
+  return {
+    channels,
+    attach(contents, role) {
+      const prior = attached.get(contents.id);
+      prior?.();
+      const detach = options.server.attach(
+        targetFor(contents, role, options.allowedOrigins),
+      );
+      attached.set(contents.id, detach);
+      return () => {
+        attached.delete(contents.id);
+        detach();
+      };
+    },
+    dispose() {
+      for (const detach of attached.values()) detach();
+      attached.clear();
+      options.ipcMain.removeHandler(channels.handshake);
+      options.ipcMain.removeHandler(channels.rpc);
+      options.ipcMain.removeAllListeners(channels.cancel);
+      options.ipcMain.removeAllListeners(channels.control);
+      options.server.dispose();
+    },
+  };
+}

@@ -1,0 +1,47 @@
+{
+  "name": "@cp949/rx-bridge-electron",
+  "version": "0.0.0",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./protocol": "./dist/protocol/index.js",
+    "./contract": "./dist/contract/index.js",
+    "./renderer": "./dist/renderer/index.js",
+    "./main": "./dist/main/index.js",
+    "./preload": "./dist/preload/index.js"
+  },
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check-types": "tsc --noEmit",
+    "test": "vitest run",
+    "lint": "eslint .",
+    "verify": "pnpm check-types && pnpm test && pnpm build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@vitest/coverage-v8": "^5.0.1",
+    "electron": "^44.4.5",
+    "rxjs": "^7.8.2",
+    "tsup": "^8.5.1",
+    "vitest": "^5.0.1"
+  },
+  "peerDependencies": {
+    "electron": ">=29",
+    "rxjs": "^7.8.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cp949/rx-bridge-electron.git",
+    "directory": "packages/rx-bridge-electron"
+  },
+  "homepage": "https://github.com/cp949/rx-bridge-electron#readme",
+  "bugs": {
+    "url": "https://github.com/cp949/rx-bridge-electron/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

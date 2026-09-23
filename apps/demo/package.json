@@ -1,0 +1,37 @@
+{
+  "name": "demo",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "check-types": "tsc --noEmit",
+    "test": "pnpm test:unit && pnpm test:electron",
+    "test:unit": "vitest run --environment jsdom --exclude test/demo.electron.test.ts",
+    "test:electron": "pnpm build && vitest run --testTimeout 30000 test/demo.electron.test.ts",
+    "test:electron:packaged": "DEMO_PACKAGED_EXECUTABLE=release/linux-unpacked/demo pnpm exec vitest run --testTimeout 30000 test/demo.electron.test.ts",
+    "lint": "eslint .",
+    "package": "pnpm build && electron-builder --config electron-builder.yml",
+    "verify": "pnpm check-types && pnpm test && pnpm build"
+  },
+  "dependencies": {
+    "@cp949/rx-bridge-electron": "workspace:*",
+    "react": "^19.3.0",
+    "react-dom": "^19.3.0",
+    "rxjs": "^7.8.2",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "@testing-library/react": "^16.3.3",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "electron": "^44.4.5",
+    "electron-builder": "^26.15.3",
+    "electron-vite": "^5.0.0",
+    "jsdom": "^30.1.1",
+    "vitest": "^5.0.1"
+  }
+}

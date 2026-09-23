@@ -1,0 +1,440 @@
+import type { Observable } from "rxjs";
+import { afterEach, describe, expect, expectTypeOf, test, vi } from "vitest";
+
+import {
+  RemoteError,
+  RpcClient,
+  createRendererApi,
+  createOpaqueId,
+  type CallOptions,
+  type RendererApi,
+} from "../../src/renderer/index.js";
+import { FakeTransport, deferred } from "./fake-transport.js";
+
+interface AppBridge {
+  readonly hardware: {
+    connect(
+      input: { readonly deviceId: string },
+      options?: CallOptions,
+    ): Promise<{ readonly connected: boolean }>;
+  };
+}
+
+interface InferredBridgeShape {
+  readonly hardware: {
+    connect(input: { readonly deviceId: string }): Promise<boolean>;
+    disconnect(): Promise<boolean>;
+    readonly fault: Observable<string>;
+  };
+}
+
+function success(
+  requestId: string,
+  result: { readonly connected: boolean } = { connected: true },
+) {
+  return {
+    protocolVersion: 1 as const,
+    clientId: "client-1",
+    type: "success" as const,
+    requestId,
+    result,
+  };
+}
+
+afterEach(() => {
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
+
+describe("renderer handshake and API proxy", () => {
+  test("adds CallOptions only to inferred RPC methods", () => {
+    type Api = RendererApi<InferredBridgeShape>;
+
+    expectTypeOf<Api["hardware"]["connect"]>().toEqualTypeOf<
+      (
+        input: { readonly deviceId: string },
+        options?: CallOptions,
+      ) => Promise<boolean>
+    >();
+    expectTypeOf<Api["hardware"]["disconnect"]>().toEqualTypeOf<
+      (input?: undefined, options?: CallOptions) => Promise<boolean>
+    >();
+    expectTypeOf<Api["hardware"]["fault"]>().toEqualTypeOf<
+      Observable<string>
+    >();
+  });
+
+  test("waits for the handshake before exposing manifest paths", async () => {
+    const transport = new FakeTransport();
+    const handshake = deferred<unknown>();
+    transport.handshake = handshake.promise;
+
+    let settled = false;
+    const apiPromise = createRendererApi<AppBridge>(transport).then((api) => {
+      settled = true;
+      return api;
+    });
+
+    await Promise.resolve();
+    expect(transport.connectCalls).toBe(1);
+    expect(settled).toBe(false);
+
+    handshake.resolve({
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: { rpc: ["rpc:hardware/connect"], state: [], event: [] },
+    });
+    await expect(apiPromise).resolves.toHaveProperty("hardware.connect");
+  });
+
+  test.each([
+    ["missing manifest", { protocolVersion: 1, clientId: "client-1" }],
+    [
+      "unsupported protocol",
+      {
+        protocolVersion: 2,
+        clientId: "client-1",
+        manifest: { rpc: [], state: [], event: [] },
+      },
+    ],
+    [
+      "unknown manifest field",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: { rpc: [], state: [], event: [], command: [] },
+      },
+    ],
+    [
+      "non-canonical entry",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: { rpc: ["hardware.connect"], state: [], event: [] },
+      },
+    ],
+    [
+      "leaf namespace collision",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: {
+          rpc: ["rpc:hardware/status", "rpc:hardware/status/read"],
+          state: [],
+          event: [],
+        },
+      },
+    ],
+  ])(
+    "rejects a malformed or unsupported handshake: %s",
+    async (_label, value) => {
+      const transport = new FakeTransport();
+      transport.handshake = Promise.resolve(value);
+
+      await expect(
+        createRendererApi<AppBridge>(transport),
+      ).rejects.toMatchObject({
+        code: "INTERNAL",
+      });
+    },
+  );
+
+  test("maps a handshake transport failure to a safe INTERNAL error", async () => {
+    const transport = new FakeTransport();
+    transport.handshake = Promise.reject(
+      new Error("secret absolute path from preload"),
+    );
+
+    await expect(createRendererApi<AppBridge>(transport)).rejects.toMatchObject(
+      {
+        code: "INTERNAL",
+        message: "Bridge handshake failed.",
+      },
+    );
+  });
+
+  test("exposes only manifest entries and dispatches their canonical RPC keys", async () => {
+    const transport = new FakeTransport();
+    const api = await createRendererApi<AppBridge>(transport);
+
+    expect("connect" in api.hardware).toBe(true);
+    expect("missing" in api.hardware).toBe(false);
+    expect(
+      (api.hardware as unknown as { readonly then?: unknown }).then,
+    ).toBeUndefined();
+
+    const resultPromise = api.hardware.connect({ deviceId: "demo" });
+    const invocation = transport.invocations[0];
+    expect(invocation).toMatchObject({
+      key: "rpc:hardware/connect",
+      input: { deviceId: "demo" },
+    });
+    transport.resolveInvocation(0, success(invocation!.requestId));
+    await expect(resultPromise).resolves.toEqual({ connected: true });
+  });
+
+  test("keeps CallOptions separate from the one serializable RPC input", async () => {
+    const transport = new FakeTransport();
+    const api = await createRendererApi<AppBridge>(transport);
+    const controller = new AbortController();
+
+    const resultPromise = api.hardware.connect(
+      { deviceId: "demo" },
+      { signal: controller.signal, timeoutMs: Number.POSITIVE_INFINITY },
+    );
+    expect(transport.invocations[0]?.input).toEqual({ deviceId: "demo" });
+    transport.resolveInvocation(
+      0,
+      success(transport.invocations[0]!.requestId),
+    );
+    await resultPromise;
+  });
+});
+
+describe("renderer RPC races", () => {
+  test("settles once when response and abort fire in the same turn in either order", async () => {
+    for (const first of ["response", "abort"] as const) {
+      const transport = new FakeTransport();
+      const client = new RpcClient(transport, {
+        protocolVersion: 1,
+        clientId: "client-1",
+      });
+      const controller = new AbortController();
+      const settlements: string[] = [];
+      const resultPromise = client.call("rpc:hardware/connect", undefined, {
+        signal: controller.signal,
+        timeoutMs: Number.POSITIVE_INFINITY,
+      });
+      const requestId = transport.invocations[0]!.requestId;
+      const observed = resultPromise.then(
+        () => settlements.push("response"),
+        (error: RemoteError) => settlements.push(error.code),
+      );
+
+      if (first === "response") {
+        transport.resolveInvocation(0, success(requestId));
+        await Promise.resolve();
+        controller.abort();
+      } else {
+        controller.abort();
+        transport.invocationResults[0]!.reject(
+          new Error("losing transport response"),
+        );
+      }
+
+      await observed;
+      await Promise.resolve();
+
+      expect(settlements).toEqual([
+        first === "response" ? "response" : "CANCELLED",
+      ]);
+      expect(transport.cancellations).toEqual(
+        first === "response" ? [] : [requestId],
+      );
+      expect(transport.cancellations.length).toBeLessThanOrEqual(1);
+    }
+  });
+
+  test("settles once when response and timeout fire in the same turn in either order", async () => {
+    vi.useFakeTimers();
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout");
+
+    for (const first of ["response", "timeout"] as const) {
+      const transport = new FakeTransport();
+      const client = new RpcClient(transport, {
+        protocolVersion: 1,
+        clientId: "client-1",
+      });
+      const settlements: string[] = [];
+
+      const resultPromise = client.call("rpc:hardware/connect", undefined, {
+        timeoutMs: 25,
+      });
+      const requestId = transport.invocations[0]!.requestId;
+      const timeoutCallback = setTimeoutSpy.mock.calls.at(-1)?.[0];
+      if (typeof timeoutCallback !== "function") {
+        throw new Error("RPC timeout callback was not registered.");
+      }
+      const observed = resultPromise.then(
+        () => settlements.push("response"),
+        (error: RemoteError) => settlements.push(error.code),
+      );
+
+      if (first === "response") {
+        transport.resolveInvocation(0, success(requestId));
+        await Promise.resolve();
+        timeoutCallback();
+      } else {
+        timeoutCallback();
+        transport.invocationResults[0]!.reject(
+          new Error("losing transport response"),
+        );
+      }
+
+      await observed;
+      await Promise.resolve();
+
+      expect(settlements).toEqual([
+        first === "response" ? "response" : "DEADLINE_EXCEEDED",
+      ]);
+      expect(transport.cancellations).toEqual(
+        first === "response" ? [] : [requestId],
+      );
+      expect(transport.cancellations.length).toBeLessThanOrEqual(1);
+      expect(vi.getTimerCount()).toBe(0);
+    }
+  });
+
+  test("rejects an already-aborted call without sending or cancelling", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(
+      client.call(
+        "rpc:hardware/connect",
+        { deviceId: "demo" },
+        {
+          signal: controller.signal,
+        },
+      ),
+    ).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(transport.invocations).toHaveLength(0);
+    expect(transport.cancellations).toHaveLength(0);
+  });
+
+  test("keeps the response when it wins the response-abort race", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    const controller = new AbortController();
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      signal: controller.signal,
+    });
+    transport.resolveInvocation(
+      0,
+      success(transport.invocations[0]!.requestId),
+    );
+    await expect(resultPromise).resolves.toEqual({ connected: true });
+    controller.abort();
+
+    expect(transport.cancellations).toHaveLength(0);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+  });
+
+  test("cancels exactly once when abort wins and discards the late response", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    const controller = new AbortController();
+    const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      signal: controller.signal,
+    });
+    const requestId = transport.invocations[0]!.requestId;
+    controller.abort();
+    controller.abort();
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(transport.cancellations).toEqual([requestId]);
+    expect(removeSpy).toHaveBeenCalledTimes(1);
+
+    transport.invocationResults[0]!.reject(new Error("late transport failure"));
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  test("times out through the cancellation path and clears the timer", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      timeoutMs: 25,
+    });
+    const requestId = transport.invocations[0]!.requestId;
+    const rejection = expect(resultPromise).rejects.toMatchObject({
+      code: "DEADLINE_EXCEEDED",
+    });
+    await vi.advanceTimersByTimeAsync(25);
+
+    await rejection;
+    expect(transport.cancellations).toEqual([requestId]);
+    expect(vi.getTimerCount()).toBe(0);
+
+    transport.resolveInvocation(0, success(requestId));
+    await Promise.resolve();
+  });
+
+  test("converts validated remote errors and maps malformed responses to INTERNAL", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    const remotePromise = client.call("rpc:hardware/connect", undefined);
+    const remoteRequestId = transport.invocations[0]!.requestId;
+    transport.resolveInvocation(0, {
+      protocolVersion: 1,
+      clientId: "client-1",
+      type: "error",
+      error: {
+        code: "DEVICE_BUSY",
+        message: "Device is busy.",
+        details: { retryable: true },
+      },
+    });
+    await expect(remotePromise).rejects.toEqual(
+      expect.objectContaining({
+        name: "RemoteError",
+        code: "DEVICE_BUSY",
+        details: { retryable: true },
+      }),
+    );
+
+    const malformedPromise = client.call("rpc:hardware/connect", undefined);
+    transport.invocationResults[1]!.resolve({
+      protocolVersion: 1,
+      clientId: "client-1",
+      type: "success",
+      requestId: remoteRequestId,
+      result: { connected: true },
+    });
+    await expect(malformedPromise).rejects.toMatchObject({ code: "INTERNAL" });
+  });
+
+  test("generates monotonically unique opaque IDs", () => {
+    const first = createOpaqueId("request");
+    const second = createOpaqueId("request");
+
+    expect(first).not.toBe(second);
+    expect(first).not.toMatch(/^request-?1$/);
+  });
+
+  test("RemoteError exposes only safe protocol fields", () => {
+    const error = new RemoteError("FORBIDDEN", "Denied", { reason: "policy" });
+
+    expect(error).toEqual(
+      expect.objectContaining({
+        name: "RemoteError",
+        code: "FORBIDDEN",
+        message: "Denied",
+        details: { reason: "policy" },
+      }),
+    );
+    expect("cause" in error).toBe(false);
+  });
+});

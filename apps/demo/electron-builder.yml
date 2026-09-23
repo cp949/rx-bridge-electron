@@ -1,0 +1,7 @@
+appId: com.example.rxbridge.demo
+productName: Virtual Device Monitor
+directories:
+  output: release
+files:
+  - out/**
+  - package.json
