@@ -203,10 +203,6 @@ describe("renderer handshake and API proxy", () => {
     expect("dispose" in api).toBe(true);
     expect(Object.keys(api)).toEqual(["hardware"]);
     expect(api.hardware.dispose).not.toBe(api.dispose);
-    expect(() => {
-      api.dispose();
-      api.dispose();
-    }).not.toThrow();
 
     const resultPromise = api.hardware.dispose();
     const invocation = transport.invocations[0];
@@ -216,6 +212,17 @@ describe("renderer handshake and API proxy", () => {
       result: "disposed",
     });
     await expect(resultPromise).resolves.toBe("disposed");
+
+    expect(() => {
+      api.dispose();
+      api.dispose();
+    }).not.toThrow();
+
+    const invocationCountAfterDispose = transport.invocations.length;
+    await expect(api.hardware.dispose()).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+    expect(transport.invocations).toHaveLength(invocationCountAfterDispose);
   });
 
   test("keeps CallOptions separate from the one serializable RPC input", async () => {

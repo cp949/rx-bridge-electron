@@ -7,7 +7,7 @@ import {
   type StreamMessage,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
-import { RemoteError } from "./remote-error.js";
+import { createDisposedError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
 const envelopeLimits: PayloadLimits = {
@@ -67,7 +67,7 @@ export class StreamMultiplexer implements Disposable {
 
     if (this.#disposed) {
       this.#generations.delete(subscriptionId);
-      handlers.error(internal("Renderer stream client is disposed."));
+      handlers.error(createDisposedError());
       return;
     }
 

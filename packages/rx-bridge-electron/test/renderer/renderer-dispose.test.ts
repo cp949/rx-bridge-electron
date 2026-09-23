@@ -1,0 +1,320 @@
+import type { Observable } from "rxjs";
+import { describe, expect, test } from "vitest";
+
+import type { RemoteState } from "../../src/contract/index.js";
+import {
+  createRendererApi,
+  RemoteError,
+  type RendererApi,
+} from "../../src/renderer/index.js";
+import type {
+  RendererStreamCommand,
+  StreamMessage,
+} from "../../src/protocol/index.js";
+import { FakeTransport } from "./fake-transport.js";
+
+interface AppBridge {
+  readonly hardware: {
+    connect(): Promise<{ readonly connected: boolean }>;
+    readonly status$: RemoteState<string | undefined>;
+    readonly log$: Observable<string>;
+  };
+}
+
+type StreamMessageBody = StreamMessage extends infer Message
+  ? Message extends StreamMessage
+    ? Omit<Message, "protocolVersion" | "clientId" | "subscriptionId">
+    : never
+  : never;
+
+type SubscribeCommand = Extract<
+  RendererStreamCommand,
+  { readonly type: "subscribe" }
+>;
+
+function bridgeTransport(): FakeTransport {
+  const transport = new FakeTransport();
+  transport.handshake = Promise.resolve({
+    protocolVersion: 1,
+    clientId: "client-1",
+    manifest: {
+      rpc: ["rpc:hardware/connect"],
+      state: ["state:hardware/status$"],
+      event: ["event:hardware/log$"],
+    },
+  });
+  return transport;
+}
+
+function message(
+  subscriptionId: string,
+  value: StreamMessageBody,
+): StreamMessage {
+  return {
+    protocolVersion: 1,
+    clientId: "client-1",
+    subscriptionId,
+    ...value,
+  } as StreamMessage;
+}
+
+function subscribeCommands(transport: FakeTransport): SubscribeCommand[] {
+  return transport.controls.filter(
+    (command): command is SubscribeCommand => command.type === "subscribe",
+  );
+}
+
+function subscriptionIdFor(transport: FakeTransport, key: string): string {
+  const command = subscribeCommands(transport).find(
+    (candidate) => candidate.key === key,
+  );
+  if (command === undefined) {
+    throw new Error(`Missing subscribe command for ${key}.`);
+  }
+  return command.subscriptionId;
+}
+
+async function setup(): Promise<{
+  readonly transport: FakeTransport;
+  readonly api: RendererApi<AppBridge>;
+}> {
+  const transport = bridgeTransport();
+  const api = await createRendererApi<AppBridge>(transport);
+  return { transport, api };
+}
+
+describe("api.dispose() root shutdown", () => {
+  test("진행 중 RPC를 CANCELLED로 확정하고 활성 State·Event 구독을 complete한다", async () => {
+    const { transport, api } = await setup();
+
+    const rpcPromise = api.hardware.connect();
+    const invocation = transport.invocations[0]!;
+
+    let stateErrored: unknown;
+    let stateCompleted = 0;
+    const stateValues: Array<string | undefined> = [];
+    api.hardware.status$.subscribe({
+      next: (value) => stateValues.push(value),
+      error: (error) => {
+        stateErrored = error;
+      },
+      complete: () => {
+        stateCompleted += 1;
+      },
+    });
+    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+    transport.emitStream(
+      message(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+    );
+
+    let eventErrored: unknown;
+    let eventCompleted = 0;
+    const eventValues: string[] = [];
+    api.hardware.log$.subscribe({
+      next: (value) => eventValues.push(value),
+      error: (error) => {
+        eventErrored = error;
+      },
+      complete: () => {
+        eventCompleted += 1;
+      },
+    });
+    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
+    transport.emitStream(
+      message(eventId, { type: "subscribed", sequence: 0 }),
+    );
+
+    api.dispose();
+
+    await expect(rpcPromise).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(transport.cancellations).toEqual([invocation.requestId]);
+
+    const unsubscribes = transport.controls.filter(
+      (command) => command.type === "unsubscribe",
+    );
+    expect(unsubscribes).toHaveLength(2);
+    expect(
+      unsubscribes.filter(
+        (command) =>
+          command.type === "unsubscribe" && command.subscriptionId === stateId,
+      ),
+    ).toHaveLength(1);
+    expect(
+      unsubscribes.filter(
+        (command) =>
+          command.type === "unsubscribe" && command.subscriptionId === eventId,
+      ),
+    ).toHaveLength(1);
+
+    expect(stateCompleted).toBe(1);
+    expect(eventCompleted).toBe(1);
+    expect(stateErrored).toBeUndefined();
+    expect(eventErrored).toBeUndefined();
+
+    expect(api.hardware.status$.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "connected",
+    });
+
+    expect(transport.streamListeners.size).toBe(0);
+  });
+
+  test("반복 dispose는 no-op이다", async () => {
+    const { transport, api } = await setup();
+
+    api.hardware.connect().catch(() => {});
+    api.hardware.status$.subscribe({ error: () => {} });
+    api.hardware.log$.subscribe({ error: () => {} });
+
+    api.dispose();
+    const controlsAfterFirst = transport.controls.length;
+    const cancellationsAfterFirst = transport.cancellations.length;
+
+    expect(() => {
+      api.dispose();
+      api.dispose();
+      api[Symbol.dispose]();
+    }).not.toThrow();
+
+    expect(transport.controls).toHaveLength(controlsAfterFirst);
+    expect(transport.cancellations).toHaveLength(cancellationsAfterFirst);
+  });
+
+  test("재진입: complete 콜백 안에서 dispose·RPC·subscribe를 호출해도 안전하다", async () => {
+    const { transport, api } = await setup();
+
+    const rpcPromise = api.hardware.connect();
+    const invocation = transport.invocations[0]!;
+    const invocationCountBeforeDispose = transport.invocations.length;
+
+    let reentrantRpcPromise: Promise<unknown> | undefined;
+    let reentrantStateError: unknown;
+    let reentrantEventError: unknown;
+    let reentrantSubscribeControlSent = false;
+    let innerDisposeAddedControls: boolean | undefined;
+    let innerDisposeAddedCancellations: boolean | undefined;
+
+    api.hardware.status$.subscribe({
+      error: () => {},
+      complete: () => {
+        const controlsBefore = transport.controls.length;
+        const cancellationsBefore = transport.cancellations.length;
+        expect(() => api.dispose()).not.toThrow();
+        innerDisposeAddedControls =
+          transport.controls.length !== controlsBefore;
+        innerDisposeAddedCancellations =
+          transport.cancellations.length !== cancellationsBefore;
+
+        reentrantRpcPromise = api.hardware.connect();
+
+        const controlsBeforeReentrantSubscribe = transport.controls.length;
+        api.hardware.status$.subscribe({
+          error: (error) => {
+            reentrantStateError = error;
+          },
+        });
+        api.hardware.log$.subscribe({
+          error: (error) => {
+            reentrantEventError = error;
+          },
+        });
+        reentrantSubscribeControlSent =
+          transport.controls.length !== controlsBeforeReentrantSubscribe;
+      },
+    });
+
+    api.dispose();
+
+    expect(innerDisposeAddedControls).toBe(false);
+    expect(innerDisposeAddedCancellations).toBe(false);
+
+    expect(reentrantStateError).toMatchObject({ code: "CANCELLED" });
+    expect(reentrantEventError).toMatchObject({ code: "CANCELLED" });
+    expect(reentrantSubscribeControlSent).toBe(false);
+
+    await expect(rpcPromise).rejects.toMatchObject({ code: "CANCELLED" });
+    await expect(reentrantRpcPromise).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+    expect(transport.invocations).toHaveLength(invocationCountBeforeDispose);
+    expect(transport.cancellations).toEqual([invocation.requestId]);
+  });
+
+  test("종료 후 호출: RPC와 subscribe는 전송 없이 동기 CANCELLED다", async () => {
+    const { transport, api } = await setup();
+
+    api.dispose();
+
+    const controlsAfterDispose = transport.controls.length;
+    const invocationsAfterDispose = transport.invocations.length;
+
+    await expect(api.hardware.connect()).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+    expect(transport.invocations).toHaveLength(invocationsAfterDispose);
+
+    let stateError: RemoteError | undefined;
+    api.hardware.status$.subscribe({
+      error: (error) => {
+        stateError = error as RemoteError;
+      },
+    });
+    expect(stateError).toBeInstanceOf(RemoteError);
+    expect(stateError).toMatchObject({ code: "CANCELLED" });
+    expect(api.hardware.status$.snapshot).toEqual({
+      status: "uninitialized",
+      active: false,
+    });
+
+    let eventError: RemoteError | undefined;
+    api.hardware.log$.subscribe({
+      error: (error) => {
+        eventError = error as RemoteError;
+      },
+    });
+    expect(eventError).toMatchObject({ code: "CANCELLED" });
+
+    expect(transport.controls).toHaveLength(controlsAfterDispose);
+  });
+
+  test("늦은 응답: dispose 뒤 도착한 RPC 응답과 스트림 메시지는 구독자에게 전달되지 않는다", async () => {
+    const { transport, api } = await setup();
+
+    const rpcPromise = api.hardware.connect();
+    const invocation = transport.invocations[0]!;
+
+    let stateNextCalled = false;
+    api.hardware.status$.subscribe({
+      next: () => {
+        stateNextCalled = true;
+      },
+      error: () => {},
+    });
+    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+    transport.emitStream(
+      message(stateId, { type: "subscribed", sequence: 0 }),
+    );
+
+    const lateListener = [...transport.streamListeners][0]!;
+
+    api.dispose();
+
+    transport.resolveInvocation(0, {
+      protocolVersion: 1,
+      clientId: "client-1",
+      type: "success",
+      requestId: invocation.requestId,
+      result: { connected: true },
+    });
+    await expect(rpcPromise).rejects.toMatchObject({ code: "CANCELLED" });
+
+    lateListener(
+      message(stateId, { type: "batch", sequence: 1, values: ["late"] }),
+    );
+    expect(stateNextCalled).toBe(false);
+  });
+});

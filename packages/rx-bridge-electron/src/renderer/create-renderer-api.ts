@@ -256,7 +256,8 @@ export async function createRendererApi<Bridge>(
   const handshake = parseHandshake(response);
   const rpcClient = new RpcClient(transport, handshake.session);
   const streams = new StreamMultiplexer(transport, handshake.session);
-  return createProxy(handshake.tree, { rpcClient, streams }, () =>
-    streams[Symbol.dispose](),
-  ) as RendererApi<Bridge>;
+  return createProxy(handshake.tree, { rpcClient, streams }, () => {
+    rpcClient.dispose();
+    streams[Symbol.dispose]();
+  }) as RendererApi<Bridge>;
 }
