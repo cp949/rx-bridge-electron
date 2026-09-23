@@ -1,4 +1,10 @@
 export {
+  type BridgeApi,
+  type BridgeImpl,
+  type ErrorsFor,
+  type SchemasFor,
+} from "./bridge-types.js";
+export {
   composeContracts,
   type ComposedContract,
   type ContractOptions,
