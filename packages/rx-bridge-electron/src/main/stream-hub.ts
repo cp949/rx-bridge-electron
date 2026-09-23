@@ -1,10 +1,5 @@
 import { Observable, Subscriber, type Subscription } from "rxjs";
 
-import type {
-  ComposedContract,
-  EventDescriptor,
-  StateDescriptor,
-} from "../contract/index.js";
 import {
   type BridgeValue,
   type PayloadLimits,
@@ -17,30 +12,16 @@ import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
-  CurrentValueSource,
-  EventSource,
-  ScopedEventSource,
-} from "./sources.js";
-import type {
-  BridgeContext,
-  DiagnosticsSink,
-  DomainImplementation,
-  SenderIdentity,
-} from "./types.js";
+  EventRegistrationEntry,
+  RegistrationTable,
+  StateRegistrationEntry,
+} from "./registration.js";
+import type { EventSource, ScopedEventSource } from "./sources.js";
+import type { BridgeContext, DiagnosticsSink, SenderIdentity } from "./types.js";
 
 export type StreamSender = (message: StreamMessage) => void;
 
-type Registration =
-  | {
-      readonly kind: "state";
-      readonly descriptor: StateDescriptor<BridgeValue>;
-      readonly source: CurrentValueSource<BridgeValue>;
-    }
-  | {
-      readonly kind: "event";
-      readonly descriptor: EventDescriptor<BridgeValue>;
-      readonly source: EventSource;
-    };
+type Registration = StateRegistrationEntry | EventRegistrationEntry;
 
 interface SharedSource {
   readonly source: Observable<BridgeValue>;
@@ -92,38 +73,16 @@ export class StreamHub {
   readonly #diagnostics: DiagnosticsSink | undefined;
 
   public constructor(
-    contract: ComposedContract,
-    implementations: ReadonlyMap<string, DomainImplementation>,
+    table: RegistrationTable,
     limits: PayloadLimits,
     diagnostics?: DiagnosticsSink,
   ) {
     this.#limits = limits;
     this.#diagnostics = diagnostics;
-    for (const domain of Object.values(contract.domains)) {
-      const implementation = implementations.get(domain.name);
-      for (const [operation, descriptor] of Object.entries(
-        domain.definitions.state ?? {},
-      )) {
-        const source = implementation?.state?.[operation];
-        if (source !== undefined)
-          this.#registrations.set(`state:${domain.name}/${operation}`, {
-            kind: "state",
-            descriptor,
-            source,
-          });
-      }
-      for (const [operation, descriptor] of Object.entries(
-        domain.definitions.event ?? {},
-      )) {
-        const source = implementation?.event?.[operation];
-        if (source !== undefined)
-          this.#registrations.set(`event:${domain.name}/${operation}`, {
-            kind: "event",
-            descriptor,
-            source,
-          });
-      }
-    }
+    for (const entry of table.state.values())
+      this.#registrations.set(`state:${entry.domainName}/${entry.operation}`, entry);
+    for (const entry of table.event.values())
+      this.#registrations.set(`event:${entry.domainName}/${entry.operation}`, entry);
   }
 
   public isRegistered(key: string): boolean {
@@ -207,8 +166,8 @@ export class StreamHub {
     if (consumer.closed) return;
     if (registration.kind === "event") {
       consumer.pendingEvents = new BoundedQueue(
-        registration.descriptor.buffer.capacity,
-        registration.descriptor.buffer.overflow,
+        registration.buffer.capacity,
+        registration.buffer.overflow,
       );
     }
     try {
@@ -377,11 +336,7 @@ export class StreamHub {
     if (consumer.closed || consumer.terminal !== undefined) return;
     let value: BridgeValue;
     try {
-      value = parseOutput(
-        consumer.registration.descriptor.output,
-        raw,
-        this.#limits,
-      );
+      value = parseOutput(consumer.registration.output, raw, this.#limits);
     } catch {
       recordDiagnostic(this.#diagnostics, {
         type: "validation-failed",

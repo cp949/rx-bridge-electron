@@ -1,4 +1,4 @@
-import { publicManifest, type ComposedContract } from "../contract/index.js";
+import type { ComposedContract } from "../contract/index.js";
 import type {
   HandshakeResponse,
   PayloadLimits,
@@ -11,7 +11,11 @@ import { parseOpaqueIdSequence } from "../protocol/index.js";
 import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
-import { registerImplementations } from "./registration.js";
+import {
+  buildRegistrationTableFromContract,
+  manifestFromTable,
+  registerImplementations,
+} from "./registration.js";
 import {
   resolveResourceLimits,
   type ResourceLimits,
@@ -64,18 +68,14 @@ export function createBridgeServer<Contract extends ComposedContract>(
   const resourceLimits = resolveResourceLimits(options.resourceLimits);
   let disposed = false;
   const registrations = registerImplementations(contract, implementations);
+  const table = buildRegistrationTableFromContract(contract, registrations);
   const sessions = new DocumentSessions(resourceLimits, options.diagnostics);
-  const manifest = publicManifest(contract);
+  const manifest = manifestFromTable(table);
   const limits: PayloadLimits = {
     ...defaultLimits,
     ...contract.payloadLimits,
   };
-  const streams = new StreamHub(
-    contract,
-    registrations,
-    limits,
-    options.diagnostics,
-  );
+  const streams = new StreamHub(table, limits, options.diagnostics);
   const keyOf = (sender: SenderIdentity, clientId: string, requestId: string) =>
     JSON.stringify([sender.webContentsId, sender.frameId, clientId, requestId]);
   const error = (
@@ -129,7 +129,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
         });
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
       }
-      const registration = findRpc(contract, registrations, envelope.key);
+      const registration = findRpc(table, envelope.key);
       if (registration === undefined) {
         recordDiagnostic(options.diagnostics, {
           type: "rejected",

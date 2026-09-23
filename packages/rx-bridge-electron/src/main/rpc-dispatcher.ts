@@ -1,4 +1,3 @@
-import type { ComposedContract, RpcDescriptor } from "../contract/index.js";
 import {
   BridgeProtocolError,
   parseBridgeValue,
@@ -11,38 +10,18 @@ import { PayloadLimitError } from "../protocol/bridge-value.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
-import type {
-  BridgeContext,
-  DiagnosticsSink,
-  DomainImplementation,
-} from "./types.js";
+import type { RegistrationTable, RpcRegistrationEntry } from "./registration.js";
+import type { BridgeContext, DiagnosticsSink } from "./types.js";
 
-export interface RpcRegistration {
-  readonly descriptor: RpcDescriptor<BridgeValue, BridgeValue, string>;
-  readonly handler: DomainImplementation["rpc"][string];
-}
 export function findRpc(
-  contract: ComposedContract,
-  implementations: ReadonlyMap<string, DomainImplementation>,
+  table: RegistrationTable,
   key: string,
-): RpcRegistration | undefined {
+): RpcRegistrationEntry | undefined {
   if (!key.startsWith("rpc:")) return undefined;
-  const path = key.slice(4);
-  const split = path.lastIndexOf("/");
-  if (split < 1) return undefined;
-  const domain = contract.domains[path.slice(0, split)];
-  const operation = path.slice(split + 1);
-  const descriptor = domain?.definitions.rpc?.[operation];
-  const implementation =
-    domain === undefined
-      ? undefined
-      : implementations.get(domain.name)?.rpc[operation];
-  return descriptor === undefined || implementation === undefined
-    ? undefined
-    : { descriptor, handler: implementation };
+  return table.rpc.get(key.slice(4));
 }
 export async function dispatchRegistered(
-  registration: RpcRegistration,
+  registration: RpcRegistrationEntry,
   envelope: WireRpcRequest,
   context: BridgeContext,
   limits: PayloadLimits,
@@ -93,7 +72,7 @@ export async function dispatchRegistered(
   }
   let input: BridgeValue;
   try {
-    input = registration.descriptor.input.parse(parsed);
+    input = registration.input === undefined ? parsed : registration.input.parse(parsed);
   } catch {
     if (context.signal.aborted)
       return respond({
@@ -129,7 +108,7 @@ export async function dispatchRegistered(
       });
     return respond({
       type: "error",
-      error: serializeError(error, registration.descriptor.errors, limits),
+      error: serializeError(error, registration.errors, limits),
     });
   }
   if (context.signal.aborted)
@@ -139,7 +118,7 @@ export async function dispatchRegistered(
     });
   let output: BridgeValue;
   try {
-    output = parseOutput(registration.descriptor.output, result, limits);
+    output = parseOutput(registration.output, result, limits);
   } catch {
     recordDiagnostic(diagnostics, {
       type: "validation-failed",
