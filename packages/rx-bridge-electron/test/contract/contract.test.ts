@@ -129,10 +129,7 @@ describe("contract composition", () => {
     ["reserved prototype segment", () => defineDomain("prototype", {})],
     ["reserved constructor segment", () => defineDomain("constructor", {})],
     ["reserved dispose domain segment", () => defineDomain("dispose", {})],
-    [
-      "reserved dispose/x domain segment",
-      () => defineDomain("dispose/x", {}),
-    ],
+    ["reserved dispose/x domain segment", () => defineDomain("dispose/x", {})],
   ])("rejects %s", (_label, create) => {
     expect(create).toThrow(/duplicate|collision|empty|dot|reserved/i);
   });

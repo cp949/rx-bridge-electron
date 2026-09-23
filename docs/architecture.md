@@ -39,6 +39,7 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 - **State**: 현재값을 나타낸다. Renderer의 `RemoteState`는 `uninitialized`, `connecting`, `current`, `stale` snapshot을 제공한다. 마지막 로컬 구독자가 해제된 뒤 값이 있었으면 snapshot은 `stale`가 되며, 새 구독 generation에 예전 값을 현재값처럼 재생하지 않는다. `undefined`도 유효한 값이다.
 - **Event**: 과거 값을 재생하지 않는 발생 스트림이다. 명시적인 buffer capacity와 `error`, `drop-oldest`, `drop-newest` 중 overflow 정책을 계약에 둔다. 구독 확인 이후 sequence와 acknowledgement로 전송을 제어한다.
 - 같은 Renderer 문서의 여러 로컬 구독자는 하나의 local generation을 공유한다. Main의 non-scoped State/Event source는 operation key별로 활성 consumer 사이에서 공유한다. 문서별 Event source는 각 구독 context로 생성한다. 마지막 consumer가 나가면 더는 쓰지 않는 upstream을 정리한다.
+- Renderer 공개 호출은 계층형 `rpc`/`state`/`event` 접두사 없이 평면 `api.<domain path>.<operation>`을 유지한다. 루트 API는 `dispose`를 예약 도메인 이름으로 두고 `api.dispose()`를 `api[Symbol.dispose]`와 같은 함수로 노출한다. 비교와 근거는 [ADR 0005](adr/0005-renderer-api-shape.md)에 있다.
 
 ## Payload 및 제한
 

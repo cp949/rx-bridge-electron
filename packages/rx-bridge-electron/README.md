@@ -114,13 +114,17 @@ declare global {
 const api = await createRendererApi<AppBridge>(window.appBridge);
 await api.device.connect();
 api.device.connection.subscribe(console.log);
+// 정리 시점에 api.dispose()(또는 api[Symbol.dispose]())로 활성 구독을 해제합니다.
+api.dispose();
 ```
 
 `bindElectronBridge({ ipcMain, server, namespace, allowedOrigins })`로 서버를 연결하고, 허용한 각 최상위 창에 `attach(webContents, role)`을 호출합니다. Main을 종료하기 전에 연결을 해제해야 합니다. `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색 및 창 생성 제한, 명시적 신뢰 origin 허용 목록을 사용하세요.
 
 ## 런타임 동작
 
-`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`).
+`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 계층형 `rpc`/`state`/`event` 접두사 없이 평면 `api.<domain path>.<operation>`을 유지합니다(근거: [ADR 0005](../../docs/adr/0005-renderer-api-shape.md)).
+
+루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출하면 이 Renderer 인스턴스의 활성 State/Event 구독을 정리합니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 `defineDomain("dispose", ...)`처럼 도메인·서비스 이름으로 쓸 수 없습니다(하위 operation 이름으로는 계속 쓸 수 있습니다, 예: `api.device.dispose`).
 
 각 RPC는 structured clone이 가능한 입력값 하나를 받습니다. `AbortSignal`과 `timeoutMs`는 별도 `CallOptions`로 전달합니다. 취소, timeout, 응답 중 하나만 최종 결과가 됩니다. 원격 실패는 `FORBIDDEN`, `INVALID_ARGUMENT`, `CANCELLED`, `DEADLINE_EXCEEDED` 같은 프로토콜 코드를 가진 `RemoteError` 값으로 전달됩니다.
 
