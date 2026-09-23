@@ -11,7 +11,7 @@
 
 ## 진행 순서
 
-- [ ] **RD-001 — 공개 인터페이스 네이밍 결정.** Renderer의 `api.domain.operation`과 요구사항 예시의 `api.domain.rpc.operation`·`state`·`event` 계층을 비교한다. 종류별 이름 충돌, 자동 완성, Proxy 및 타입 추론, 기존 소비자 이전 비용을 기준으로 하나를 결정하고 문서에 기록한다. `defineDomain`/`composeContracts`, `timeoutMs`, `DEADLINE_EXCEEDED`는 현재 의미가 명확하므로 이름 변경을 전제하지 않는다. `dispose()`는 RD-003의 종료 의미와 이름 충돌 정책을 함께 결정한다. **완료 기준:** 공개 호출 형태와 이전 방법이 결정되고, README·타입 예제·데모가 선택한 형태와 일치한다.
+- [x] **RD-001 — 공개 인터페이스 네이밍 결정.** Renderer의 `api.domain.operation`과 요구사항 예시의 `api.domain.rpc.operation`·`state`·`event` 계층을 비교한다. 종류별 이름 충돌, 자동 완성, Proxy 및 타입 추론, 기존 소비자 이전 비용을 기준으로 하나를 결정하고 문서에 기록한다. `defineDomain`/`composeContracts`, `timeoutMs`, `DEADLINE_EXCEEDED`는 현재 의미가 명확하므로 이름 변경을 전제하지 않는다. `dispose()`는 RD-003의 종료 의미와 이름 충돌 정책을 함께 결정한다. **완료 기준:** 공개 호출 형태와 이전 방법이 결정되고, README·타입 예제·데모가 선택한 형태와 일치한다.
 
 - [ ] **RD-002 — 활성 State의 늦은 로컬 구독자에게 현재값 전달.** 한 Renderer에서 State를 이미 구독 중일 때 새 구독자가 합류하면 현재 세대의 최신값을 즉시 받도록 한다. 마지막 구독 해제 뒤 남은 `stale` 값은 새 세대에 재생하지 않는다. `undefined`도 유효한 현재값으로 취급한다. **완료 기준:** 첫 구독, 늦은 구독, 마지막 해제, 재구독, 동기 전달을 검증하고 Main의 원격 구독은 공유된다.
 
