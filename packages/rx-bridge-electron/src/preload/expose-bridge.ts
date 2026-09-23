@@ -15,7 +15,11 @@ import {
 import { ELECTRON_BRIDGE_CHANNELS } from "../main/electron-adapter.js";
 import type { BridgeTransport } from "../renderer/transport.js";
 
-const limits = { maxDepth: 32, maxEntries: 10_000, maxStringBytes: 1_000_000 };
+const limits = {
+  maxDepth: Number.MAX_SAFE_INTEGER,
+  maxEntries: Number.MAX_SAFE_INTEGER,
+  maxStringBytes: Number.MAX_SAFE_INTEGER,
+};
 
 export interface ExposeBridgeOptions {
   readonly contextBridge: ContextBridge;

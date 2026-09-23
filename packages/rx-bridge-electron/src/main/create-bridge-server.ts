@@ -29,6 +29,7 @@ const defaultLimits: PayloadLimits = {
   maxDepth: 32,
   maxEntries: 10_000,
   maxStringBytes: 1_000_000,
+  maxTotalBytes: 16_777_216,
 };
 
 export interface StreamBridgeServer extends BridgeServer {
@@ -60,7 +61,10 @@ export function createBridgeServer<Contract extends ComposedContract>(
   const registrations = registerImplementations(contract, implementations);
   const sessions = new DocumentSessions(options.diagnostics);
   const manifest = publicManifest(contract);
-  const limits = contract.payloadLimits ?? defaultLimits;
+  const limits: PayloadLimits = {
+    ...defaultLimits,
+    ...contract.payloadLimits,
+  };
   const streams = new StreamHub(
     contract,
     registrations,

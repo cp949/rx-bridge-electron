@@ -1,8 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-import { parseBridgeValue } from "../../src/protocol/bridge-value.js";
+import {
+  parseBridgeValue,
+  type PayloadLimits,
+} from "../../src/protocol/bridge-value.js";
 
-const limits = {
+const limits: PayloadLimits = {
   maxDepth: 3,
   maxEntries: 8,
   maxStringBytes: 8,
@@ -10,7 +13,7 @@ const limits = {
 
 function expectInvalidArgument(
   value: unknown,
-  configuredLimits = limits,
+  configuredLimits: PayloadLimits = limits,
 ): void {
   expect(() => parseBridgeValue(value, configuredLimits)).toThrowError(
     expect.objectContaining({ code: "INVALID_ARGUMENT" }),
@@ -87,5 +90,47 @@ describe("parseBridgeValue", () => {
 
   test("rejects a string beyond the configured UTF-8 byte count", () => {
     expectInvalidArgument("한글", { ...limits, maxStringBytes: 5 });
+  });
+
+  describe("maxTotalBytes", () => {
+    test("does not enforce a total when maxTotalBytes is omitted", () => {
+      expect(parseBridgeValue(2n ** 80000n, limits)).toBe(2n ** 80000n);
+    });
+
+    test("accepts an array at the exact byte budget and rejects one byte under it", () => {
+      // array node(8) + keys "0","1"(1+1) + "ab" node(8)+bytes(2) + "cd" node(8)+bytes(2) = 30
+      const value = ["ab", "cd"];
+
+      expect(parseBridgeValue(value, { ...limits, maxTotalBytes: 30 })).toEqual(
+        value,
+      );
+      expectInvalidArgument(value, { ...limits, maxTotalBytes: 29 });
+    });
+
+    test("counts object key bytes toward the total", () => {
+      // object node(8) + keys "kkkkk","jjjjj"(5+5) + two number nodes(8+8) = 34
+      const value = { kkkkk: 1, jjjjj: 2 };
+
+      expect(parseBridgeValue(value, { ...limits, maxTotalBytes: 34 })).toEqual(
+        value,
+      );
+      expectInvalidArgument(value, { ...limits, maxTotalBytes: 33 });
+    });
+
+    test("computes string bytes using UTF-8, not UTF-16 code units", () => {
+      // node(8) + UTF-8 byte length of "한글"(6) = 14, not the 2 UTF-16 code units
+      expect(parseBridgeValue("한글", { ...limits, maxTotalBytes: 14 })).toBe(
+        "한글",
+      );
+      expectInvalidArgument("한글", { ...limits, maxTotalBytes: 13 });
+    });
+
+    test("counts large bigints toward the total", () => {
+      expectInvalidArgument(2n ** 80000n, { ...limits, maxTotalBytes: 1000 });
+    });
+
+    test("rejects a negative maxTotalBytes", () => {
+      expectInvalidArgument(1, { ...limits, maxTotalBytes: -1 });
+    });
   });
 });

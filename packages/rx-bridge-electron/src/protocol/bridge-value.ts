@@ -13,6 +13,7 @@ export interface PayloadLimits {
   readonly maxDepth: number;
   readonly maxEntries: number;
   readonly maxStringBytes: number;
+  readonly maxTotalBytes?: number;
 }
 
 /** Error safe to return across the bridge for malformed protocol input. */
@@ -51,13 +52,19 @@ function assertLimit(name: string, value: number): void {
   }
 }
 
+interface DataProperties {
+  readonly keys: readonly string[];
+  readonly keyBytesTotal: number;
+}
+
 function assertDataProperties(
   value: object,
   allowArrayLength: boolean,
   maxStringBytes: number,
-): readonly string[] {
+): DataProperties {
   const keys = Reflect.ownKeys(value);
   const stringKeys: string[] = [];
+  let keyBytesTotal = 0;
 
   for (const key of keys) {
     if (typeof key !== "string") {
@@ -66,7 +73,8 @@ function assertDataProperties(
     if (allowArrayLength && key === "length") {
       continue;
     }
-    if (textEncoder.encode(key).byteLength > maxStringBytes) {
+    const keyBytes = textEncoder.encode(key).byteLength;
+    if (keyBytes > maxStringBytes) {
       invalidArgument(
         "Bridge object key exceeds the configured maximum byte length.",
       );
@@ -82,10 +90,11 @@ function assertDataProperties(
         "Bridge objects must contain enumerable data properties only.",
       );
     }
+    keyBytesTotal += keyBytes;
     stringKeys.push(key);
   }
 
-  return stringKeys;
+  return { keys: stringKeys, keyBytesTotal };
 }
 
 /**
@@ -99,10 +108,27 @@ export function parseBridgeValue(
   assertLimit("maxDepth", limits.maxDepth);
   assertLimit("maxEntries", limits.maxEntries);
   assertLimit("maxStringBytes", limits.maxStringBytes);
+  const maxTotalBytes = limits.maxTotalBytes;
+  if (maxTotalBytes !== undefined) {
+    assertLimit("maxTotalBytes", maxTotalBytes);
+  }
 
   const ancestors = new WeakSet<object>();
   const pending: TraversalFrame[] = [{ kind: "enter", depth: 0, value }];
   let entries = 0;
+  let totalBytes = 0;
+
+  function addBytes(delta: number): void {
+    if (maxTotalBytes === undefined) {
+      return;
+    }
+    totalBytes += delta;
+    if (totalBytes > maxTotalBytes) {
+      invalidArgument(
+        "Bridge value exceeds the configured maximum total byte size.",
+      );
+    }
+  }
 
   while (pending.length > 0) {
     const frame = pending.pop();
@@ -117,21 +143,28 @@ export function parseBridgeValue(
       invalidArgument("Bridge value exceeds the configured maximum depth.");
     }
 
+    addBytes(8);
+
     switch (typeof frame.value) {
       case "undefined":
       case "boolean":
       case "number":
-      case "bigint":
         continue;
-      case "string":
-        if (
-          textEncoder.encode(frame.value).byteLength > limits.maxStringBytes
-        ) {
+      case "bigint": {
+        const magnitude = frame.value < 0n ? -frame.value : frame.value;
+        addBytes(Math.ceil(magnitude.toString(16).length / 2));
+        continue;
+      }
+      case "string": {
+        const byteLength = textEncoder.encode(frame.value).byteLength;
+        if (byteLength > limits.maxStringBytes) {
           invalidArgument(
             "Bridge string exceeds the configured maximum byte length.",
           );
         }
+        addBytes(byteLength);
         continue;
+      }
       case "function":
       case "symbol":
         invalidArgument("Bridge value contains an unsupported value type.");
@@ -163,7 +196,7 @@ export function parseBridgeValue(
       );
     }
 
-    const keys = assertDataProperties(
+    const { keys, keyBytesTotal } = assertDataProperties(
       objectValue,
       isArray,
       limits.maxStringBytes,
@@ -174,6 +207,7 @@ export function parseBridgeValue(
         "Bridge value exceeds the configured maximum entry count.",
       );
     }
+    addBytes(keyBytesTotal);
 
     pending.push({ kind: "exit", value: objectValue });
     for (const key of keys) {

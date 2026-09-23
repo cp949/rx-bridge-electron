@@ -42,6 +42,35 @@ describe("contract composition", () => {
     expect(Object.isFrozen(appContract.payloadLimits)).toBe(true);
   });
 
+  test("accepts an optional maxTotalBytes payload limit", () => {
+    const payloadLimits = {
+      maxDepth: 4,
+      maxEntries: 16,
+      maxStringBytes: 128,
+      maxTotalBytes: 1024,
+    };
+
+    const appContract = composeContracts({ payloadLimits }, hardware);
+
+    expect(appContract.payloadLimits).toEqual(payloadLimits);
+  });
+
+  test("rejects a non-integer maxTotalBytes payload limit", () => {
+    expect(() =>
+      composeContracts(
+        {
+          payloadLimits: {
+            maxDepth: 4,
+            maxEntries: 16,
+            maxStringBytes: 128,
+            maxTotalBytes: 1.5,
+          },
+        },
+        hardware,
+      ),
+    ).toThrow(TypeError);
+  });
+
   test("retains schemas for Main while exposing sorted canonical manifest IDs", () => {
     const appContract = composeContracts(hardware);
 

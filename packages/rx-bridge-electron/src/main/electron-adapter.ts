@@ -19,7 +19,11 @@ import type { StreamSender } from "./stream-hub.js";
 import type { StreamBridgeServer } from "./create-bridge-server.js";
 import type { AttachedTarget, SenderIdentity } from "./types.js";
 
-const limits = { maxDepth: 32, maxEntries: 10_000, maxStringBytes: 1_000_000 };
+const limits = {
+  maxDepth: Number.MAX_SAFE_INTEGER,
+  maxEntries: Number.MAX_SAFE_INTEGER,
+  maxStringBytes: Number.MAX_SAFE_INTEGER,
+};
 
 export interface ElectronBridgeChannels {
   readonly handshake: string;

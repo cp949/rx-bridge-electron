@@ -156,3 +156,73 @@ describe("bindElectronBridge dispose", () => {
     expect(second).toHaveBeenCalledTimes(1);
   });
 });
+
+/** Minimal fake WebContents whose main frame carries a real `url`, for origin checks. */
+class UrlWebContents extends EventEmitter {
+  public readonly id = 1;
+  public readonly mainFrame: {
+    readonly routingId: number;
+    readonly url: string;
+  };
+
+  public constructor(url: string) {
+    super();
+    this.mainFrame = { routingId: 10, url };
+  }
+}
+
+describe("Electron adapter payload limits", () => {
+  test("forwards input past the adapter's structural check up to the contract's larger maxStringBytes", async () => {
+    const stringSchema: Schema<string> = {
+      parse(input) {
+        if (typeof input !== "string") throw new TypeError("string required");
+        return input;
+      },
+    };
+    const echoDomain = defineDomain("hardware", {
+      rpc: { echo: rpc({ input: stringSchema, output: stringSchema }) },
+    });
+    const handler = vi.fn(async (input: string) => input);
+    const server = createBridgeServer(
+      composeContracts(
+        {
+          payloadLimits: {
+            maxDepth: 4,
+            maxEntries: 10,
+            maxStringBytes: 2_000_000,
+          },
+        },
+        echoDomain,
+      ),
+      [implementDomain(echoDomain, { rpc: { echo: handler } })],
+    );
+    const ipcMain = new FakeIpcMain();
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      namespace: "test",
+      allowedOrigins: ["app://local"],
+    });
+    const contents = new UrlWebContents("app://local");
+    bridge.attach(contents as unknown as WebContents, "main");
+
+    const rpcHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").rpc,
+    );
+    if (rpcHandler === undefined) throw new Error("expected rpc handler");
+    const bigString = "a".repeat(1_500_000);
+    const response = await rpcHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        requestId: "request-1",
+        key: "rpc:hardware/echo",
+        input: bigString,
+      },
+    );
+
+    expect(response).toMatchObject({ type: "success", result: bigString });
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+});

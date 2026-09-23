@@ -687,4 +687,54 @@ describe("Main stream lifecycle and ordering", () => {
     });
     expect(messages).toHaveLength(2);
   });
+
+  test("a State value exceeding maxTotalBytes fails validation instead of being sent", async () => {
+    const string: Schema<string> = {
+      parse(value) {
+        if (typeof value !== "string") throw new TypeError("string required");
+        return value;
+      },
+    };
+    const source = new BehaviorSubject("x".repeat(2000));
+    const domain = defineDomain("hardware", {
+      state: { current$: state(string) },
+    });
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      composeContracts(
+        {
+          payloadLimits: {
+            maxDepth: 4,
+            maxEntries: 10,
+            maxStringBytes: 4096,
+            maxTotalBytes: 1024,
+          },
+        },
+        domain,
+      ),
+      [
+        implementDomain(domain, {
+          state: { current$: currentValueSource(source) },
+        }),
+      ],
+      { diagnostics },
+    );
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command("subscribe", "s", "client-1", "state:hardware/current$"),
+      (message) => messages.push(message),
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(diagnostics.record).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "validation-failed" }),
+    );
+  });
 });

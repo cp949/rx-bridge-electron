@@ -114,6 +114,15 @@ export function composeContracts(
         );
       }
     }
+    if (
+      payloadLimits.maxTotalBytes !== undefined &&
+      (!Number.isSafeInteger(payloadLimits.maxTotalBytes) ||
+        payloadLimits.maxTotalBytes < 0)
+    ) {
+      throw new TypeError(
+        "Payload limit 'maxTotalBytes' must be a non-negative safe integer.",
+      );
+    }
   }
   return Object.freeze({
     domains: Object.freeze(domainsByName),
