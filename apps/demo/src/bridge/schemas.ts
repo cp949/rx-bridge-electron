@@ -1,43 +1,7 @@
 import { z } from "zod";
 import type { Schema } from "@cp949/rx-bridge-electron/contract";
-import type { BridgeValue } from "@cp949/rx-bridge-electron/protocol";
 
 import { rateValues, samplingValues } from "./device-options.js";
-
-export interface ConnectionState extends Record<string, BridgeValue> {
-  readonly connected: boolean;
-  readonly phase: "connecting" | "connected" | "disconnected";
-  readonly reason?: "cable-disconnected";
-}
-export interface DeviceMetrics extends Record<string, BridgeValue> {
-  readonly targetPerSecond: number;
-  readonly sourceSamplingMs: number;
-  readonly generatedPerSecond: number;
-  readonly forwardedPerSecond: number;
-  readonly generatedTotal: number;
-  readonly forwardedTotal: number;
-}
-export interface SerialLine extends Record<string, BridgeValue> {
-  readonly kind: "rx" | "tx" | "system";
-  readonly text: string;
-  readonly at: number;
-}
-export interface DeviceError extends Record<string, BridgeValue> {
-  readonly code: "DEVICE_TIMEOUT";
-  readonly message: "Device response timeout";
-}
-export interface SendCommandInput extends Record<string, BridgeValue> {
-  readonly command: string;
-}
-export interface SendResult extends Record<string, BridgeValue> {
-  readonly accepted: true;
-}
-export interface SetRateInput extends Record<string, BridgeValue> {
-  readonly messagesPerSecond: (typeof rateValues)[number];
-}
-export interface SetSourceSamplingInput extends Record<string, BridgeValue> {
-  readonly milliseconds: (typeof samplingValues)[number];
-}
 
 const nonNegativeIntegerSchema = z.int().nonnegative();
 const numberValueSchema = z.number();
@@ -54,12 +18,13 @@ export const noInput: Schema<undefined> = z.undefined();
 export const numberValue: Schema<number> = numberValueSchema;
 export const nonNegativeInteger: Schema<number> = nonNegativeIntegerSchema;
 
-export const connectionState: Schema<ConnectionState> = z
-  .object({
-    connected: z.boolean(),
-    phase: z.enum(["connecting", "connected", "disconnected"]),
-    reason: z.literal("cable-disconnected").optional(),
-  })
+const connectionStateObject = z.object({
+  connected: z.boolean(),
+  phase: z.enum(["connecting", "connected", "disconnected"]),
+  reason: z.literal("cable-disconnected").optional(),
+});
+export type ConnectionState = Readonly<z.infer<typeof connectionStateObject>>;
+export const connectionState: Schema<ConnectionState> = connectionStateObject
   .refine(
     ({ connected, phase, reason }) =>
       connected === (phase === "connected") &&
@@ -70,7 +35,7 @@ export const connectionState: Schema<ConnectionState> = z
     reason === undefined ? { connected, phase } : { connected, phase, reason },
   );
 
-export const deviceMetrics: Schema<DeviceMetrics> = z.object({
+const deviceMetricsObject = z.object({
   targetPerSecond: nonNegativeIntegerSchema,
   sourceSamplingMs: nonNegativeIntegerSchema,
   generatedPerSecond: numberValueSchema,
@@ -78,36 +43,54 @@ export const deviceMetrics: Schema<DeviceMetrics> = z.object({
   generatedTotal: nonNegativeIntegerSchema,
   forwardedTotal: nonNegativeIntegerSchema,
 });
+export type DeviceMetrics = Readonly<z.infer<typeof deviceMetricsObject>>;
+export const deviceMetrics: Schema<DeviceMetrics> = deviceMetricsObject;
 
-export const serialLine: Schema<SerialLine> = z.object({
+const serialLineObject = z.object({
   kind: z.enum(["rx", "tx", "system"]),
   text: z.string().refine((value) => value.length <= 256, {
     error: "Expected bounded serial line text.",
   }),
   at: numberValueSchema,
 });
+export type SerialLine = Readonly<z.infer<typeof serialLineObject>>;
+export const serialLine: Schema<SerialLine> = serialLineObject;
 
-export const deviceError: Schema<DeviceError> = z.object({
+const deviceErrorObject = z.object({
   code: z.literal("DEVICE_TIMEOUT"),
   message: z.literal("Device response timeout"),
 });
+export type DeviceError = Readonly<z.infer<typeof deviceErrorObject>>;
+export const deviceError: Schema<DeviceError> = deviceErrorObject;
 
-export const sendCommandInput: Schema<SendCommandInput> = z.object({
+const sendCommandInputObject = z.object({
   command: z
     .string()
     .min(1)
     .max(80)
     .regex(/^[\x20-\x7e]+$/),
 });
+export type SendCommandInput = Readonly<z.infer<typeof sendCommandInputObject>>;
+export const sendCommandInput: Schema<SendCommandInput> =
+  sendCommandInputObject;
 
-export const sendResult: Schema<SendResult> = z.object({
+const sendResultObject = z.object({
   accepted: z.literal(true),
 });
+export type SendResult = Readonly<z.infer<typeof sendResultObject>>;
+export const sendResult: Schema<SendResult> = sendResultObject;
 
-export const setRateInput: Schema<SetRateInput> = z.object({
+const setRateInputObject = z.object({
   messagesPerSecond: rate,
 });
+export type SetRateInput = Readonly<z.infer<typeof setRateInputObject>>;
+export const setRateInput: Schema<SetRateInput> = setRateInputObject;
 
-export const setSourceSamplingInput: Schema<SetSourceSamplingInput> = z.object({
+const setSourceSamplingInputObject = z.object({
   milliseconds: sampling,
 });
+export type SetSourceSamplingInput = Readonly<
+  z.infer<typeof setSourceSamplingInputObject>
+>;
+export const setSourceSamplingInput: Schema<SetSourceSamplingInput> =
+  setSourceSamplingInputObject;
