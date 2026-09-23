@@ -104,7 +104,10 @@ export function defineDomain<
   Name extends string,
   Definitions extends DomainDefinitions,
 >(name: Name, definitions: Definitions): DomainContract<Name, Definitions> {
-  assertPathSegments(name, "Domain name");
+  const nameSegments = assertPathSegments(name, "Domain name");
+  if (nameSegments[0] === "dispose") {
+    throw new TypeError("Domain name contains reserved segment 'dispose'.");
+  }
   assertOwnDataRecord(definitions, "Domain definitions");
   for (const key of Object.keys(definitions)) {
     if (key !== "rpc" && key !== "state" && key !== "event") {

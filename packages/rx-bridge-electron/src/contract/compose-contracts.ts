@@ -71,6 +71,11 @@ export function composeContracts(
     if (Object.hasOwn(domainsByName, domain.name)) {
       throw new TypeError(`Duplicate domain name '${domain.name}'.`);
     }
+    if (assertPathSegments(domain.name, "Domain name")[0] === "dispose") {
+      throw new TypeError(
+        `Domain name '${domain.name}' contains reserved segment 'dispose'.`,
+      );
+    }
     for (const category of ["rpc", "state", "event"] as const) {
       const definitions = domain.definitions[category];
       if (definitions === undefined) {

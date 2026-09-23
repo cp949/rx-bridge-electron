@@ -89,6 +89,7 @@ function parseSegments(
   const segments = path.split("/");
   if (
     segments.length < 2 ||
+    segments[0] === "dispose" ||
     segments.some(
       (segment) =>
         segment.length === 0 ||

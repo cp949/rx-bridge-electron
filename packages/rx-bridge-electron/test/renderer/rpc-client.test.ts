@@ -125,6 +125,18 @@ describe("renderer handshake and API proxy", () => {
         },
       },
     ],
+    [
+      "reserved dispose root segment",
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: {
+          rpc: ["rpc:dispose/x"],
+          state: [],
+          event: [],
+        },
+      },
+    ],
   ])(
     "rejects a malformed or unsupported handshake: %s",
     async (_label, value) => {

@@ -128,7 +128,20 @@ describe("contract composition", () => {
     ["reserved __proto__ segment", () => defineDomain("__proto__", {})],
     ["reserved prototype segment", () => defineDomain("prototype", {})],
     ["reserved constructor segment", () => defineDomain("constructor", {})],
+    ["reserved dispose domain segment", () => defineDomain("dispose", {})],
+    [
+      "reserved dispose/x domain segment",
+      () => defineDomain("dispose/x", {}),
+    ],
   ])("rejects %s", (_label, create) => {
     expect(create).toThrow(/duplicate|collision|empty|dot|reserved/i);
+  });
+
+  test("allows an operation named 'dispose' under a non-reserved domain", () => {
+    const domain = defineDomain("device", {
+      rpc: { dispose: rpc({ input: stringSchema, output: stringSchema }) },
+    });
+
+    expect(domain.definitions.rpc?.dispose).toBeDefined();
   });
 });
