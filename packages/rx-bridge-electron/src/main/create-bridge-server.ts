@@ -9,6 +9,7 @@ import type {
 } from "../protocol/index.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
+import { registerImplementations } from "./registration.js";
 import { StreamHub, type StreamSender } from "./stream-hub.js";
 import type {
   AttachedTarget,
@@ -47,12 +48,13 @@ export function createBridgeServer(
   } = {},
 ): StreamBridgeServer {
   let disposed = false;
+  const registrations = registerImplementations(contract, implementations);
   const sessions = new DocumentSessions(options.diagnostics);
   const manifest = publicManifest(contract);
   const limits = contract.payloadLimits ?? defaultLimits;
   const streams = new StreamHub(
     contract,
-    implementations,
+    registrations,
     limits,
     options.diagnostics,
   );
@@ -90,7 +92,7 @@ export function createBridgeServer(
       const session = sessions.establish(sender, envelope.clientId);
       if (session === undefined)
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
-      const registration = findRpc(contract, implementations, envelope.key);
+      const registration = findRpc(contract, registrations, envelope.key);
       if (registration === undefined)
         return error(envelope, "NOT_FOUND", "Unknown bridge operation.");
       const id = keyOf(sender, envelope.clientId, envelope.requestId);

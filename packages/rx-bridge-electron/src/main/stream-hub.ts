@@ -93,16 +93,14 @@ export class StreamHub {
 
   public constructor(
     contract: ComposedContract,
-    implementations: readonly DomainImplementation[],
+    implementations: ReadonlyMap<string, DomainImplementation>,
     limits: PayloadLimits,
     diagnostics?: DiagnosticsSink,
   ) {
     this.#limits = limits;
     this.#diagnostics = diagnostics;
     for (const domain of Object.values(contract.domains)) {
-      const implementation = implementations.find(
-        (candidate) => candidate.domainName === domain.name,
-      );
+      const implementation = implementations.get(domain.name);
       for (const [operation, descriptor] of Object.entries(
         domain.definitions.state ?? {},
       )) {

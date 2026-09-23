@@ -21,7 +21,7 @@ export interface RpcRegistration {
 }
 export function findRpc(
   contract: ComposedContract,
-  implementations: readonly DomainImplementation[],
+  implementations: ReadonlyMap<string, DomainImplementation>,
   key: string,
 ): RpcRegistration | undefined {
   if (!key.startsWith("rpc:")) return undefined;
@@ -31,9 +31,10 @@ export function findRpc(
   const domain = contract.domains[path.slice(0, split)];
   const operation = path.slice(split + 1);
   const descriptor = domain?.definitions.rpc?.[operation];
-  const implementation = implementations.find(
-    (item) => item.domainName === domain?.name,
-  )?.rpc[operation];
+  const implementation =
+    domain === undefined
+      ? undefined
+      : implementations.get(domain.name)?.rpc[operation];
   return descriptor === undefined || implementation === undefined
     ? undefined
     : { descriptor, handler: implementation };
