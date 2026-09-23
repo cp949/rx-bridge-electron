@@ -1,5 +1,4 @@
 import { describe, expect, test } from "vitest";
-import type { Observable } from "rxjs";
 
 import { createRendererApi, RemoteError } from "../../src/renderer/index.js";
 import type {
@@ -11,7 +10,7 @@ import { FakeTransport } from "./fake-transport.js";
 interface EventBridge {
   readonly hardware: {
     readonly event: {
-      readonly fault$: Observable<string>;
+      readonly fault$: string;
     };
   };
 }

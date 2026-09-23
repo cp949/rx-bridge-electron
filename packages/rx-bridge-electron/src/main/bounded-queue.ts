@@ -1,4 +1,4 @@
-import type { OverflowPolicy } from "../contract/index.js";
+import type { OverflowPolicy } from "./sources.js";
 
 export interface QueuePushResult {
   readonly dropped: number;

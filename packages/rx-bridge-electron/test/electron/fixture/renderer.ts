@@ -2,12 +2,7 @@ import {
   createRendererApi,
   type BridgeTransport,
 } from "../../../src/renderer/index.js";
-
-interface FixtureApi {
-  readonly device: {
-    readonly rpc: { readonly ping: (input: string) => Promise<string> };
-  };
-}
+import type { FixtureBridge } from "./contract.js";
 
 declare global {
   interface Window {
@@ -19,7 +14,7 @@ declare global {
   }
 }
 
-void createRendererApi<FixtureApi>(window.rxBridge)
+void createRendererApi<FixtureBridge>(window.rxBridge)
   .then((api) => {
     window.fixtureRendererResult = {
       ready: typeof api.device.rpc.ping === "function",

@@ -15,7 +15,7 @@ import { useRemoteState } from "../src/renderer/use-remote-state.js";
 
 interface StateBridge {
   readonly hardware: {
-    readonly state: { readonly sensor: RemoteState<number> };
+    readonly state: { readonly sensor: number };
   };
 }
 

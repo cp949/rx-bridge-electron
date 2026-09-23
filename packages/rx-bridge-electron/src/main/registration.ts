@@ -1,181 +1,133 @@
 import { Observable } from "rxjs";
 
-import type {
-  ComposedContract,
-  DomainContract,
-  OverflowPolicy,
-  PublicManifest,
-  Schema,
-} from "../contract/index.js";
-import {
-  addPath,
-  assertDomainName,
-  assertOperationName,
-  assertOwnDataRecord,
-  assertPathSegments,
-  createPathTree,
-  type PathNode,
-} from "../contract/define-domain.js";
+import type { PublicManifest, Schema } from "../contract/index.js";
 import type { BridgeValue } from "../protocol/index.js";
 import type {
   BroadcastEventSource,
   CurrentValueSource,
   EventSource,
+  OverflowPolicy,
   ScopedEventSource,
 } from "./sources.js";
-import type { DomainImplementation, RpcHandler } from "./types.js";
+import type { RpcHandler } from "./types.js";
 
-type ImplementationCandidate = {
-  readonly rpc?: unknown;
-  readonly state?: unknown;
-  readonly event?: unknown;
-};
+const reservedSegments = new Set([
+  "__proto__",
+  "prototype",
+  "constructor",
+  "then",
+]);
 
-type Category = "rpc" | "state" | "event";
-
-function asCategoryRecord(
-  domainName: string,
-  category: Category,
+/**
+ * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
+ * 경량 계약 impl 트리 검증(`buildRegistrationTableFromImpl`)이 "사용자가 만든
+ * 중첩 객체가 안전한 plain object인가"를 판단할 때 쓴다. 원래
+ * `contract/define-domain.ts`(descriptor API)에 있었으나, descriptor API 제거
+ * (DELTA-09)로 이 impl 검증 경로만 남아 이곳으로 옮겼다.
+ */
+function assertOwnDataRecord(
   value: unknown,
-): Record<string, unknown> {
-  if (value === undefined) return {};
-  if (value === null || typeof value !== "object")
+  label: string,
+): asserts value is Record<string, unknown> {
+  if (value === null || typeof value !== "object") {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} must be a plain object.`);
+  }
+  for (const key of Reflect.ownKeys(value)) {
+    if (typeof key !== "string") {
+      throw new TypeError(`${label} cannot contain symbol keys.`);
+    }
+    const property = Object.getOwnPropertyDescriptor(value, key);
+    if (
+      property === undefined ||
+      !("value" in property) ||
+      !property.enumerable
+    ) {
+      throw new TypeError(
+        `${label} must contain enumerable data properties only.`,
+      );
+    }
+  }
+}
+
+/** "domain/operation" 경로를 `/`로 나누고 예약어·빈 segment·dotted segment를 거부한다. */
+function assertPathSegments(path: string, label: string): readonly string[] {
+  const segments = path.split("/");
+  for (const segment of segments) {
+    if (segment.length === 0) {
+      throw new TypeError(`${label} cannot contain an empty segment.`);
+    }
+    if (segment.includes(".")) {
+      throw new TypeError(`${label} cannot contain dotted segments.`);
+    }
+    if (reservedSegments.has(segment)) {
+      throw new TypeError(`${label} contains reserved segment '${segment}'.`);
+    }
+  }
+  return segments;
+}
+
+const categorySegments = new Set(["rpc", "state", "event"]);
+
+/** 도메인 이름의 segment 규칙(예약어 금지)에 더해 루트 `dispose`·`rpc`/`state`/`event`를 거부한다. */
+function assertDomainName(name: string): void {
+  const segments = assertPathSegments(name, "Domain name");
+  if (segments[0] === "dispose") {
+    throw new TypeError("Domain name contains reserved segment 'dispose'.");
+  }
+  for (const segment of segments) {
+    if (categorySegments.has(segment)) {
+      throw new TypeError(
+        `Domain name contains reserved segment '${segment}'.`,
+      );
+    }
+  }
+}
+
+/** operation 이름은 단일 segment여야 한다(중첩 경로 금지). */
+function assertOperationName(name: string, label: string): void {
+  if (assertPathSegments(name, label).length !== 1) {
+    throw new TypeError(`${label} '${name}' cannot be a nested path.`);
+  }
+}
+
+/**
+ * "domain/operation" 전체 경로들을 하나의 trie에 누적하며 leaf/namespace
+ * 충돌과 중복 경로를 검출한다. impl 트리 순회(`walkImplNode`)가 등록 경로를
+ * 쌓을 때 쓴다.
+ */
+interface PathNode {
+  leaf: boolean;
+  readonly children: Map<string, PathNode>;
+}
+
+function createPathTree(): PathNode {
+  return { leaf: false, children: new Map() };
+}
+
+function addPath(root: PathNode, path: string): void {
+  const segments = assertPathSegments(path, "Operation path");
+  let node = root;
+  for (const segment of segments) {
+    if (node.leaf) {
+      throw new TypeError(`Leaf/namespace collision at '${path}'.`);
+    }
+    let child = node.children.get(segment);
+    if (child === undefined) {
+      child = { leaf: false, children: new Map() };
+      node.children.set(segment, child);
+    }
+    node = child;
+  }
+  if (node.leaf || node.children.size > 0) {
     throw new TypeError(
-      `${category} implementations for '${domainName}' must be an object.`,
-    );
-  return value as Record<string, unknown>;
-}
-
-/**
- * 도메인 하나의 구현 후보(candidate)를 계약(domain)과 대조 검증하고,
- * 참조를 복사한 새 DomainImplementation으로 정규화한다.
- * 검증 순서는 rpc → state → event, 각 카테고리 내부는 "선언 안 된 항목" →
- * "형태 오류" → "누락 항목" 순서를 유지한다.
- */
-export function normalizeImplementation(
-  domain: DomainContract,
-  candidate: ImplementationCandidate,
-): DomainImplementation {
-  const rpcCandidate = asCategoryRecord(domain.name, "rpc", candidate.rpc);
-  const declaredRpc = domain.definitions.rpc ?? {};
-  const rpc: Record<string, RpcHandler> = Object.create(null);
-  for (const key of Object.keys(rpcCandidate)) {
-    if (!Object.hasOwn(declaredRpc, key))
-      throw new TypeError(`Undeclared RPC handler '${domain.name}/${key}'.`);
-    const handler = rpcCandidate[key];
-    if (typeof handler !== "function")
-      throw new TypeError(
-        `RPC handler '${domain.name}/${key}' must be a function.`,
-      );
-    rpc[key] = handler as RpcHandler;
-  }
-  for (const key of Object.keys(declaredRpc))
-    if (!Object.hasOwn(rpc, key))
-      throw new TypeError(`Missing RPC handler '${domain.name}/${key}'.`);
-
-  const stateCandidate = asCategoryRecord(
-    domain.name,
-    "state",
-    candidate.state,
-  );
-  const declaredState = domain.definitions.state ?? {};
-  const state: Record<string, CurrentValueSource<BridgeValue>> = Object.create(
-    null,
-  );
-  for (const key of Object.keys(stateCandidate)) {
-    if (!Object.hasOwn(declaredState, key))
-      throw new TypeError(`Undeclared State source '${domain.name}/${key}'.`);
-    const source = stateCandidate[key];
-    if (
-      !(source instanceof Observable) ||
-      typeof (source as { getValue?: unknown }).getValue !== "function"
-    )
-      throw new TypeError(
-        `State source '${domain.name}/${key}' must have a current value.`,
-      );
-    state[key] = source as CurrentValueSource<BridgeValue>;
-  }
-  for (const key of Object.keys(declaredState))
-    if (!Object.hasOwn(state, key))
-      throw new TypeError(`Missing State source '${domain.name}/${key}'.`);
-
-  const eventCandidate = asCategoryRecord(
-    domain.name,
-    "event",
-    candidate.event,
-  );
-  const declaredEvent = domain.definitions.event ?? {};
-  const event: Record<string, EventSource> = Object.create(null);
-  for (const key of Object.keys(eventCandidate)) {
-    if (!Object.hasOwn(declaredEvent, key))
-      throw new TypeError(`Undeclared Event source '${domain.name}/${key}'.`);
-    const source = eventCandidate[key] as EventSource | null | undefined;
-    if (
-      source === undefined ||
-      source === null ||
-      !(
-        source instanceof Observable ||
-        (source.mode === "broadcast" && source.source instanceof Observable) ||
-        (source.mode === "scoped" && typeof source.factory === "function")
-      )
-    )
-      throw new TypeError(
-        `Event source '${domain.name}/${key}' must be an Observable or source adapter.`,
-      );
-    event[key] = source;
-  }
-  for (const key of Object.keys(declaredEvent))
-    if (!Object.hasOwn(event, key))
-      throw new TypeError(`Missing Event source '${domain.name}/${key}'.`);
-
-  return Object.freeze({
-    domainName: domain.name,
-    rpc: Object.freeze(rpc),
-    state: Object.freeze(state),
-    event: Object.freeze(event),
-  });
-}
-
-/**
- * 합성된 계약(contract) 전체를 기준으로 구현 목록을 대조 검증한다.
- * 계약에 선언된 모든 도메인이 정확히 한 번씩, 알려진 이름으로 등록되어
- * 있어야 하며 각 도메인은 normalizeImplementation으로 재검증한다.
- * 반환된 Map만이 findRpc/StreamHub의 조회 대상이 되므로, 검증을 통과한
- * 등록만으로 manifest에 광고된 모든 operation이 구현을 갖게 된다.
- */
-export function registerImplementations(
-  contract: ComposedContract,
-  implementations: readonly DomainImplementation[],
-): ReadonlyMap<string, DomainImplementation> {
-  const registered = new Map<string, DomainImplementation>();
-  for (const implementation of implementations) {
-    if (
-      implementation === null ||
-      typeof implementation !== "object" ||
-      typeof (implementation as { domainName?: unknown }).domainName !==
-        "string"
-    )
-      throw new TypeError(
-        "Domain implementation must be an object with a string domainName.",
-      );
-    const name = (implementation as { domainName: string }).domainName;
-    if (!Object.hasOwn(contract.domains, name))
-      throw new TypeError(`Unknown domain implementation '${name}'.`);
-    if (registered.has(name))
-      throw new TypeError(`Duplicate domain implementation '${name}'.`);
-    const domain = contract.domains[name] as DomainContract;
-    registered.set(
-      name,
-      normalizeImplementation(
-        domain,
-        implementation as unknown as ImplementationCandidate,
-      ),
+      `Duplicate path or leaf/namespace collision at '${path}'.`,
     );
   }
-  for (const name of Object.keys(contract.domains))
-    if (!registered.has(name))
-      throw new TypeError(`Missing domain implementation '${name}'.`);
-  return registered;
+  node.leaf = true;
 }
 
 /**
@@ -230,80 +182,10 @@ export interface RegistrationTable {
 }
 
 /**
- * 기존 descriptor 계약(`contract`)과 검증된 구현 Map(`registerImplementations`
- * 결과)으로부터 정규화된 등록 테이블을 만드는 어댑터. 계약에 선언된
- * operation만 순회하므로, `registerImplementations`가 이미 강제한 "선언과
- * 구현이 정확히 일치" 불변식을 그대로 물려받는다 — 여기서는 존재 여부를
- * 다시 검증하지 않는다.
- */
-export function buildRegistrationTableFromContract(
-  contract: ComposedContract,
-  implementations: ReadonlyMap<string, DomainImplementation>,
-): RegistrationTable {
-  const rpcTable = new Map<string, RpcRegistrationEntry>();
-  const stateTable = new Map<string, StateRegistrationEntry>();
-  const eventTable = new Map<string, EventRegistrationEntry>();
-  for (const domain of Object.values(contract.domains) as DomainContract[]) {
-    const implementation = implementations.get(domain.name);
-    for (const [operation, descriptor] of Object.entries(
-      domain.definitions.rpc ?? {},
-    )) {
-      const handler = implementation?.rpc[operation];
-      if (handler === undefined) continue;
-      rpcTable.set(`${domain.name}/${operation}`, {
-        kind: "rpc",
-        domainName: domain.name,
-        operation,
-        path: [domain.name, operation],
-        handler,
-        input: descriptor.input,
-        output: descriptor.output,
-        errors: descriptor.errors,
-      });
-    }
-    for (const [operation, descriptor] of Object.entries(
-      domain.definitions.state ?? {},
-    )) {
-      const source = implementation?.state[operation];
-      if (source === undefined) continue;
-      stateTable.set(`${domain.name}/${operation}`, {
-        kind: "state",
-        domainName: domain.name,
-        operation,
-        path: [domain.name, operation],
-        source,
-        output: descriptor.output,
-      });
-    }
-    for (const [operation, descriptor] of Object.entries(
-      domain.definitions.event ?? {},
-    )) {
-      const source = implementation?.event[operation];
-      if (source === undefined) continue;
-      eventTable.set(`${domain.name}/${operation}`, {
-        kind: "event",
-        domainName: domain.name,
-        operation,
-        path: [domain.name, operation],
-        source,
-        output: descriptor.output,
-        buffer: descriptor.buffer,
-      });
-    }
-  }
-  return {
-    rpc: rpcTable,
-    state: stateTable,
-    event: eventTable,
-  };
-}
-
-/**
- * 등록 테이블 한 카테고리의 항목들을 `contract/manifest.ts`의
- * `publicManifest`와 동일한 순서(도메인명 정렬 → 도메인 내부 operation명
- * 정렬)로 나열한다. 테이블은 Map이라 삽입 순서를 보존하지만 여기서는
- * 순서를 다시 정렬해 `publicManifest`와 완전히 같은 결과를 보장한다 —
- * 테이블 생성 순서(계약 순회 순서)에 기대지 않는다.
+ * 등록 테이블 한 카테고리의 항목들을 도메인명 정렬 → 도메인 내부 operation명
+ * 정렬 순서로 나열한다. 테이블은 Map이라 삽입 순서를 보존하지만 여기서는
+ * 순서를 다시 정렬해 항상 같은 manifest 형식·값을 보장한다 — 테이블 생성
+ * 순서(impl 트리 순회 순서)에 기대지 않는다.
  */
 function manifestCategoryList(
   category: "rpc" | "state" | "event",
@@ -322,12 +204,7 @@ function manifestCategoryList(
   return list;
 }
 
-/**
- * 등록 테이블로부터 공개 manifest를 만든다. 기존 `publicManifest(contract)`와
- * 같은 입력(같은 계약+구현)에 대해 완전히 같은 형식·값을 내야 한다
- * (DELTA-03 완료 기준). 동등성은
- * `test/main/registration-table.test.ts`에서 검증한다.
- */
+/** 등록 테이블로부터 공개 manifest를 만든다. */
 export function manifestFromTable(table: RegistrationTable): PublicManifest {
   return Object.freeze({
     rpc: Object.freeze(manifestCategoryList("rpc", table.rpc)),
@@ -339,13 +216,12 @@ export function manifestFromTable(table: RegistrationTable): PublicManifest {
 // ---------------------------------------------------------------------------
 // 경량 계약(impl 기반) 등록 테이블 빌더 (DELTA-04, RD-011).
 //
-// 기존 경로(`buildRegistrationTableFromContract`)는 `defineDomain`/
-// `composeContracts`가 이미 검증한 계약 트리와, 그 계약을 기준으로 검증된
-// `DomainImplementation` Map을 입력으로 받는다. 여기서는 descriptor 자체가
-// 없으므로 - impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수
-// 객체 트리)를 직접 순회하며 이름 규칙·형태·leaf/namespace 충돌을 한 번에
-// 검증하고 같은 모양의 `RegistrationTable`을 만든다. `options.schemas`/
-// `options.errors`도 impl 트리와 같은 모양으로 병렬 순회한다.
+// impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수 객체 트리)를
+// 직접 순회하며 이름 규칙·형태·leaf/namespace 충돌을 한 번에 검증하고
+// `RegistrationTable`을 만든다. impl 트리 자신이 유일한 진실 소스다 —
+// descriptor 계약을 거치지 않는다(DELTA-09에서 descriptor API 자체를
+// 제거했다). `options.schemas`/`options.errors`도 impl 트리와 같은 모양으로
+// 병렬 순회한다.
 // ---------------------------------------------------------------------------
 
 const CATEGORY_KEYS = ["rpc", "state", "event"] as const;
@@ -411,11 +287,9 @@ function isBroadcastSource(
  * `options.schemas`/`options.errors`의 해당 서브트리(없으면 `undefined`)다.
  *
  * 검증 순서: 노드 자체가 plain object인지 → 카테고리(rpc→state→event) 순서로
- * "선언된 각 operation의 이름·형태" → 나머지 키를 중첩 도메인으로 재귀.
- * 이 순서는 `main/registration.ts`의 `normalizeImplementation`과 같은 정신
- * (선언 안 된 항목 → 형태 오류 → 누락 항목)을 유지하되, impl 트리에는
- * "선언 안 된 항목"이라는 개념이 없다(계약이 없으므로) — 대신 "형태 오류"만
- * 검사한다.
+ * "각 operation의 이름·형태" → 나머지 키를 중첩 도메인으로 재귀. impl
+ * 트리에는 별도 "선언"이 없으므로(계약이 없으므로) "선언 안 된 항목"이라는
+ * 구분 자체가 없다 — "형태 오류"만 검사한다.
  */
 function walkImplNode(
   node: unknown,
@@ -589,8 +463,8 @@ function assertNoExtraOptionPaths(
 /**
  * 경량 계약 impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수
  * 객체)와 선택적 `schemas`/`errors` map으로부터 `RegistrationTable`을 직접
- * 만든다. `buildRegistrationTableFromContract`와 달리 descriptor 계약을
- * 거치지 않는다 — impl 트리 자신이 유일한 진실 소스다.
+ * 만든다. impl 트리 자신이 유일한 진실 소스다 — descriptor 계약을 거치지
+ * 않는다.
  */
 export function buildRegistrationTableFromImpl(
   impl: unknown,

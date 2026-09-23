@@ -1,4 +1,3 @@
-import type { ComposedContract } from "../contract/index.js";
 // bridge-types.ts에서 직접 import한다(barrel `../contract/index.js`를 거치면
 // tsup의 dts 번들러가 `contract`/`main` 두 entry가 같은 파일을 서로 다른
 // chunk에서 참조한다고 보고 순환 chunk 경고를 낸다 — 타입 전용 import라
@@ -17,10 +16,8 @@ import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import {
-  buildRegistrationTableFromContract,
   buildRegistrationTableFromImpl,
   manifestFromTable,
-  registerImplementations,
   type RegistrationTable,
 } from "./registration.js";
 import {
@@ -35,7 +32,6 @@ import type {
   BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
-  DomainImplementation,
   RejectReason,
   SenderIdentity,
 } from "./types.js";
@@ -55,10 +51,8 @@ const PAYLOAD_LIMIT_KEYS = [
 ] as const;
 
 /**
- * `options.payloadLimits`(경량 계약 impl 경로, DELTA-04)를 검증한다.
- * `contract.payloadLimits`(기존 경로, `composeContracts`가 검증)와 달리 이
- * 옵션은 부분 지정을 허용한다(`ResourceLimits`와 같은 패턴) — 생략한 필드는
- * `defaultLimits`를 그대로 쓴다.
+ * `options.payloadLimits`를 검증한다. 부분 지정을 허용한다(`ResourceLimits`와
+ * 같은 패턴) — 생략한 필드는 `defaultLimits`를 그대로 쓴다.
  */
 function assertPartialPayloadLimits(
   payloadLimits: Partial<PayloadLimits> | undefined,
@@ -88,23 +82,6 @@ function assertPartialPayloadLimits(
   }
 }
 
-/**
- * 첫 인자가 기존 descriptor 기반 `ComposedContract`인지 판별한다.
- * `composeContracts`가 만든 값은 항상 own property `domains`(non-null
- * object)를 갖는다 — 경량 계약 impl 트리는 도메인 이름이 `"domains"`인
- * 극단적인 경우가 아니면 이 모양을 만들 수 없다. 두 번째 인자가 배열인지
- * (기존 시그니처의 `implementations`) 함께 확인해 오판별 위험을 낮춘다.
- */
-function looksLikeComposedContract(value: unknown): value is ComposedContract {
-  return (
-    typeof value === "object" &&
-    value !== null &&
-    Object.hasOwn(value, "domains") &&
-    typeof (value as { domains?: unknown }).domains === "object" &&
-    (value as { domains?: unknown }).domains !== null
-  );
-}
-
 export interface StreamBridgeServer extends BridgeServer {
   handshake(
     sender: SenderIdentity,
@@ -125,73 +102,34 @@ interface CommonServerOptions {
   readonly resourceLimits?: Partial<ResourceLimits>;
 }
 
-/** 기존(descriptor 기반) `createBridgeServer(contract, implementations, options)` 오버로드의 옵션. */
-export type ContractServerOptions = CommonServerOptions;
-
-/** 신규(경량 계약 impl 기반) `createBridgeServer(impl, options)` 오버로드의 옵션(RD-011). */
+/** `createBridgeServer(impl, options)`의 옵션(RD-011). */
 export interface ImplServerOptions<B> extends CommonServerOptions {
   readonly schemas?: SchemasFor<B>;
   readonly errors?: ErrorsFor<B>;
   readonly payloadLimits?: Partial<PayloadLimits>;
 }
 
-export function createBridgeServer<Contract extends ComposedContract>(
-  contract: Contract,
-  implementations: readonly DomainImplementation<
-    keyof Contract["domains"] & string
-  >[],
-  options?: ContractServerOptions,
-): StreamBridgeServer;
 export function createBridgeServer<B>(
   impl: BridgeImpl<B>,
   options?: ImplServerOptions<B>,
-): StreamBridgeServer;
-export function createBridgeServer(
-  first: unknown,
-  second?: unknown,
-  third?: unknown,
 ): StreamBridgeServer {
-  if (Array.isArray(second)) {
-    if (!looksLikeComposedContract(first)) {
-      throw new TypeError(
-        "createBridgeServer(contract, implementations, options) requires a composed contract (from composeContracts) as the first argument.",
-      );
-    }
-    const contract = first;
-    const implementations = second as readonly DomainImplementation[];
-    const options = (third ?? {}) as ContractServerOptions;
-    const registrations = registerImplementations(contract, implementations);
-    const table = buildRegistrationTableFromContract(contract, registrations);
-    const limits: PayloadLimits = {
-      ...defaultLimits,
-      ...contract.payloadLimits,
-    };
-    return buildBridgeServer(table, limits, options);
-  }
-  if (third !== undefined) {
-    throw new TypeError(
-      "createBridgeServer(impl, options) accepts at most two arguments.",
-    );
-  }
-  const options = (second ?? {}) as ImplServerOptions<unknown>;
-  assertPartialPayloadLimits(options.payloadLimits);
+  assertPartialPayloadLimits(options?.payloadLimits);
   const limits: PayloadLimits = {
     ...defaultLimits,
-    ...options.payloadLimits,
+    ...options?.payloadLimits,
   };
   const table = buildRegistrationTableFromImpl(
-    first,
-    options.schemas,
-    options.errors,
+    impl,
+    options?.schemas,
+    options?.errors,
   );
-  return buildBridgeServer(table, limits, options);
+  return buildBridgeServer(table, limits, options ?? {});
 }
 
 /**
- * `RegistrationTable`(descriptor 기반이든 impl 기반이든 같은 모양)로부터
- * 실제 `StreamBridgeServer`를 만드는 공유 코어. DELTA-03이 두 경로의 내부를
- * 이 테이블 모양으로 정규화해 둔 덕에, DELTA-04는 테이블을 만드는 방법만
- * 늘리고 dispatch·session·stream 로직은 그대로 재사용한다.
+ * `RegistrationTable`로부터 실제 `StreamBridgeServer`를 만드는 코어.
+ * dispatch·session·stream 로직은 테이블을 만드는 방법(impl 트리 순회)과
+ * 분리되어 있다.
  */
 function buildBridgeServer(
   table: RegistrationTable,

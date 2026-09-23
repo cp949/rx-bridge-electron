@@ -8,8 +8,8 @@ import { FakeTarget, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
 // DELTA-07: 이 파일은 원래 descriptor 기반 registerImplementations/
-// normalizeImplementation(defineDomain + composeContracts + implementDomain의
-// "구현 배열을 계약과 대조" 모델) 자체의 런타임 검증을 다뤘다. 그 중 다음 두
+// normalizeImplementation("구현 배열을 계약과 대조" 모델) 자체의 런타임
+// 검증을 다뤘다(DELTA-09에서 descriptor API 자체가 제거됐다). 그 중 다음 두
 // 부류는 이번 DELTA에서 옮기지 않았다(각각 사유):
 //
 // 1. "선언된 도메인 구현이 배열에 없음/중복/다른 모양으로 재선언" 계열 — 계약과

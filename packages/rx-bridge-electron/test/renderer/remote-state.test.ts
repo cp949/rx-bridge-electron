@@ -1,7 +1,6 @@
 import { firstValueFrom, take } from "rxjs";
 import { describe, expect, expectTypeOf, test } from "vitest";
 
-import type { RemoteState } from "../../src/contract/index.js";
 import {
   createRendererApi,
   type RendererApi,
@@ -12,7 +11,7 @@ import { FakeTransport } from "./fake-transport.js";
 interface StateBridge {
   readonly hardware: {
     readonly state: {
-      readonly connection$: RemoteState<string | undefined>;
+      readonly connection$: string | undefined;
     };
   };
 }

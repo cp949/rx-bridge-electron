@@ -1,7 +1,5 @@
-import type { Observable } from "rxjs";
 import { describe, expect, test } from "vitest";
 
-import type { RemoteState } from "../../src/contract/index.js";
 import {
   createRendererApi,
   RemoteError,
@@ -16,13 +14,13 @@ import { FakeTransport } from "./fake-transport.js";
 interface AppBridge {
   readonly hardware: {
     readonly rpc: {
-      connect(): Promise<{ readonly connected: boolean }>;
+      connect(): { readonly connected: boolean };
     };
     readonly state: {
-      readonly status$: RemoteState<string | undefined>;
+      readonly status$: string | undefined;
     };
     readonly event: {
-      readonly log$: Observable<string>;
+      readonly log$: string;
     };
   };
 }

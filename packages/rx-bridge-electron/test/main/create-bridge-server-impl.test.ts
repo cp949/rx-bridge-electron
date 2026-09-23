@@ -209,10 +209,9 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).toThrow(TypeError);
   });
 
-  // DELTA-07: contract.test.ts의 `defineDomain`/`composeContracts` 이름 규칙
-  // test.each(20행)에서, walkImplNode가 defineDomain과 같은 assertDomainName/
-  // assertPathSegments를 공유해 impl 트리에도 그대로 적용됨을 보이는 대표
-  // 사례만 옮겼다. "constructor" 예약 세그먼트·"/"가 든 operation 이름·
+  // DELTA-07: 옛 descriptor API의 이름 규칙 test.each(20행)에서, walkImplNode가
+  // 같은 assertDomainName/assertPathSegments를 공유해 impl 트리에도 그대로
+  // 적용됨을 보이는 대표 사례만 옮겼다. "constructor" 예약 세그먼트·"/"가 든 operation 이름·
   // leaf/namespace 충돌은 위에서 이미 다른 이름으로 검증됐다(중복이라 다시
   // 옮기지 않음). "도메인이 정확히 'rpc'/'state'/'event' 그 자체"인 경우는
   // impl 트리의 최상위에서 그 키가 항상 카테고리로 해석되어 애초에 구성할 수

@@ -59,7 +59,7 @@ type BadValueBridge = {
   };
 };
 
-/** 카테고리는 있지만 key가 없는(빈) 도메인 — DELTA-07: 옛 `implementDomain`이
+/** 카테고리는 있지만 key가 없는(빈) 도메인 — DELTA-07: 옛 descriptor API가
  * 요구하던 "빈 카테고리는 `{}`만 허용" 규칙이 impl 기반 API에도 그대로 있는지
  * 확인한다(옛 test/main/implement-domain-types.test.ts에서 옮김). */
 type EmptyRpcBridge = {

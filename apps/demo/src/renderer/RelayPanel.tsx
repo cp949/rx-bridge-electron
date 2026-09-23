@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
 import type { AppBridge } from "../bridge/contract.js";
 import type { RelayStatus } from "../bridge/relay-contract.js";
-import type { BridgeApi } from "@cp949/rx-bridge-electron/contract";
 import {
   RemoteError,
   type RendererApi,
@@ -9,7 +8,7 @@ import {
 import { useRemoteState } from "./use-remote-state.js";
 
 interface Props {
-  readonly api: RendererApi<BridgeApi<AppBridge>>;
+  readonly api: RendererApi<AppBridge>;
   readonly readOnly?: boolean;
 }
 

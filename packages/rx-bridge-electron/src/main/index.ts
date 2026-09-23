@@ -1,8 +1,5 @@
 export { createBridgeServer } from "./create-bridge-server.js";
-export type {
-  ContractServerOptions,
-  ImplServerOptions,
-} from "./create-bridge-server.js";
+export type { ImplServerOptions } from "./create-bridge-server.js";
 // bridge-types.ts에서 직접 재수출한다(barrel을 거치면 tsup dts 번들러가
 // contract/main 두 entry 간 순환 chunk 경고를 낸다 — create-bridge-server.ts
 // 참고).
@@ -21,8 +18,6 @@ export type {
   ElectronBridgeChannels,
 } from "./electron-adapter.js";
 export type { StreamBridgeServer } from "./create-bridge-server.js";
-export { implementDomain } from "./implement-domain.js";
-export type { DomainHandlers } from "./implement-domain.js";
 export { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 export type { ResourceLimits } from "./resource-limits.js";
 export { broadcastEvent, currentValueSource, scopedEvent } from "./sources.js";
@@ -35,7 +30,6 @@ export type {
   BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
-  DomainImplementation,
   RejectReason,
   SenderIdentity,
 } from "./types.js";

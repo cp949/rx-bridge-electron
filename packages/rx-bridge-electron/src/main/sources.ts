@@ -1,12 +1,19 @@
 import { Observable } from "rxjs";
 
-import type { OverflowPolicy } from "../contract/index.js";
 import type { BridgeValue } from "../protocol/index.js";
 import type { BridgeContext } from "./types.js";
 
 export interface CurrentValueSource<T> extends Observable<T> {
   getValue(): T;
 }
+
+/**
+ * Event source 버퍼가 가득 찼을 때의 처리 정책. 예전에는
+ * `contract/descriptors.ts`의 `event()` descriptor가 정의했지만, 경량 계약은
+ * descriptor가 없으므로(DELTA-09) 이 개념을 실제로 쓰는 main 쪽(source
+ * 생성·등록 테이블)에 둔다.
+ */
+export type OverflowPolicy = "error" | "drop-oldest" | "drop-newest";
 
 /**
  * Event source의 배압 버퍼 설정. 경량 계약(impl 기반 `createBridgeServer`,

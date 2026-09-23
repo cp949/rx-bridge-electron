@@ -1,4 +1,9 @@
 import type { PublicManifest } from "../contract/index.js";
+// bridge-types.ts에서 직접 import한다(barrel `../contract/index.js`를 거치면
+// tsup의 dts 번들러가 `contract`/`renderer` 두 entry가 같은 파일을 서로 다른
+// chunk에서 참조한다고 보고 순환 chunk 경고를 낸다 — `main/create-bridge-server.ts`와
+// 같은 이유).
+import type { BridgeApi } from "../contract/bridge-types.js";
 import type { Observable } from "rxjs";
 import {
   parseBridgeValue,
@@ -41,7 +46,12 @@ type AddCallOptions<Value> =
         ? { readonly [Key in keyof Value]: AddCallOptions<Value[Key]> }
         : Value;
 
-export type RendererApi<Bridge> = AddCallOptions<Bridge> &
+/**
+ * Renderer가 계약 타입 `B`로부터 얻는 공개 API 타입. `BridgeApi<B>`(RPC는
+ * `Promise`, State는 `RemoteState`, Event는 `Observable`)에 RPC 호출마다
+ * `CallOptions`(취소·타임아웃)를 더하고, 루트에 `dispose()`를 추가한다.
+ */
+export type RendererApi<B> = AddCallOptions<BridgeApi<B>> &
   Disposable & { readonly dispose: () => void };
 
 interface ManifestLeaf {
@@ -138,7 +148,7 @@ function addManifestPath(
   key: string,
 ): void {
   const segments = parseSegments(key, category);
-  // 와이어 경로 기준 충돌 검사는 Main의 composeContracts 규칙과 같다.
+  // 와이어 경로 기준 충돌 검사는 Main의 impl 트리 등록 규칙과 같다.
   addPath(paths, segments, true);
   const operation = segments[segments.length - 1]!;
   addPath(root, [...segments.slice(0, -1), category, operation], {
@@ -266,9 +276,9 @@ function createProxy(
   });
 }
 
-export async function createRendererApi<Bridge>(
+export async function createRendererApi<B>(
   transport: BridgeTransport,
-): Promise<RendererApi<Bridge>> {
+): Promise<RendererApi<B>> {
   let response: unknown;
   try {
     response = await transport.connect();
@@ -281,5 +291,5 @@ export async function createRendererApi<Bridge>(
   return createProxy(handshake.tree, { rpcClient, streams }, () => {
     rpcClient.dispose();
     streams[Symbol.dispose]();
-  }) as RendererApi<Bridge>;
+  }) as RendererApi<B>;
 }

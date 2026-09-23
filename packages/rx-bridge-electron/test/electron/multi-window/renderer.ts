@@ -1,23 +1,10 @@
-import type { Observable } from "rxjs";
-
 import {
   createOpaqueId,
   createRendererApi,
   RemoteError,
   type BridgeTransport,
 } from "../../../src/renderer/index.js";
-
-type Subscribable = Observable<string>;
-interface LabApi {
-  readonly lab: {
-    readonly rpc: Record<
-      "ping" | "secure" | "hold",
-      (input: string) => Promise<string>
-    >;
-    readonly state: { readonly status: Subscribable };
-    readonly event: Record<"notice" | "strict" | "lossy", Subscribable>;
-  };
-}
+import type { LabBridge } from "./contract.js";
 
 declare global {
   interface Window {
@@ -29,7 +16,7 @@ export type CallResult =
   | { readonly ok: true; readonly value: string }
   | { readonly ok: false; readonly code: string };
 
-const api = createRendererApi<LabApi>(window.rxBridge);
+const api = createRendererApi<LabBridge>(window.rxBridge);
 
 function settle(promise: Promise<string>): Promise<CallResult> {
   return promise.then(

@@ -4,7 +4,6 @@ import {
   createRendererApi,
   type BridgeTransport,
 } from "@cp949/rx-bridge-electron/renderer";
-import type { BridgeApi } from "@cp949/rx-bridge-electron/contract";
 
 import type { AppBridge } from "../src/bridge/contract.js";
 import { MainMonitorApp } from "../src/renderer/App.js";
@@ -64,7 +63,7 @@ async function monitorHarness() {
     onStreamMessage: () => () => {},
   };
   return {
-    api: await createRendererApi<BridgeApi<AppBridge>>(transport),
+    api: await createRendererApi<AppBridge>(transport),
     invoke,
   };
 }

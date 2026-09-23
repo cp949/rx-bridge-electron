@@ -9,16 +9,14 @@ import {
   type CallOptions,
   type RendererApi,
 } from "../../src/renderer/index.js";
-import type { RemoteState } from "../../src/contract/index.js";
 import { FakeTransport, deferred } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
     readonly rpc: {
-      connect(
-        input: { readonly deviceId: string },
-        options?: CallOptions,
-      ): Promise<{ readonly connected: boolean }>;
+      connect(input: {
+        readonly deviceId: string;
+      }): { readonly connected: boolean };
     };
   };
 }
@@ -26,11 +24,11 @@ interface AppBridge {
 interface InferredBridgeShape {
   readonly hardware: {
     readonly rpc: {
-      connect(input: { readonly deviceId: string }): Promise<boolean>;
-      disconnect(): Promise<boolean>;
+      connect(input: { readonly deviceId: string }): boolean;
+      disconnect(): boolean;
     };
     readonly event: {
-      readonly fault: Observable<string>;
+      readonly fault: string;
     };
   };
 }
@@ -229,9 +227,9 @@ describe("renderer handshake and API proxy", () => {
     });
     const api = await createRendererApi<{
       readonly hardware: {
-        readonly rpc: { connect(): Promise<string> };
-        readonly state: { readonly status: RemoteState<string> };
-        readonly serial: { readonly rpc: { open(): Promise<string> } };
+        readonly rpc: { connect(): string };
+        readonly state: { readonly status: string };
+        readonly serial: { readonly rpc: { open(): string } };
       };
     }>(transport);
 
@@ -267,7 +265,7 @@ describe("renderer handshake and API proxy", () => {
       },
     });
     const api = await createRendererApi<{
-      readonly hardware: { readonly rpc: { dispose(): Promise<string> } };
+      readonly hardware: { readonly rpc: { dispose(): string } };
     }>(transport);
 
     expect("dispose" in api).toBe(true);
