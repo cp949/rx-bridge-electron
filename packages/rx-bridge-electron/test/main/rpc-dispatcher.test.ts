@@ -443,10 +443,7 @@ describe("RPC output boundary revalidation", () => {
     const bad = setupOutput(badOutput, undefined, diagnostics);
     const good = setupOutput(object, undefined, diagnostics);
     await expect(
-      bad.server.dispatchRpc(
-        sender(),
-        transformRequest({ input: { id: 42 } }),
-      ),
+      bad.server.dispatchRpc(sender(), transformRequest({ input: { id: 42 } })),
     ).resolves.toMatchObject({
       type: "error",
       error: { code: "INVALID_ARGUMENT" },

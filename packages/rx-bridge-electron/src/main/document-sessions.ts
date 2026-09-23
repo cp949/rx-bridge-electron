@@ -40,10 +40,7 @@ export class DocumentSessions {
 
   public attach(target: AttachedTarget): () => void {
     if (this.#disposed)
-      throw new BridgeProtocolError(
-        "FORBIDDEN",
-        "Bridge server is disposed.",
-      );
+      throw new BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.");
     this.#detach(target.webContentsId);
     if (this.#attachments.has(target.webContentsId)) return () => {};
     const attachment: Attachment = {
