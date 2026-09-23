@@ -1,3 +1,4 @@
+import { firstValueFrom, take } from "rxjs";
 import { describe, expect, expectTypeOf, test } from "vitest";
 
 import type { RemoteState } from "../../src/contract/index.js";
@@ -112,6 +113,297 @@ describe("renderer RemoteState", () => {
       type: "unsubscribe",
       subscriptionId,
     });
+  });
+
+  test("delivers the current value synchronously to a late subscriber joining an active generation", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const first = state.subscribe(() => {});
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 1, values: ["a"] }),
+    );
+
+    const secondValues: Array<string | undefined> = [];
+    const snapshotsDuringDelivery: unknown[] = [];
+    const second = state.subscribe((value) => {
+      secondValues.push(value);
+      snapshotsDuringDelivery.push(state.snapshot);
+    });
+
+    expect(secondValues).toEqual(["a"]);
+    expect(snapshotsDuringDelivery).toEqual([
+      { status: "current", active: true, value: "a" },
+    ]);
+
+    first.unsubscribe();
+    second.unsubscribe();
+  });
+
+  test("delivers a legitimate undefined current value synchronously to a late subscriber", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const first = state.subscribe(() => {});
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, {
+        type: "batch",
+        sequence: 1,
+        values: [undefined],
+      }),
+    );
+
+    const secondValues: Array<string | undefined> = [];
+    const second = state.subscribe((value) => secondValues.push(value));
+
+    expect(secondValues).toEqual([undefined]);
+
+    first.unsubscribe();
+    second.unsubscribe();
+  });
+
+  test("does not open an additional remote subscription for a late subscriber", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const first = state.subscribe(() => {});
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 1, values: ["a"] }),
+    );
+    expect(
+      transport.controls.filter((command) => command.type === "subscribe"),
+    ).toHaveLength(1);
+
+    const second = state.subscribe(() => {});
+    expect(
+      transport.controls.filter((command) => command.type === "subscribe"),
+    ).toHaveLength(1);
+
+    first.unsubscribe();
+    second.unsubscribe();
+    expect(
+      transport.controls.filter((command) => command.type === "subscribe"),
+    ).toHaveLength(1);
+  });
+
+  test("does not deliver to a late subscriber joining before subscribed", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    const first = state.subscribe((value) => firstValues.push(value));
+    const secondValues: Array<string | undefined> = [];
+    const second = state.subscribe((value) => secondValues.push(value));
+
+    expect(firstValues).toEqual([]);
+    expect(secondValues).toEqual([]);
+
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 1, values: ["x"] }),
+    );
+    expect(firstValues).toEqual(["x"]);
+    expect(secondValues).toEqual(["x"]);
+
+    first.unsubscribe();
+    second.unsubscribe();
+  });
+
+  test("does not deliver to a late subscriber joining after subscribed but before the first batch", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    const first = state.subscribe((value) => firstValues.push(value));
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+
+    const secondValues: Array<string | undefined> = [];
+    const second = state.subscribe((value) => secondValues.push(value));
+    expect(firstValues).toEqual([]);
+    expect(secondValues).toEqual([]);
+
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 1, values: ["x"] }),
+    );
+    expect(firstValues).toEqual(["x"]);
+    expect(secondValues).toEqual(["x"]);
+
+    first.unsubscribe();
+    second.unsubscribe();
+  });
+
+  test("replays the in-flight value once to a subscriber that joins reentrantly from another subscriber's callback", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    const secondValues: Array<string | undefined> = [];
+    let second: { unsubscribe(): void } | undefined;
+
+    const first = state.subscribe((value) => {
+      firstValues.push(value);
+      if (second === undefined) {
+        second = state.subscribe((innerValue) => secondValues.push(innerValue));
+      }
+    });
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, {
+        type: "batch",
+        sequence: 1,
+        values: ["a", "b"],
+      }),
+    );
+
+    expect(firstValues).toEqual(["a", "b"]);
+    expect(secondValues).toEqual(["a", "b"]);
+
+    first.unsubscribe();
+    second?.unsubscribe();
+  });
+
+  test("delivers the current value synchronously to firstValueFrom and does not disturb existing subscribers", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    const first = state.subscribe((value) => firstValues.push(value));
+    const subscriptionId = firstSubscriptionId(transport);
+    transport.emitStream(
+      message(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 1, values: ["a"] }),
+    );
+
+    const takeValues: Array<string | undefined> = [];
+    state.pipe(take(1)).subscribe((value) => takeValues.push(value));
+    expect(takeValues).toEqual(["a"]);
+    expect(
+      transport.controls.filter((command) => command.type === "unsubscribe"),
+    ).toHaveLength(0);
+
+    const resolved = await firstValueFrom(state);
+    expect(resolved).toBe("a");
+    expect(
+      transport.controls.filter((command) => command.type === "unsubscribe"),
+    ).toHaveLength(0);
+
+    transport.emitStream(
+      message(subscriptionId, { type: "batch", sequence: 2, values: ["b"] }),
+    );
+    expect(firstValues).toEqual(["a", "b"]);
+
+    first.unsubscribe();
+  });
+
+  test("does not replay a value after a remote complete and before a fresh subscribed", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    let completed = 0;
+    state.subscribe({
+      next: (value) => firstValues.push(value),
+      complete: () => {
+        completed += 1;
+      },
+    });
+    const firstId = firstSubscriptionId(transport);
+    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      message(firstId, { type: "batch", sequence: 1, values: ["old"] }),
+    );
+    transport.emitStream(message(firstId, { type: "complete", sequence: 2 }));
+    expect(completed).toBe(1);
+
+    const nextValues: Array<string | undefined> = [];
+    const next = state.subscribe((value) => nextValues.push(value));
+    expect(nextValues).toEqual([]);
+    expect(state.snapshot).toEqual({ status: "connecting", active: true });
+
+    const subscribeCommands = transport.controls.filter(
+      (command) => command.type === "subscribe",
+    );
+    expect(subscribeCommands).toHaveLength(2);
+    const secondId = subscribeCommands[1]!.subscriptionId;
+    expect(secondId).not.toBe(firstId);
+
+    transport.emitStream(
+      message(secondId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+    );
+    expect(nextValues).toEqual(["fresh"]);
+    next.unsubscribe();
+  });
+
+  test("does not replay a value after a remote error and before a fresh subscribed", async () => {
+    const transport = stateTransport();
+    const api = await createRendererApi<StateBridge>(transport);
+    const state = api.hardware.connection$;
+    const firstValues: Array<string | undefined> = [];
+    const errors: unknown[] = [];
+    state.subscribe({
+      next: (value) => firstValues.push(value),
+      error: (error) => errors.push(error),
+    });
+    const firstId = firstSubscriptionId(transport);
+    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      message(firstId, { type: "batch", sequence: 1, values: ["old"] }),
+    );
+    transport.emitStream(
+      message(firstId, {
+        type: "error",
+        sequence: 2,
+        error: { code: "SOURCE_FAILED", message: "stream failed" },
+      }),
+    );
+    expect(errors).toHaveLength(1);
+
+    const nextValues: Array<string | undefined> = [];
+    const next = state.subscribe((value) => nextValues.push(value));
+    expect(nextValues).toEqual([]);
+    expect(state.snapshot).toEqual({ status: "connecting", active: true });
+
+    const subscribeCommands = transport.controls.filter(
+      (command) => command.type === "subscribe",
+    );
+    expect(subscribeCommands).toHaveLength(2);
+    const secondId = subscribeCommands[1]!.subscriptionId;
+    expect(secondId).not.toBe(firstId);
+
+    transport.emitStream(
+      message(secondId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+    );
+    expect(nextValues).toEqual(["fresh"]);
+    next.unsubscribe();
   });
 
   test("opens a new ID without replaying stale data and discards the closed generation", async () => {
