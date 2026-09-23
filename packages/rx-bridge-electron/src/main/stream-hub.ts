@@ -6,7 +6,6 @@ import type {
   StateDescriptor,
 } from "../contract/index.js";
 import {
-  parseBridgeValue,
   type BridgeValue,
   type PayloadLimits,
   type RpcErrorPayload,
@@ -15,6 +14,7 @@ import {
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { serializeError } from "./error-serializer.js";
+import { parseOutput } from "./output-boundary.js";
 import type { StreamDomainImplementation } from "./implement-domain.js";
 import type {
   CurrentValueSource,
@@ -377,11 +377,11 @@ export class StreamHub {
     if (consumer.closed || consumer.terminal !== undefined) return;
     let value: BridgeValue;
     try {
-      value = consumer.registration.descriptor.output.parse(
-        parseBridgeValue(raw, this.#limits),
+      value = parseOutput(
+        consumer.registration.descriptor.output,
+        raw,
+        this.#limits,
       );
-      parseBridgeValue(value, this.#limits);
-      value = parseBridgeValue(structuredClone(value), this.#limits);
     } catch {
       this.#diagnostics?.record({
         type: "validation-failed",

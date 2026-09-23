@@ -8,7 +8,12 @@ import {
   type WireRpcRequest,
 } from "../protocol/index.js";
 import { serializeError } from "./error-serializer.js";
-import type { BridgeContext, DomainImplementation } from "./types.js";
+import { parseOutput } from "./output-boundary.js";
+import type {
+  BridgeContext,
+  DiagnosticsSink,
+  DomainImplementation,
+} from "./types.js";
 
 export interface RpcRegistration {
   readonly descriptor: RpcDescriptor<BridgeValue, BridgeValue, string>;
@@ -38,6 +43,7 @@ export async function dispatchRegistered(
   envelope: WireRpcRequest,
   context: BridgeContext,
   limits: PayloadLimits,
+  diagnostics?: DiagnosticsSink,
 ): Promise<RpcResponse> {
   const respond = (
     response:
@@ -76,19 +82,9 @@ export async function dispatchRegistered(
       },
     });
   }
+  let result: BridgeValue;
   try {
-    const result = await registration.handler(input, context);
-    if (context.signal.aborted)
-      return respond({
-        type: "error",
-        error: { code: "CANCELLED", message: "Request cancelled." },
-      });
-    return respond({
-      type: "success",
-      result: registration.descriptor.output.parse(
-        parseBridgeValue(result, limits),
-      ),
-    });
+    result = await registration.handler(input, context);
   } catch (error) {
     if (context.signal.aborted)
       return respond({
@@ -105,4 +101,25 @@ export async function dispatchRegistered(
       error: serializeError(error, registration.descriptor.errors, limits),
     });
   }
+  if (context.signal.aborted)
+    return respond({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+  let output: BridgeValue;
+  try {
+    output = parseOutput(registration.descriptor.output, result, limits);
+  } catch {
+    diagnostics?.record({ type: "validation-failed", key: envelope.key });
+    if (context.signal.aborted)
+      return respond({
+        type: "error",
+        error: { code: "CANCELLED", message: "Request cancelled." },
+      });
+    return respond({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+  }
+  return respond({ type: "success", result: output });
 }

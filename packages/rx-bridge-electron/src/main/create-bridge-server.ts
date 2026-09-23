@@ -128,6 +128,7 @@ export function createBridgeServer(
           envelope,
           context,
           limits,
+          options.diagnostics,
         );
       } finally {
         sessions.finishRpc(session, id, controller);

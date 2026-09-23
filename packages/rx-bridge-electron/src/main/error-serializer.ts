@@ -21,11 +21,12 @@ export function serializeError(
       typeof candidate.message === "string"
     ) {
       try {
+        const message = parseBridgeValue(candidate.message, limits) as string;
         return candidate.details === undefined
-          ? { code: candidate.code, message: candidate.message }
+          ? { code: candidate.code, message }
           : {
               code: candidate.code,
-              message: candidate.message,
+              message,
               details: parseBridgeValue(candidate.details, limits),
             };
       } catch {
