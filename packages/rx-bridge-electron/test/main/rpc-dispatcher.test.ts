@@ -12,7 +12,12 @@ import {
   type WireRpcRequest,
 } from "../../src/main/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
-import type { Authorize } from "../../src/main/index.js";
+import type {
+  Authorize,
+  BridgeContext,
+  BridgeDiagnostic,
+  StreamBridgeServer,
+} from "../../src/main/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 
 const limits = { maxDepth: 3, maxEntries: 8, maxStringBytes: 32 };
@@ -64,6 +69,43 @@ function setup(
   );
   server.attach(new FakeTarget());
   return { handler, server };
+}
+
+const transformRequest = (
+  overrides: Partial<WireRpcRequest> = {},
+): WireRpcRequest => request({ key: "rpc:boundary/transform", ...overrides });
+
+function setupOutput(
+  output: Schema<BridgeValue>,
+  handler: (
+    input: BridgeValue,
+    context: BridgeContext,
+  ) => Promise<BridgeValue> | BridgeValue = vi.fn(async () => ({
+    id: "device-1",
+  })),
+  diagnostics: {
+    record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>>;
+  } = { record: vi.fn<(event: BridgeDiagnostic) => void>() },
+) {
+  const transformDomain = defineDomain("boundary", {
+    rpc: {
+      transform: rpc({
+        input: object,
+        output,
+        errors: ["DEVICE_GONE"] as const,
+      }),
+    },
+  });
+  const implementation = implementDomain(transformDomain, {
+    rpc: { transform: handler },
+  });
+  const server: StreamBridgeServer = createBridgeServer(
+    composeContracts({ payloadLimits: limits }, transformDomain),
+    [implementation],
+    { diagnostics },
+  );
+  server.attach(new FakeTarget());
+  return { handler, server, diagnostics };
 }
 
 describe("Main RPC dispatch", () => {
@@ -195,5 +237,234 @@ describe("Main RPC dispatch", () => {
         error: { code: "INTERNAL", message: "Internal bridge error." },
       }),
     );
+  });
+});
+
+describe("RPC output boundary revalidation", () => {
+  test("rejects an output schema that produces a function", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => (() => undefined) as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema that produces a Date", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => new Date() as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema that produces a Map", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => new Map() as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema that produces a cyclic object", async () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
+    const output: Schema<BridgeValue> = {
+      parse: () => circular as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema that produces an accessor property without invoking it", async () => {
+    const getter = vi.fn(() => "secret");
+    const withAccessor: Record<string, unknown> = {};
+    Object.defineProperty(withAccessor, "value", {
+      enumerable: true,
+      get: getter,
+    });
+    const output: Schema<BridgeValue> = {
+      parse: () => withAccessor as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+    expect(getter).not.toHaveBeenCalled();
+  });
+
+  test("rejects an output schema result beyond the configured depth", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => ({ a: { b: { c: { d: 1 } } } }),
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema result beyond the configured entry count", async () => {
+    const nineEntries = Object.fromEntries(
+      Array.from({ length: 9 }, (_, index) => [`k${index}`, index]),
+    );
+    const output: Schema<BridgeValue> = {
+      parse: () => nineEntries as unknown as BridgeValue,
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("rejects an output schema result beyond the configured string byte count", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => "x".repeat(33),
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("does not leak a declared error code thrown by the output schema", async () => {
+    const output: Schema<BridgeValue> = {
+      parse: () => {
+        throw Object.assign(new Error("device unavailable"), {
+          code: "DEVICE_GONE",
+        });
+      },
+    };
+    const { server } = setupOutput(output);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("returns a response result unaffected by later mutation of the handler's object", async () => {
+    const source: { id: string; extra?: string } = { id: "device-1" };
+    const handler = vi.fn(async () => source);
+    const { server } = setupOutput(object, handler);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    if (response.type !== "success") throw new Error("expected success");
+    const result = response.result;
+    source.extra = "mutated";
+    expect(result).toEqual({ id: "device-1" });
+    expect(result).not.toBe(source);
+  });
+
+  test("keeps a within-limits schema transformation in the success response", async () => {
+    const normalizing: Schema<BridgeValue> = {
+      parse(value) {
+        const parsed = object.parse(value);
+        return { id: parsed.id, normalized: true };
+      },
+    };
+    const { server } = setupOutput(normalizing);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({ type: "success" });
+    if (response.type !== "success") throw new Error("expected success");
+    expect(response.result).toEqual({ id: "device-1", normalized: true });
+  });
+
+  test("rejects a declared domain error whose message exceeds the byte limit", async () => {
+    const handler = vi.fn(async () => {
+      throw Object.assign(new Error("x".repeat(33)), { code: "DEVICE_GONE" });
+    });
+    const { server } = setupOutput(object, handler);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("prefers CANCELLED when the request is aborted before the output schema throws", async () => {
+    const box: { server?: StreamBridgeServer } = {};
+    const output: Schema<BridgeValue> = {
+      parse: () => {
+        box.server?.cancel(sender(), {
+          protocolVersion: 1,
+          clientId: "document-1",
+          requestId: "request-1",
+        });
+        throw new Error("boom");
+      },
+    };
+    const { server } = setupOutput(output);
+    box.server = server;
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    expect(response).not.toHaveProperty("result");
+  });
+
+  test("records a single validation-failed diagnostic only for output failures", async () => {
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const badOutput: Schema<BridgeValue> = {
+      parse: () => (() => undefined) as unknown as BridgeValue,
+    };
+    const bad = setupOutput(badOutput, undefined, diagnostics);
+    const good = setupOutput(object, undefined, diagnostics);
+    await expect(
+      bad.server.dispatchRpc(
+        sender(),
+        transformRequest({ input: { id: 42 } }),
+      ),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INVALID_ARGUMENT" },
+    });
+    await expect(
+      good.server.dispatchRpc(sender(), transformRequest()),
+    ).resolves.toMatchObject({ type: "success" });
+    await expect(
+      bad.server.dispatchRpc(sender(), transformRequest()),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL" },
+    });
+    const validationFailed = diagnostics.record.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "validation-failed");
+    expect(validationFailed).toEqual([
+      { type: "validation-failed", key: "rpc:boundary/transform" },
+    ]);
   });
 });
