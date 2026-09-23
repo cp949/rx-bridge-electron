@@ -4,6 +4,7 @@ import {
   parseBridgeValue,
   type PayloadLimits,
 } from "../../src/protocol/bridge-value.js";
+import * as protocol from "../../src/protocol/index.js";
 
 const limits: PayloadLimits = {
   maxDepth: 3,
@@ -21,6 +22,16 @@ function expectInvalidArgument(
 }
 
 describe("parseBridgeValue", () => {
+  test("keeps limit rejections indistinguishable from other protocol errors publicly", () => {
+    expect(() => parseBridgeValue("x".repeat(9), limits)).toThrowError(
+      expect.objectContaining({
+        name: "BridgeProtocolError",
+        code: "INVALID_ARGUMENT",
+      }),
+    );
+    expect(Object.keys(protocol)).not.toContain("PayloadLimitError");
+  });
+
   test("preserves accepted nested plain data without mutating it", () => {
     const value = { nested: [1, undefined, null, "ok"] };
 

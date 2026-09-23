@@ -31,13 +31,13 @@ export class BridgeProtocolError extends Error {
  * Raised in place of {@link BridgeProtocolError} when a value is rejected
  * because it exceeds a configured {@link PayloadLimits} threshold, so
  * callers can distinguish size-limit rejections from structural ones
- * without matching on the message string. Public `code`/`message` are
- * unchanged.
+ * without matching on the message string. Internal marker only: not
+ * exported from `./index.js`, and `name`/`code`/`message` stay identical to
+ * {@link BridgeProtocolError}.
  */
 export class PayloadLimitError extends BridgeProtocolError {
   public constructor(message: string) {
     super("INVALID_ARGUMENT", message);
-    this.name = "PayloadLimitError";
   }
 }
 

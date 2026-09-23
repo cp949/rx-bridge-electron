@@ -2,12 +2,12 @@ import type { ComposedContract, RpcDescriptor } from "../contract/index.js";
 import {
   BridgeProtocolError,
   parseBridgeValue,
-  PayloadLimitError,
   type BridgeValue,
   type PayloadLimits,
   type RpcResponse,
   type WireRpcRequest,
 } from "../protocol/index.js";
+import { PayloadLimitError } from "../protocol/bridge-value.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";

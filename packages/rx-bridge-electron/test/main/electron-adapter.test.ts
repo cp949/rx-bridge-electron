@@ -16,7 +16,7 @@ import {
   implementDomain,
   type BridgeDiagnostic,
 } from "../../src/main/index.js";
-import { recordAdapterRejection } from "../../src/main/create-bridge-server.js";
+import { recordAdapterRejection } from "../../src/main/diagnostics.js";
 import * as mainIndex from "../../src/main/index.js";
 
 const value: Schema<undefined> = { parse: () => undefined };

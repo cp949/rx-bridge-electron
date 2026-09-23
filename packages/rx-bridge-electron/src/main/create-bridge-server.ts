@@ -8,7 +8,7 @@ import type {
   WireStreamCommand,
 } from "../protocol/index.js";
 import { parseOpaqueIdSequence } from "../protocol/index.js";
-import { recordDiagnostic } from "./diagnostics.js";
+import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import { registerImplementations } from "./registration.js";
@@ -35,14 +35,6 @@ const defaultLimits: PayloadLimits = {
   maxStringBytes: 1_000_000,
   maxTotalBytes: 16_777_216,
 };
-
-/**
- * Adapter-only recording pathway for rejections the adapter itself judges
- * (`frame-not-main`, `origin-not-allowed`, `malformed-envelope`). Not exported
- * from `./index.js` so user-defined `StreamBridgeServer` implementations never
- * need to know about it.
- */
-export const recordAdapterRejection = Symbol("recordAdapterRejection");
 
 export interface StreamBridgeServer extends BridgeServer {
   handshake(
