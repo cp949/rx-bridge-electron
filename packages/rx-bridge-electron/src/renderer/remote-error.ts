@@ -13,3 +13,12 @@ export class RemoteError extends Error {
     }
   }
 }
+
+/**
+ * Creates the RemoteError returned to callers whose RPC is settled locally
+ * because the renderer API has been disposed. Always returns a fresh
+ * instance so callers cannot observe shared mutable state through it.
+ */
+export function createDisposedError(): RemoteError {
+  return new RemoteError("CANCELLED", "Renderer API is disposed.");
+}

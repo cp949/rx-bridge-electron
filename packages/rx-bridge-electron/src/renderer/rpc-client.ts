@@ -5,7 +5,7 @@ import {
   type ProtocolEnvelope,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
-import { RemoteError } from "./remote-error.js";
+import { createDisposedError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport, CallOptions } from "./transport.js";
 
 const envelopeLimits: PayloadLimits = {
@@ -45,6 +45,8 @@ export class RpcClient {
   readonly #transport: BridgeTransport;
   readonly #session: ProtocolEnvelope;
   readonly #defaultTimeoutMs: number;
+  #disposed = false;
+  readonly #pending = new Set<() => void>();
 
   public constructor(
     transport: BridgeTransport,
@@ -64,6 +66,10 @@ export class RpcClient {
     input: BridgeValue,
     options: CallOptions = {},
   ): Promise<BridgeValue> {
+    if (this.#disposed) {
+      return Promise.reject(createDisposedError());
+    }
+
     if (options.signal?.aborted === true) {
       return Promise.reject(localError("CANCELLED", "RPC call was cancelled."));
     }
@@ -81,6 +87,7 @@ export class RpcClient {
     let cancellationSent = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abortListener: (() => void) | undefined;
+    let disposeListener: (() => void) | undefined;
 
     const result = new Promise<BridgeValue>((resolve, reject) => {
       const beginSettlement = (): boolean => {
@@ -117,6 +124,11 @@ export class RpcClient {
         }
         rejectOnce(error);
       };
+
+      disposeListener = () => {
+        cancelOnce(createDisposedError());
+      };
+      this.#pending.add(disposeListener);
 
       abortListener = () => {
         cancelOnce(localError("CANCELLED", "RPC call was cancelled."));
@@ -192,6 +204,26 @@ export class RpcClient {
       if (abortListener !== undefined) {
         options.signal?.removeEventListener("abort", abortListener);
       }
+      if (disposeListener !== undefined) {
+        this.#pending.delete(disposeListener);
+      }
     });
+  }
+
+  /**
+   * Settles every RPC that is still pending as CANCELLED and marks this
+   * client as disposed so future calls are rejected without being sent.
+   * Idempotent: a second call is a no-op.
+   */
+  public dispose(): void {
+    if (this.#disposed) {
+      return;
+    }
+    this.#disposed = true;
+    const listeners = [...this.#pending];
+    this.#pending.clear();
+    for (const listener of listeners) {
+      listener();
+    }
   }
 }

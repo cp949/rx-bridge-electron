@@ -483,3 +483,170 @@ describe("renderer RPC races", () => {
     expect("cause" in error).toBe(false);
   });
 });
+
+describe("RpcClient dispose", () => {
+  test("settles an in-flight sent call as CANCELLED and cancels it once", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined);
+    const requestId = transport.invocations[0]!.requestId;
+
+    client.dispose();
+
+    await expect(resultPromise).rejects.toMatchObject({
+      code: "CANCELLED",
+      message: "Renderer API is disposed.",
+    });
+    expect(transport.cancellations).toEqual([requestId]);
+  });
+
+  test("resolves a permanently pending call (Infinity timeout) on dispose", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      timeoutMs: Number.POSITIVE_INFINITY,
+    });
+
+    client.dispose();
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+
+  test("dispose settlement wins over a later deadline timeout", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      timeoutMs: 25,
+    });
+    const requestId = transport.invocations[0]!.requestId;
+    const rejection = expect(resultPromise).rejects.toMatchObject({
+      code: "CANCELLED",
+    });
+
+    client.dispose();
+    await vi.advanceTimersByTimeAsync(25);
+
+    await rejection;
+    expect(transport.cancellations).toEqual([requestId]);
+  });
+
+  test("dispose settlement wins over a later abort signal", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    const controller = new AbortController();
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined, {
+      signal: controller.signal,
+    });
+    const requestId = transport.invocations[0]!.requestId;
+
+    client.dispose();
+    controller.abort();
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(transport.cancellations).toEqual([requestId]);
+  });
+
+  test("dispose is idempotent and cancels each in-flight call only once", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined);
+    const requestId = transport.invocations[0]!.requestId;
+
+    client.dispose();
+    client.dispose();
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+    expect(transport.cancellations).toEqual([requestId]);
+  });
+
+  test("does not cancel a call already settled by a response", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined);
+    transport.resolveInvocation(
+      0,
+      success(transport.invocations[0]!.requestId),
+    );
+    await expect(resultPromise).resolves.toEqual({ connected: true });
+
+    client.dispose();
+
+    expect(transport.cancellations).toEqual([]);
+  });
+
+  test("rejects a call made after dispose without sending it", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    client.dispose();
+
+    await expect(
+      client.call("rpc:hardware/connect", undefined),
+    ).rejects.toMatchObject({
+      code: "CANCELLED",
+      message: "Renderer API is disposed.",
+    });
+    expect(transport.invocations).toHaveLength(0);
+  });
+
+  test("ignores a late transport response after dispose settled the call", async () => {
+    const transport = new FakeTransport();
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined);
+    const requestId = transport.invocations[0]!.requestId;
+
+    client.dispose();
+    transport.resolveInvocation(0, success(requestId));
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+
+  test("settles as CANCELLED even when the transport cancel call throws", async () => {
+    const transport = new FakeTransport();
+    transport.cancel = () => {
+      throw new Error("cancel channel is gone");
+    };
+    const client = new RpcClient(transport, {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+
+    const resultPromise = client.call("rpc:hardware/connect", undefined);
+
+    client.dispose();
+
+    await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+});
