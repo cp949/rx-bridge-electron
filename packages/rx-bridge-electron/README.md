@@ -162,7 +162,24 @@ const server = createBridgeServer(appContract, implementations, {
 
 한도를 넘으면 세션별로 격리된 오류로 끝나고 다른 세션에는 영향이 없습니다: 동시 RPC·구독 수 초과는 `RESOURCE_EXHAUSTED`, Main deadline 경과는 `DEADLINE_EXCEEDED`(handler의 `AbortSignal`도 abort됩니다). `AbortSignal`을 무시하는 handler는 자기 세션의 RPC 슬롯만 계속 점유합니다. 근거는 [ADR 0009](../../docs/adr/0009-session-resource-limits.md)에 있습니다.
 
-진단 정보에는 RPC 완료·취소와 스트림 수명주기 정보를 기록할 수 있지만, 자격 증명이나 원시 payload는 넣지 않습니다. 대용량 바이너리 전송과 지속적인 고속 스트림은 현재 범위에 포함되지 않습니다. 향후 이 기능이 필요하면 이 API에서 원시 IPC를 노출하지 말고 별도의 MessagePort 어댑터 뒤에 구현합니다.
+`createBridgeServer`의 `diagnostics` 옵션으로 `DiagnosticsSink`를 연결하면 RPC 완료(성공·실패 `outcome` 포함)·취소·Main deadline 만료, 출력 검증 실패, Event 큐 깊이·드롭, 보안·입력·자원 한도 거부 사유(`rejected`, 11개 `RejectReason`), 세션·구독의 생성과 해제를 닫힌 타입 이벤트로 관측할 수 있습니다. 사유는 enum 코드, 식별자는 등록된 와이어 key만 실리며 자격 증명·원시 payload·origin·clientId·requestId·subscriptionId·`Error` 객체는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다.
+
+```ts
+const server = createBridgeServer(appContract, implementations, {
+  diagnostics: {
+    record: (event) => {
+      if (event.type === "rejected")
+        metrics.increment(`bridge.rejected.${event.reason}`);
+    },
+  },
+});
+
+// 현재 활성 세션·RPC·구독 수와 대기 중 Event 수(스냅샷, 누적 아님)
+const { sessions, rpcInFlight, subscriptions, queuedEvents } =
+  server.getDiagnosticsSnapshot();
+```
+
+대용량 바이너리 전송과 지속적인 고속 스트림은 현재 범위에 포함되지 않습니다. 향후 이 기능이 필요하면 이 API에서 원시 IPC를 노출하지 말고 별도의 MessagePort 어댑터 뒤에 구현합니다. 이벤트 종류 전체와 각 `RejectReason`의 판정 지점은 [ADR 0010](../../docs/adr/0010-operational-diagnostics.md)에 있습니다.
 
 ## 호환성 변경
 
@@ -172,3 +189,4 @@ const server = createBridgeServer(appContract, implementations, {
 2. **사용자 정의 transport(자체 `BridgeTransport` 구현)는 `subscriptionId`를 `<nonce>:<scope>:<seq base36>` 형식으로, 한 문서 세션 안에서 증가하는 순서로 보내야 합니다.** Main이 세션별 워터마크로 재사용·늦은 도착을 판정하기 때문입니다. `@cp949/rx-bridge-electron/renderer`가 공개하는 `createOpaqueId(scope)`를 그대로 쓰는 것을 권장합니다. 형식에 맞지 않는 ID는 `INVALID_ARGUMENT`로 거부됩니다.
 3. **`TransportErrorCode`에 `RESOURCE_EXHAUSTED`가 추가됐습니다.** 오류 코드를 망라해 분기하던(`switch`의 `default`가 없거나 union을 좁게 전제한) 코드는 이 코드도 처리하도록 확인하세요.
 4. **계약의 `payloadLimits`가 이제 Electron 어댑터에도 적용됩니다.** 이전에는 어댑터가 하드코딩된 한도로 wire를 먼저 검사해 계약이 선언한 더 큰 한도가 실제로는 동작하지 않았습니다. 기본값보다 큰 `payloadLimits`를 선언했다면 이제 그 한도만큼 큰 입력이 실제로 handler까지 도달합니다.
+5. **`DiagnosticsSink`로 받는 `rpc-finished` 이벤트에 `outcome: "ok" | "error"` 필드가 추가됐습니다.** `BridgeDiagnostic`을 망라해 분기하던(`switch`의 `default`가 없거나 이벤트 모양을 좁게 전제한) sink 구현은 이 필드와 새 이벤트 6종(`rpc-timed-out`, `rejected`, `session-opened`, `session-closed`, `subscription-opened`, `subscription-closed`)도 처리하도록 확인하세요.

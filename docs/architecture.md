@@ -24,7 +24,7 @@ Contract는 프로세스 중립 선언이다. handler, Electron 객체, 자격�
 3. Main은 연결된 문서 세션과 도메인 계약을 확인하고 권한 함수를 적용한다.
 4. RPC 입력과 출력, handshake 및 stream envelope는 프로토콜 파서와 payload 한도를 통과해야 한다. RPC handler와 stream source가 만든 값은 원시 값 검사 → 출력 스키마 변환 → 변환 결과 재검사 → 복제 → 복제본 검사 순서를 모두 통과해야 전송된다. 이 순서는 `src/main/output-boundary.ts`의 `parseOutput` 하나로 구현되어 RPC 출력과 stream 값(State/Event)이 공유하며, 두 번째 검사(복제 전)는 accessor·함수 값이 `structuredClone` 단계로 새는 것을 막고 복제는 검증 이후 handler·스키마가 쥔 참조로 값을 바꾸는 TOCTOU를 막는다.
 5. 오류 응답은 안전한 프로토콜 오류 코드로 직렬화한다. 내부 예외나 원문 payload를 진단 정보에 기록하지 않는다.
-6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수·전체 byte)를 넘으면 같은 `INTERNAL`로 대체된다. 선언된 도메인 에러의 `details`도 검사 → 복제 → 복제본 검사를 거치며, `code`·`message`·`details`는 한 번만 읽어 검사한 값을 그대로 전송한다. 이 필드를 읽다 예외가 나도 `INTERNAL`이다. 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다. 세션별 자원 한도(동시 RPC·구독 수) 초과는 `RESOURCE_EXHAUSTED`, Main이 스스로 설정한 RPC 실행 시간 상한 초과는 `DEADLINE_EXCEEDED`다 — 아래 "세션 자원 한도" 참고.
+6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수·전체 byte)를 넘으면 같은 `INTERNAL`로 대체된다. 선언된 도메인 에러의 `details`도 검사 → 복제 → 복제본 검사를 거치며, `code`·`message`·`details`는 한 번만 읽어 검사한 값을 그대로 전송한다. 이 필드를 읽다 예외가 나도 `INTERNAL`이다. 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다. 세션별 자원 한도(동시 RPC·구독 수) 초과는 `RESOURCE_EXHAUSTED`, Main이 스스로 설정한 RPC 실행 시간 상한 초과는 `DEADLINE_EXCEEDED`다 — 아래 "세션 자원 한도" 참고. 이 모든 거부와 완료 결과는 진단 이벤트로도 관측할 수 있다 — 아래 "운영 진단" 참고.
 
 Electron 어댑터는 `allowedOrigins`를 받고 현재 main frame과 허용 origin을 검사한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
@@ -69,6 +69,16 @@ RPC 슬롯은 취소나 deadline으로 응답을 먼저 보내도 handler Promis
 stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 세션별 워터마크(마지막으로 수락한 sequence)로 판정한다. `subscriptionId`는 `<nonce>:<scope>:<seq base36>` 형식(`createOpaqueId` 산출 형식)이어야 하며, 형식 오류는 `INVALID_ARGUMENT`, 워터마크 이하는 메시지 없이 무시한다. RPC `requestId`는 워터마크 대상이 아니다.
 
 근거와 대안 비교는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다.
+
+## 운영 진단
+
+Main은 `createBridgeServer(contract, implementations, { diagnostics })`로 넘긴 `DiagnosticsSink`에 닫힌 타입의 이벤트(`BridgeDiagnostic`)를 기록한다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 동일하다(호출을 삼키는 공통 함수 하나로 모든 기록 지점을 통과시킨다) — sink 실패가 RPC 응답이나 stream 전달에 영향을 주지 않는다. sink를 지정하지 않으면 기본 동작에서 어떤 콘솔 출력도 없다.
+
+이벤트는 RPC 완료(`rpc-finished`, 성공·실패를 나타내는 `outcome` 포함)·취소(`rpc-cancelled`)·Main deadline 만료(`rpc-timed-out`)·출력 검증 실패(`validation-failed`)·Event 큐 깊이(`stream-queue`)와 드롭(`stream-dropped`)·거부(`rejected`, 11개 `RejectReason` 중 하나)·세션과 구독의 생성·해제(`session-opened`/`session-closed`, `subscription-opened`/`subscription-closed`)로 구성된다. 사유는 enum 코드, 식별자는 등록 조회를 통과한 와이어 key만 싣는다 — `Error` 객체, message, stack, 원문 payload, origin, clientId, webContentsId, requestId, subscriptionId는 어떤 이벤트에도 넣지 않는다. Electron 어댑터가 판정하는 거부(`frame-not-main`, `origin-not-allowed`, `malformed-envelope`)는 export하지 않는 내부 Symbol 통로로 같은 sink에 기록되며, 한 요청에서 `rejected`는 최대 1회만 기록된다(server가 이미 기록한 경우 adapter가 중복 기록하지 않는다).
+
+`server.getDiagnosticsSnapshot()`은 현재 활성 세션 수, in-flight RPC 수, 구독(대기+활성) 수, 대기 중 Event 수를 조회한다 — 이벤트 스트림과 달리 누적하지 않는 현재 스냅샷이며, 누적 카운터는 제공하지 않는다.
+
+근거와 판정 지점 전체 목록, `RejectReason` 11개 각각의 판정 위치는 [ADR 0010](adr/0010-operational-diagnostics.md)에 있다.
 
 ## 데모와 증거 범위
 
