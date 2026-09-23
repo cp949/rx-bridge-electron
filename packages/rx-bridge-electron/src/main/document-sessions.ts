@@ -1,4 +1,5 @@
 import { BridgeProtocolError } from "../protocol/index.js";
+import type { ResourceLimits } from "./resource-limits.js";
 import type {
   AttachedTarget,
   DiagnosticsSink,
@@ -19,6 +20,7 @@ interface SessionState {
     string,
     { readonly key: string; readonly controller: AbortController }
   >;
+  runningRpc: number;
 }
 
 interface Attachment {
@@ -32,9 +34,14 @@ export class DocumentSessions {
   readonly #retiredClients = new Map<number, Set<string>>();
   readonly #states = new WeakMap<DocumentSession, SessionState>();
   readonly #diagnostics: DiagnosticsSink | undefined;
+  readonly #resourceLimits: ResourceLimits;
   #disposed = false;
 
-  public constructor(diagnostics?: DiagnosticsSink) {
+  public constructor(
+    resourceLimits: ResourceLimits,
+    diagnostics?: DiagnosticsSink,
+  ) {
+    this.#resourceLimits = resourceLimits;
     this.#diagnostics = diagnostics;
   }
 
@@ -89,6 +96,7 @@ export class DocumentSessions {
       usedStreamIds: new Set(),
       pendingStreams: new Map(),
       active: new Map(),
+      runningRpc: 0,
     });
     attachment.current = session;
     return session;
@@ -111,6 +119,20 @@ export class DocumentSessions {
     return session?.clientId === clientId && !session.signal.aborted
       ? session
       : undefined;
+  }
+
+  public tryAcquireRpc(session: DocumentSession): boolean {
+    const state = this.#states.get(session);
+    if (state === undefined) return false;
+    if (state.runningRpc >= this.#resourceLimits.maxConcurrentRpc) return false;
+    state.runningRpc += 1;
+    return true;
+  }
+
+  public releaseRpc(session: DocumentSession): void {
+    const state = this.#states.get(session);
+    if (state === undefined) return;
+    state.runningRpc = Math.max(0, state.runningRpc - 1);
   }
 
   public beginRpc(

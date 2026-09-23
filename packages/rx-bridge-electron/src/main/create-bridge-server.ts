@@ -56,10 +56,9 @@ export function createBridgeServer<Contract extends ComposedContract>(
   } = {},
 ): StreamBridgeServer {
   const resourceLimits = resolveResourceLimits(options.resourceLimits);
-  void resourceLimits; // 뒤 DELTA(RPC 동시성·구독 한도 등)에서 사용한다.
   let disposed = false;
   const registrations = registerImplementations(contract, implementations);
-  const sessions = new DocumentSessions(options.diagnostics);
+  const sessions = new DocumentSessions(resourceLimits, options.diagnostics);
   const manifest = publicManifest(contract);
   const limits: PayloadLimits = {
     ...defaultLimits,
@@ -108,6 +107,12 @@ export function createBridgeServer<Contract extends ComposedContract>(
       const registration = findRpc(contract, registrations, envelope.key);
       if (registration === undefined)
         return error(envelope, "NOT_FOUND", "Unknown bridge operation.");
+      if (!sessions.tryAcquireRpc(session))
+        return error(
+          envelope,
+          "RESOURCE_EXHAUSTED",
+          "Too many concurrent bridge requests.",
+        );
       const id = keyOf(sender, envelope.clientId, envelope.requestId);
       const controller = sessions.beginRpc(session, id, envelope.key);
       const context: BridgeContext = {
@@ -118,39 +123,65 @@ export function createBridgeServer<Contract extends ComposedContract>(
         signal: controller.signal,
       };
       const started = performance.now();
-      try {
-        let allowed: boolean;
+      const work = (async (): Promise<RpcResponse> => {
         try {
-          allowed =
-            options.authorize === undefined
-              ? true
-              : await options.authorize(context, envelope.key);
-        } catch (cause) {
-          if (controller.signal.aborted)
+          let allowed: boolean;
+          try {
+            allowed =
+              options.authorize === undefined
+                ? true
+                : await options.authorize(context, envelope.key);
+          } catch (cause) {
+            if (controller.signal.aborted)
+              return error(envelope, "CANCELLED", "Request cancelled.");
+            throw cause;
+          }
+          if (
+            controller.signal.aborted ||
+            sessions.current(sender, envelope.clientId) !== session
+          )
             return error(envelope, "CANCELLED", "Request cancelled.");
-          throw cause;
+          if (!allowed)
+            return error(
+              envelope,
+              "FORBIDDEN",
+              "Bridge operation is forbidden.",
+            );
+          return await dispatchRegistered(
+            registration,
+            envelope,
+            context,
+            limits,
+            options.diagnostics,
+          );
+        } finally {
+          sessions.finishRpc(session, id, controller);
+          sessions.releaseRpc(session);
+          options.diagnostics?.record({
+            type: "rpc-finished",
+            key: envelope.key,
+            durationMs: performance.now() - started,
+          });
         }
-        if (
-          controller.signal.aborted ||
-          sessions.current(sender, envelope.clientId) !== session
-        )
-          return error(envelope, "CANCELLED", "Request cancelled.");
-        if (!allowed)
-          return error(envelope, "FORBIDDEN", "Bridge operation is forbidden.");
-        return await dispatchRegistered(
-          registration,
-          envelope,
-          context,
-          limits,
-          options.diagnostics,
-        );
+      })();
+      if (!Number.isFinite(resourceLimits.maxRpcDurationMs)) return await work;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const deadline = new Promise<RpcResponse>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve(
+            error(
+              envelope,
+              "DEADLINE_EXCEEDED",
+              "Request exceeded the server deadline.",
+            ),
+          );
+        }, resourceLimits.maxRpcDurationMs);
+      });
+      try {
+        return await Promise.race([work, deadline]);
       } finally {
-        sessions.finishRpc(session, id, controller);
-        options.diagnostics?.record({
-          type: "rpc-finished",
-          key: envelope.key,
-          durationMs: performance.now() - started,
-        });
+        clearTimeout(timer);
       }
     },
     cancel(sender: SenderIdentity, envelope: WireCancelRequest): void {
