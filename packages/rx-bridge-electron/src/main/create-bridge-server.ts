@@ -10,7 +10,6 @@ import type {
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import { StreamHub, type StreamSender } from "./stream-hub.js";
-import type { StreamDomainImplementation } from "./implement-domain.js";
 import type {
   AttachedTarget,
   Authorize,
@@ -53,7 +52,7 @@ export function createBridgeServer(
   const limits = contract.payloadLimits ?? defaultLimits;
   const streams = new StreamHub(
     contract,
-    implementations as readonly StreamDomainImplementation[],
+    implementations,
     limits,
     options.diagnostics,
   );

@@ -15,7 +15,6 @@ import {
 import { BoundedQueue } from "./bounded-queue.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
-import type { StreamDomainImplementation } from "./implement-domain.js";
 import type {
   CurrentValueSource,
   EventSource,
@@ -24,6 +23,7 @@ import type {
 import type {
   BridgeContext,
   DiagnosticsSink,
+  DomainImplementation,
   SenderIdentity,
 } from "./types.js";
 
@@ -93,7 +93,7 @@ export class StreamHub {
 
   public constructor(
     contract: ComposedContract,
-    implementations: readonly StreamDomainImplementation[],
+    implementations: readonly DomainImplementation[],
     limits: PayloadLimits,
     diagnostics?: DiagnosticsSink,
   ) {

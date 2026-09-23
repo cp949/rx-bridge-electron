@@ -4,11 +4,6 @@ import { Observable } from "rxjs";
 import type { CurrentValueSource, EventSource } from "./sources.js";
 import type { BridgeContext, DomainImplementation } from "./types.js";
 
-export interface StreamDomainImplementation extends DomainImplementation {
-  readonly state: Readonly<Record<string, CurrentValueSource<BridgeValue>>>;
-  readonly event: Readonly<Record<string, EventSource>>;
-}
-
 export function implementDomain(
   domain: DomainContract,
   handlers: {
@@ -24,7 +19,7 @@ export function implementDomain(
     readonly state?: Readonly<Record<string, CurrentValueSource<BridgeValue>>>;
     readonly event?: Readonly<Record<string, EventSource>>;
   },
-): StreamDomainImplementation {
+): DomainImplementation {
   const declared = domain.definitions.rpc ?? {};
   const rpc: Record<
     string,

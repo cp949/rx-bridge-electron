@@ -4,6 +4,7 @@ import type {
   WireCancelRequest,
   WireRpcRequest,
 } from "../protocol/index.js";
+import type { CurrentValueSource, EventSource } from "./sources.js";
 
 export interface SenderIdentity {
   readonly webContentsId: number;
@@ -72,7 +73,9 @@ export type RpcHandler = (
   input: BridgeValue,
   context: BridgeContext,
 ) => Promise<BridgeValue> | BridgeValue;
-export interface DomainImplementation {
-  readonly domainName: string;
+export interface DomainImplementation<Name extends string = string> {
+  readonly domainName: Name;
   readonly rpc: Readonly<Record<string, RpcHandler>>;
+  readonly state: Readonly<Record<string, CurrentValueSource<BridgeValue>>>;
+  readonly event: Readonly<Record<string, EventSource>>;
 }
