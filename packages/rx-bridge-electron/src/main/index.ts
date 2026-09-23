@@ -10,6 +10,8 @@ export type {
 export type { StreamBridgeServer } from "./create-bridge-server.js";
 export { implementDomain } from "./implement-domain.js";
 export type { DomainHandlers } from "./implement-domain.js";
+export { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
+export type { ResourceLimits } from "./resource-limits.js";
 export { broadcastEvent, currentValueSource, scopedEvent } from "./sources.js";
 export type { CurrentValueSource } from "./sources.js";
 export type {

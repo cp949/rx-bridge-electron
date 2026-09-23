@@ -10,6 +10,10 @@ import type {
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import { registerImplementations } from "./registration.js";
+import {
+  resolveResourceLimits,
+  type ResourceLimits,
+} from "./resource-limits.js";
 import { StreamHub, type StreamSender } from "./stream-hub.js";
 import type {
   AttachedTarget,
@@ -47,8 +51,11 @@ export function createBridgeServer<Contract extends ComposedContract>(
   options: {
     readonly authorize?: Authorize;
     readonly diagnostics?: DiagnosticsSink;
+    readonly resourceLimits?: Partial<ResourceLimits>;
   } = {},
 ): StreamBridgeServer {
+  const resourceLimits = resolveResourceLimits(options.resourceLimits);
+  void resourceLimits; // 뒤 DELTA(RPC 동시성·구독 한도 등)에서 사용한다.
   let disposed = false;
   const registrations = registerImplementations(contract, implementations);
   const sessions = new DocumentSessions(options.diagnostics);

@@ -11,6 +11,7 @@ export type TransportErrorCode =
   | "FORBIDDEN"
   | "CANCELLED"
   | "DEADLINE_EXCEEDED"
+  | "RESOURCE_EXHAUSTED"
   | "VERSION_MISMATCH"
   | "INTERNAL";
 
