@@ -131,4 +131,28 @@ describe("bindElectronBridge dispose", () => {
     expect(contents.listenerCount("render-process-gone")).toBe(0);
     expect(contents.listenerCount("destroyed")).toBe(0);
   });
+
+  test("stale detach from a replaced attach keeps the newer attachment registered", () => {
+    const ipcMain = new FakeIpcMain();
+    const { server, bridge } = makeBridge(ipcMain);
+    const serverDetaches: Array<ReturnType<typeof vi.fn>> = [];
+    const attach = server.attach.bind(server);
+    vi.spyOn(server, "attach").mockImplementation((target) => {
+      const detach = vi.fn(attach(target));
+      serverDetaches.push(detach);
+      return detach;
+    });
+    const contents = new FakeWebContents() as unknown as WebContents;
+
+    const closeFirst = bridge.attach(contents, "main");
+    bridge.attach(contents, "main");
+    closeFirst();
+
+    const second = serverDetaches[1]!;
+    const callsBeforeDispose = second.mock.calls.length;
+    bridge.dispose();
+
+    expect(callsBeforeDispose).toBe(0);
+    expect(second).toHaveBeenCalledTimes(1);
+  });
 });

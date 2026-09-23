@@ -210,7 +210,7 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       );
       attached.set(contents.id, detach);
       return () => {
-        attached.delete(contents.id);
+        if (attached.get(contents.id) === detach) attached.delete(contents.id);
         detach();
       };
     },
