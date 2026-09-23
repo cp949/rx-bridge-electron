@@ -89,9 +89,10 @@ export function normalizeImplementation(
   for (const key of Object.keys(eventCandidate)) {
     if (!Object.hasOwn(declaredEvent, key))
       throw new TypeError(`Undeclared Event source '${domain.name}/${key}'.`);
-    const source = eventCandidate[key] as EventSource | undefined;
+    const source = eventCandidate[key] as EventSource | null | undefined;
     if (
       source === undefined ||
+      source === null ||
       !(
         source instanceof Observable ||
         (source.mode === "broadcast" && source.source instanceof Observable) ||

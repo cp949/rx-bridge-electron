@@ -39,6 +39,8 @@ type EventSources<Event> = {
  * 해당 필드 요구 수준을 결정한다.
  * - 카테고리에 선언된 key가 있으면: 필드 필수, Mapped 타입으로 각 key 필수.
  * - 카테고리는 있지만 key가 없으면: 필드 optional, 빈 객체만 허용.
+ *   `Record<never, never>`(= `{}`)는 excess property check 대상이 아니라서
+ *   값이 never인 index signature로 모든 key를 막는다.
  * - 카테고리 자체가 없으면: 필드를 `?: never`로 막는다.
  */
 type CategoryHandlers<
@@ -47,7 +49,7 @@ type CategoryHandlers<
   Mapped,
 > = Definitions extends { readonly [K in Category]: infer Entries }
   ? [keyof Entries] extends [never]
-    ? { readonly [K in Category]?: Record<never, never> }
+    ? { readonly [K in Category]?: { readonly [key: string]: never } }
     : { readonly [K in Category]: Mapped }
   : { readonly [K in Category]?: never };
 

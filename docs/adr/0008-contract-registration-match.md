@@ -26,7 +26,7 @@
 참조 동일성을 요구하지 않는 이유는 두 가지다.
 
 - **구조 변경 비용**: `composeContracts`(`src/contract/compose-contracts.ts`)는 도메인 객체를 새로 만들어 freeze하지만 descriptor(각 rpc·state·event 정의)는 원본과 같은 참조를 복사한다. 참조 동일성을 기준으로 삼으려면 이 복사 규칙 전체를 등록 검증의 전제 조건으로 고정해야 하고, 계약 조합 방식이 바뀔 때마다 등록 검증도 함께 깨진다.
-- **타입 검사가 이미 스키마 불일치를 잡는다**: `implementDomain`의 handler·소스 타입은 넘긴 `domain`의 descriptor에서 추론된다(아래 절). 같은 이름이지만 다른 스키마를 가진 도메인으로 `implementDomain`을 호출하면, 그 결과를 원래 계약의 `createBridgeServer`에 넘기는 순간 `DomainImplementation<Name>`의 이름 제네릭이 계약의 도메인 이름 집합과 맞아떨어져도 rpc·state·event 키 집합이 다르면 런타임 검사(`registerImplementations`)가 잡는다. 참조 동일성 비교가 막으려는 사고(다른 정의의 도메인을 잘못 연결)는 이미 이름 집합 검사와 타입 추론의 조합으로 커버된다.
+- **남는 사고 범위가 좁다**: 같은 이름이지만 operation 키 집합이 다른 도메인으로 `implementDomain`한 결과는 런타임 검사(`registerImplementations`)가 잡는다. 잡지 못하는 경우는 이름과 키 집합이 모두 같고 스키마만 다른 별도 `DomainContract`로 구현한 경우뿐이다. `DomainImplementation<Name>`은 handler·소스 타입을 지우므로 이 경우는 타입 검사도 통과한다. 이때도 서버는 자신이 받은 계약의 descriptor로 입력·출력을 검증하므로(`findRpc`·`StreamHub`는 `contract`의 descriptor를 쓴다) 스키마에 맞지 않는 값이 handler나 Renderer로 넘어가지는 않는다. handler가 기대한 입력 타입과 실제 입력이 다를 수 있다는 위험은 수용한다.
 
 ## 결정: 검증을 통과한 정규화 사본만 등록한다
 
@@ -38,7 +38,7 @@
 
 - rpc handler는 `(input: I, context: BridgeContext) => O | Promise<O>`다. `I`/`O`는 `RpcDescriptor<I, O, ...>`에서 추론한다. 반환 타입을 `O`(출력 스키마의 출력 타입) 단독이 아니라 `O | Promise<O>`로 둔 이유는 동기 handler와 비동기 handler를 같은 시그니처로 받기 위해서다 — `Schema` 자체는 바꾸지 않는다.
 - state 소스는 `CurrentValueSource<T>`, event 소스는 `EventSource<T>`이고 `T`는 각각 `StateDescriptor<T>`/`EventDescriptor<T>`에서 추론한다.
-- 도메인 정의에 선언된 rpc·state·event 키는 `CategoryHandlers`(`implement-domain.ts`)가 Mapped 타입으로 모두 필수로 만든다. 초과 키는 별도 코드로 막지 않고 TypeScript의 객체 리터럴 excess property check에 맡긴다. 도메인에 없는 카테고리는 `?: never`로 필드 자체를 막고, 카테고리는 있지만 키가 없으면(`declaredRpc`가 빈 객체) 필드를 `Record<never, never>`로 제한해 빈 객체만 허용한다.
+- 도메인 정의에 선언된 rpc·state·event 키는 `CategoryHandlers`(`implement-domain.ts`)가 Mapped 타입으로 모두 필수로 만든다. 초과 키는 별도 코드로 막지 않고 TypeScript의 객체 리터럴 excess property check에 맡긴다. 도메인에 없는 카테고리는 `?: never`로 필드 자체를 막고, 카테고리는 있지만 키가 없으면(`declaredRpc`가 빈 객체) 필드를 값이 `never`인 index signature(`{ readonly [key: string]: never }`)로 제한해 빈 객체만 허용한다(`Record<never, never>`는 `{}`라서 excess property check가 적용되지 않는다).
 - `createBridgeServer<Contract>(contract, implementations: readonly DomainImplementation<keyof Contract["domains"] & string>[], ...)`(`create-bridge-server.ts`)는 각 구현의 이름 제네릭을 계약의 도메인 이름 합집합으로 제약한다. 이 타입은 원소 하나하나가 알려진 도메인 이름인지만 보고, 배열 전체가 계약의 모든 도메인을 정확히 한 번씩 덮는지는 보지 않는다 — TypeScript 타입 시스템으로 "배열 원소의 이름 집합이 정확히 어떤 유니온과 같다"를 표현할 수 없기 때문이다. 누락·중복은 위에서 설명한 런타임 검사(`Missing domain implementation`/`Duplicate domain implementation`)에서만 잡는다.
 
 ## 결정: `DomainImplementation`을 통합하고 `StreamDomainImplementation`을 제거한다

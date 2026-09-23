@@ -66,6 +66,12 @@ test("BridgeValue로 넓게 선언한 handler도 반환 타입만 맞으면 허�
   });
 });
 
+test("key가 없는 카테고리는 빈 객체를 넘기거나 필드를 생략할 수 있다", () => {
+  const emptyRpcDomain = defineDomain("empty-rpc", { rpc: {} });
+  implementDomain(emptyRpcDomain, { rpc: {} });
+  implementDomain(emptyRpcDomain, {});
+});
+
 // 아래 블록은 타입 검사(pnpm check-types) 전용이다. 런타임에서 예외를 던지는
 // 잘못된 호출을 실행하지 않도록 if (false)로 감싼다. 각 @ts-expect-error 줄은
 // 제거 시 해당 줄에서 check-types가 실패하는지 확인(RED)한 뒤 복원했다.
@@ -140,6 +146,12 @@ if (false) {
     rpc: { ping: () => 1 },
     // @ts-expect-error rpc만 선언된 도메인은 state 카테고리를 갖지 않는다(?: never).
     state: {},
+  });
+
+  const emptyRpcDomain = defineDomain("empty-rpc", { rpc: {} });
+  implementDomain(emptyRpcDomain, {
+    // @ts-expect-error key가 없는 rpc 카테고리는 빈 객체만 허용한다.
+    rpc: { extra: () => 1 },
   });
 
   const a = defineDomain("a", {

@@ -233,6 +233,20 @@ describe("Domain implementation registration", () => {
     );
   });
 
+  test("throws the contract message when an Event source is null", () => {
+    const { source } = alphaSources();
+    const raw = rawImplementation("alpha", {
+      rpc: { op1: async (input: number) => input },
+      state: { current$: currentValueSource(source) },
+      event: { change$: null },
+    });
+    expect(() =>
+      createBridgeServer(contract, [raw, validBetaImplementation()]),
+    ).toThrow(
+      /Event source 'alpha\/change\$' must be an Observable or source adapter\./,
+    );
+  });
+
   test("throws when a same-named domain implementation declares a different operation set", () => {
     const alphaShadow = defineDomain("alpha", {
       rpc: {
