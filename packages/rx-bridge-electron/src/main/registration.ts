@@ -7,8 +7,22 @@ import type {
   PublicManifest,
   Schema,
 } from "../contract/index.js";
+import {
+  addPath,
+  assertDomainName,
+  assertOperationName,
+  assertOwnDataRecord,
+  assertPathSegments,
+  createPathTree,
+  type PathNode,
+} from "../contract/define-domain.js";
 import type { BridgeValue } from "../protocol/index.js";
-import type { CurrentValueSource, EventSource } from "./sources.js";
+import type {
+  BroadcastEventSource,
+  CurrentValueSource,
+  EventSource,
+  ScopedEventSource,
+} from "./sources.js";
 import type { DomainImplementation, RpcHandler } from "./types.js";
 
 type ImplementationCandidate = {
@@ -320,4 +334,294 @@ export function manifestFromTable(table: RegistrationTable): PublicManifest {
     state: Object.freeze(manifestCategoryList("state", table.state)),
     event: Object.freeze(manifestCategoryList("event", table.event)),
   });
+}
+
+// ---------------------------------------------------------------------------
+// 경량 계약(impl 기반) 등록 테이블 빌더 (DELTA-04, RD-011).
+//
+// 기존 경로(`buildRegistrationTableFromContract`)는 `defineDomain`/
+// `composeContracts`가 이미 검증한 계약 트리와, 그 계약을 기준으로 검증된
+// `DomainImplementation` Map을 입력으로 받는다. 여기서는 descriptor 자체가
+// 없으므로 - impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수
+// 객체 트리)를 직접 순회하며 이름 규칙·형태·leaf/namespace 충돌을 한 번에
+// 검증하고 같은 모양의 `RegistrationTable`을 만든다. `options.schemas`/
+// `options.errors`도 impl 트리와 같은 모양으로 병렬 순회한다.
+// ---------------------------------------------------------------------------
+
+const CATEGORY_KEYS = ["rpc", "state", "event"] as const;
+type CategoryKey = (typeof CATEGORY_KEYS)[number];
+
+function isCategoryKey(key: string): key is CategoryKey {
+  return (CATEGORY_KEYS as readonly string[]).includes(key);
+}
+
+/** 경량 계약 event source의 기본 버퍼(확정 결정 4: capacity 100, overflow "error"). */
+const DEFAULT_EVENT_BUFFER = Object.freeze({
+  capacity: 100,
+  overflow: "error" as const,
+});
+
+/**
+ * `options.schemas`/`options.errors` 서브트리를 읽을 때 쓰는 방어적 캐스트.
+ * `undefined`는 "이 경로에 옵션 없음"으로 통과시키고, 그 외 non-object는
+ * 명확한 TypeError로 거부한다.
+ */
+function asOptionalRecord(
+  value: unknown,
+  label: string,
+): Record<string, unknown> | undefined {
+  if (value === undefined) return undefined;
+  if (value === null || typeof value !== "object") {
+    throw new TypeError(`${label} must be an object.`);
+  }
+  return value as Record<string, unknown>;
+}
+
+/** rpc `options.schemas` leaf(`{ input?, output? }`)의 방어적 형태 검사. */
+function readRpcSchemaEntry(
+  value: unknown,
+  path: string,
+): { readonly input?: Schema<BridgeValue>; readonly output?: Schema<BridgeValue> } {
+  if (value === undefined) return {};
+  if (value === null || typeof value !== "object") {
+    throw new TypeError(`Schema entry for 'rpc:${path}' must be an object.`);
+  }
+  return value as {
+    readonly input?: Schema<BridgeValue>;
+    readonly output?: Schema<BridgeValue>;
+  };
+}
+
+function isScopedSource(
+  source: EventSource,
+): source is ScopedEventSource<BridgeValue> {
+  return !(source instanceof Observable) && source.mode === "scoped";
+}
+
+function isBroadcastSource(
+  source: EventSource,
+): source is BroadcastEventSource<BridgeValue> {
+  return !(source instanceof Observable) && source.mode === "broadcast";
+}
+
+/**
+ * impl 트리 한 노드(도메인 자신 또는 중첩 네임스페이스)를 재귀 순회하며
+ * rpc/state/event 카테고리는 등록하고, 그 외 키는 중첩 도메인으로 보고
+ * 재귀한다. `schemasNode`/`errorsNode`는 impl과 같은 경로를 나란히 따라가는
+ * `options.schemas`/`options.errors`의 해당 서브트리(없으면 `undefined`)다.
+ *
+ * 검증 순서: 노드 자체가 plain object인지 → 카테고리(rpc→state→event) 순서로
+ * "선언된 각 operation의 이름·형태" → 나머지 키를 중첩 도메인으로 재귀.
+ * 이 순서는 `main/registration.ts`의 `normalizeImplementation`과 같은 정신
+ * (선언 안 된 항목 → 형태 오류 → 누락 항목)을 유지하되, impl 트리에는
+ * "선언 안 된 항목"이라는 개념이 없다(계약이 없으므로) — 대신 "형태 오류"만
+ * 검사한다.
+ */
+function walkImplNode(
+  node: unknown,
+  domainSegments: readonly string[],
+  schemasNode: unknown,
+  errorsNode: unknown,
+  pathTree: PathNode,
+  rpcTable: Map<string, RpcRegistrationEntry>,
+  stateTable: Map<string, StateRegistrationEntry>,
+  eventTable: Map<string, EventRegistrationEntry>,
+): void {
+  const nodeLabel =
+    domainSegments.length === 0
+      ? "Bridge implementation"
+      : `Domain '${domainSegments.join("/")}' implementation`;
+  assertOwnDataRecord(node, nodeLabel);
+  const record = node as Record<string, unknown>;
+  const schemasRecord = asOptionalRecord(schemasNode, "Schema entry");
+  const errorsRecord = asOptionalRecord(errorsNode, "Errors entry");
+
+  for (const category of CATEGORY_KEYS) {
+    if (!Object.hasOwn(record, category)) continue;
+    const domainName = domainSegments.join("/");
+    assertDomainName(domainName);
+    const categoryLabel = `${category} implementations for '${domainName}'`;
+    assertOwnDataRecord(record[category], categoryLabel);
+    const categoryRecord = record[category] as Record<string, unknown>;
+    const categorySchemas = asOptionalRecord(
+      schemasRecord?.[category],
+      `Schema entries for '${category}:${domainName}'`,
+    );
+    const categoryErrors = asOptionalRecord(
+      errorsRecord?.[category],
+      `Errors entries for '${category}:${domainName}'`,
+    );
+
+    for (const operation of Object.keys(categoryRecord)) {
+      assertOperationName(operation, `${category} operation`);
+      const path = `${domainName}/${operation}`;
+      addPath(pathTree, path);
+      const value = categoryRecord[operation];
+
+      if (category === "rpc") {
+        if (typeof value !== "function") {
+          throw new TypeError(`RPC handler '${path}' must be a function.`);
+        }
+        const schemaEntry = readRpcSchemaEntry(categorySchemas?.[operation], path);
+        const declaredErrors = categoryErrors?.[operation];
+        if (declaredErrors !== undefined && !Array.isArray(declaredErrors)) {
+          throw new TypeError(
+            `Declared errors for 'rpc:${path}' must be an array of error codes.`,
+          );
+        }
+        rpcTable.set(path, {
+          kind: "rpc",
+          domainName,
+          operation,
+          path: [domainName, operation],
+          handler: value as RpcHandler,
+          ...(schemaEntry.input === undefined ? {} : { input: schemaEntry.input }),
+          ...(schemaEntry.output === undefined
+            ? {}
+            : { output: schemaEntry.output }),
+          errors: Object.freeze([...(declaredErrors ?? [])]) as readonly string[],
+        });
+      } else if (category === "state") {
+        if (
+          !(value instanceof Observable) ||
+          typeof (value as { getValue?: unknown }).getValue !== "function"
+        ) {
+          throw new TypeError(`State source '${path}' must have a current value.`);
+        }
+        const stateOutput = categorySchemas?.[operation] as
+          | Schema<BridgeValue>
+          | undefined;
+        stateTable.set(path, {
+          kind: "state",
+          domainName,
+          operation,
+          path: [domainName, operation],
+          source: value as CurrentValueSource<BridgeValue>,
+          ...(stateOutput === undefined ? {} : { output: stateOutput }),
+        });
+      } else {
+        const source = value as EventSource | null | undefined;
+        if (
+          source === undefined ||
+          source === null ||
+          !(
+            source instanceof Observable ||
+            isBroadcastSource(source) ||
+            isScopedSource(source)
+          )
+        ) {
+          throw new TypeError(
+            `Event source '${path}' must be an Observable or source adapter.`,
+          );
+        }
+        const buffer =
+          source instanceof Observable
+            ? DEFAULT_EVENT_BUFFER
+            : (source.buffer ?? DEFAULT_EVENT_BUFFER);
+        const eventOutput = categorySchemas?.[operation] as
+          | Schema<BridgeValue>
+          | undefined;
+        eventTable.set(path, {
+          kind: "event",
+          domainName,
+          operation,
+          path: [domainName, operation],
+          source,
+          ...(eventOutput === undefined ? {} : { output: eventOutput }),
+          buffer,
+        });
+      }
+    }
+  }
+
+  for (const key of Object.keys(record)) {
+    if (isCategoryKey(key)) continue;
+    assertPathSegments(key, "Domain name segment");
+    walkImplNode(
+      record[key],
+      [...domainSegments, key],
+      schemasRecord?.[key],
+      errorsRecord?.[key],
+      pathTree,
+      rpcTable,
+      stateTable,
+      eventTable,
+    );
+  }
+}
+
+/**
+ * `options.schemas`/`options.errors`에 impl에 없는 경로가 있으면 생성 시
+ * `TypeError`로 거부한다(계획 항목 4의 마지막 요구사항). impl 트리 순회
+ * (`walkImplNode`)는 impl에 실제로 있는 경로만 옵션에서 읽으므로, 옵션 쪽에만
+ * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다.
+ */
+function assertNoExtraOptionPaths(
+  node: unknown,
+  domainSegments: readonly string[],
+  label: string,
+  hasPath: (category: CategoryKey, path: string) => boolean,
+): void {
+  const record = asOptionalRecord(node, `${label} entry`);
+  if (record === undefined) return;
+  for (const key of Object.keys(record)) {
+    if (isCategoryKey(key)) {
+      const domainName = domainSegments.join("/");
+      const categoryRecord = asOptionalRecord(
+        record[key],
+        `${label} category entries`,
+      );
+      if (categoryRecord === undefined) continue;
+      for (const operation of Object.keys(categoryRecord)) {
+        const path = `${domainName}/${operation}`;
+        if (!hasPath(key, path)) {
+          throw new TypeError(
+            `${label} path '${key}:${path}' has no matching implementation.`,
+          );
+        }
+      }
+      continue;
+    }
+    assertNoExtraOptionPaths(record[key], [...domainSegments, key], label, hasPath);
+  }
+}
+
+/**
+ * 경량 계약 impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수
+ * 객체)와 선택적 `schemas`/`errors` map으로부터 `RegistrationTable`을 직접
+ * 만든다. `buildRegistrationTableFromContract`와 달리 descriptor 계약을
+ * 거치지 않는다 — impl 트리 자신이 유일한 진실 소스다.
+ */
+export function buildRegistrationTableFromImpl(
+  impl: unknown,
+  schemas: unknown,
+  errors: unknown,
+): RegistrationTable {
+  const pathTree = createPathTree();
+  const rpcTable = new Map<string, RpcRegistrationEntry>();
+  const stateTable = new Map<string, StateRegistrationEntry>();
+  const eventTable = new Map<string, EventRegistrationEntry>();
+  walkImplNode(
+    impl,
+    [],
+    schemas,
+    errors,
+    pathTree,
+    rpcTable,
+    stateTable,
+    eventTable,
+  );
+  const hasPath = (category: CategoryKey, path: string): boolean =>
+    category === "rpc"
+      ? rpcTable.has(path)
+      : category === "state"
+        ? stateTable.has(path)
+        : eventTable.has(path);
+  assertNoExtraOptionPaths(schemas, [], "options.schemas", hasPath);
+  assertNoExtraOptionPaths(errors, [], "options.errors", hasPath);
+  return {
+    rpc: rpcTable,
+    state: stateTable,
+    event: eventTable,
+  };
 }

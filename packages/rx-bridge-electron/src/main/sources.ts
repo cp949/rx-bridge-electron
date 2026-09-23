@@ -1,5 +1,6 @@
 import { Observable } from "rxjs";
 
+import type { OverflowPolicy } from "../contract/index.js";
 import type { BridgeValue } from "../protocol/index.js";
 import type { BridgeContext } from "./types.js";
 
@@ -7,14 +8,27 @@ export interface CurrentValueSource<T> extends Observable<T> {
   getValue(): T;
 }
 
+/**
+ * Event source의 배압 버퍼 설정. 경량 계약(impl 기반 `createBridgeServer`,
+ * DELTA-04)은 descriptor `event()`가 없으므로 버퍼 설정을 source 생성 시점에
+ * 둔다 — 생략 시 `DEFAULT_EVENT_BUFFER`(capacity 100, overflow "error")를
+ * `main/registration.ts`의 `buildRegistrationTableFromImpl`이 적용한다.
+ */
+export interface EventSourceBuffer {
+  readonly capacity: number;
+  readonly overflow: OverflowPolicy;
+}
+
 export interface BroadcastEventSource<T> {
   readonly mode: "broadcast";
   readonly source: Observable<T>;
+  readonly buffer?: EventSourceBuffer;
 }
 
 export interface ScopedEventSource<T> {
   readonly mode: "scoped";
   readonly factory: (context: BridgeContext) => Observable<T>;
+  readonly buffer?: EventSourceBuffer;
 }
 
 export type EventSource<T extends BridgeValue = BridgeValue> =
@@ -53,18 +67,47 @@ export function currentValueSource<T extends BridgeValue>(
   );
 }
 
+/**
+ * `capacity`가 양의 안전 정수인지 검증한다. `contract/descriptors.ts`의
+ * `event()`가 하던 규칙과 동일하다(DELTA-04: 경량 계약 impl 경로는 descriptor가
+ * 없으므로 이 검증을 source 생성 함수로 옮긴다).
+ */
+function assertEventBuffer(
+  buffer: EventSourceBuffer | undefined,
+): EventSourceBuffer | undefined {
+  if (buffer === undefined) return undefined;
+  if (!Number.isSafeInteger(buffer.capacity) || buffer.capacity < 1) {
+    throw new TypeError(
+      "Event buffer capacity must be a positive safe integer.",
+    );
+  }
+  return Object.freeze({ ...buffer });
+}
+
 export function broadcastEvent<T extends BridgeValue>(
   source: Observable<T>,
+  options: { readonly buffer?: EventSourceBuffer } = {},
 ): BroadcastEventSource<T> {
   if (!(source instanceof Observable))
     throw new TypeError("Event source must be an Observable.");
-  return Object.freeze({ mode: "broadcast" as const, source });
+  const buffer = assertEventBuffer(options.buffer);
+  return Object.freeze({
+    mode: "broadcast" as const,
+    source,
+    ...(buffer === undefined ? {} : { buffer }),
+  });
 }
 
 export function scopedEvent<T extends BridgeValue>(
   factory: (context: BridgeContext) => Observable<T>,
+  options: { readonly buffer?: EventSourceBuffer } = {},
 ): ScopedEventSource<T> {
   if (typeof factory !== "function")
     throw new TypeError("Scoped Event source must be a factory.");
-  return Object.freeze({ mode: "scoped" as const, factory });
+  const buffer = assertEventBuffer(options.buffer);
+  return Object.freeze({
+    mode: "scoped" as const,
+    factory,
+    ...(buffer === undefined ? {} : { buffer }),
+  });
 }

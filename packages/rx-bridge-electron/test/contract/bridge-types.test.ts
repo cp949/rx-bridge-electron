@@ -118,7 +118,8 @@ test("BridgeImpl: 올바른 구현은 그대로 대입된다(정상 케이스)",
   const implementation: BridgeImpl<AppBridge> = {
     device: {
       rpc: {
-        connect: (context) => {
+        connect: (input, context) => {
+          expectTypeOf(input).toEqualTypeOf<undefined>();
           expectTypeOf(context).toEqualTypeOf<BridgeContext>();
           return { ok: true };
         },

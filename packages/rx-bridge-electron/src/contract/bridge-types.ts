@@ -48,13 +48,17 @@ type RpcApiOperation<Method> =
 
 /**
  * RPC operation 시그니처에서 Main이 구현해야 하는 handler 타입을 만든다.
- * 입력이 있으면 `(input, context) => O | Promise<O>`, 없으면
- * `(context) => O | Promise<O>`.
+ * dispatcher가 항상 `handler(input, context)` 2-인자로 호출하므로(입력 없는
+ * RPC는 `input`이 항상 `undefined`), 입력이 없어도 매개변수 위치는 동일하게
+ * 유지한다: `(input: undefined, context) => O | Promise<O>`. 함수 타입은
+ * 선언한 매개변수 수가 적어도 대입 가능하므로, context가 필요 없는 구현은
+ * `() => O`만 써도 된다.
  */
 type RpcImplOperation<Method> =
   Method extends (...args: infer Args) => infer Output
     ? Args extends []
       ? (
+          input: undefined,
           context: BridgeContext,
         ) => BridgeValueOrNever<Output> | Promise<BridgeValueOrNever<Output>>
       : Args extends [infer Input]

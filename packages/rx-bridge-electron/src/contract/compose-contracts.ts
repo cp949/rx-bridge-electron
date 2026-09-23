@@ -1,7 +1,8 @@
 import {
+  addPath,
   assertDomainName,
   assertOperationName,
-  assertPathSegments,
+  createPathTree,
   type DomainContract,
 } from "./define-domain.js";
 import type { PayloadLimits } from "../protocol/index.js";
@@ -17,33 +18,6 @@ export interface ComposedContract<
 
 export interface ContractOptions {
   readonly payloadLimits: PayloadLimits;
-}
-
-interface PathNode {
-  leaf: boolean;
-  readonly children: Map<string, PathNode>;
-}
-
-function addPath(root: PathNode, path: string): void {
-  const segments = assertPathSegments(path, "Operation path");
-  let node = root;
-  for (const segment of segments) {
-    if (node.leaf) {
-      throw new TypeError(`Leaf/namespace collision at '${path}'.`);
-    }
-    let child = node.children.get(segment);
-    if (child === undefined) {
-      child = { leaf: false, children: new Map() };
-      node.children.set(segment, child);
-    }
-    node = child;
-  }
-  if (node.leaf || node.children.size > 0) {
-    throw new TypeError(
-      `Duplicate path or leaf/namespace collision at '${path}'.`,
-    );
-  }
-  node.leaf = true;
 }
 
 export function composeContracts<
@@ -64,7 +38,7 @@ export function composeContracts(
     options === undefined ? arguments_ : arguments_.slice(1)
   ) as readonly DomainContract[];
   const domainsByName: Record<string, DomainContract> = Object.create(null);
-  const paths: PathNode = { leaf: false, children: new Map() };
+  const paths = createPathTree();
 
   for (const domain of domains) {
     if (

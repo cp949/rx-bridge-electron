@@ -28,7 +28,14 @@ const reservedSegments = new Set([
   "then",
 ]);
 
-function assertOwnDataRecord(
+/**
+ * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
+ * `defineDomain`(definitions 객체)과 경량 계약 impl 트리 검증
+ * (`main/registration.ts`의 `buildRegistrationTableFromImpl`, DELTA-04)이
+ * 함께 쓴다 — 두 경로 모두 "사용자가 만든 중첩 객체가 안전한 plain object인가"를
+ * 같은 기준으로 검사해야 하므로 위치를 이곳(계약 계층)으로 공유한다.
+ */
+export function assertOwnDataRecord(
   value: unknown,
   label: string,
 ): asserts value is Record<string, unknown> {
@@ -95,6 +102,43 @@ export function assertOperationName(name: string, label: string): void {
   if (assertPathSegments(name, label).length !== 1) {
     throw new TypeError(`${label} '${name}' cannot be a nested path.`);
   }
+}
+
+/**
+ * "domain/operation" 전체 경로들을 하나의 trie에 누적하며 leaf/namespace
+ * 충돌과 중복 경로를 검출한다. `composeContracts`(여러 도메인의 선언 경로)와
+ * `buildRegistrationTableFromImpl`(경량 계약 impl 트리의 등록 경로, DELTA-04)이
+ * 같은 검사 기준을 공유하도록 이곳(계약 계층)에 둔다.
+ */
+export interface PathNode {
+  leaf: boolean;
+  readonly children: Map<string, PathNode>;
+}
+
+export function createPathTree(): PathNode {
+  return { leaf: false, children: new Map() };
+}
+
+export function addPath(root: PathNode, path: string): void {
+  const segments = assertPathSegments(path, "Operation path");
+  let node = root;
+  for (const segment of segments) {
+    if (node.leaf) {
+      throw new TypeError(`Leaf/namespace collision at '${path}'.`);
+    }
+    let child = node.children.get(segment);
+    if (child === undefined) {
+      child = { leaf: false, children: new Map() };
+      node.children.set(segment, child);
+    }
+    node = child;
+  }
+  if (node.leaf || node.children.size > 0) {
+    throw new TypeError(
+      `Duplicate path or leaf/namespace collision at '${path}'.`,
+    );
+  }
+  node.leaf = true;
 }
 
 function assertDescriptors(
