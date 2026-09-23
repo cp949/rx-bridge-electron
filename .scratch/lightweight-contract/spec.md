@@ -1,6 +1,6 @@
 # 경량 계약: 타입만으로 시작하고 스키마를 점진 도입
 
-- Status: planned (ROADMAP RD-010~RD-014)
+- Status: done (ROADMAP RD-010~RD-013 완료, RD-014는 범위 밖 후속 항목으로 남음)
 - 출처: 2026-09-24 설계 그릴링. 참고 프로젝트 `/work/cp949/iframecall`.
 
 ## 문제
@@ -81,9 +81,9 @@ RD-012를 RD-013보다 먼저 둔다. 스키마 계층 없이 기존 API를 제�
 - 타입 수준 RPC 에러 코드.
 - RPC 다중 인자(와이어 형식 변경 필요).
 
-## 미검증 가설
+## 미검증 가설 — 결과
 
-- 중첩 도메인 경로에서 `SchemasFor`를 재귀로 정의할 수 있고 에러 메시지 품질이 쓸 만하다.
-- `impl` 키만으로 기존 manifest와 같은 형식을 만들 수 있다.
+- **중첩 도메인 경로에서 `SchemasFor`를 재귀로 정의할 수 있고 에러 메시지 품질이 쓸 만하다.** 확인됨(DELTA-02). `BridgeApi`/`BridgeImpl`/`SchemasFor`/`ErrorsFor` 전부 조건부 타입 재귀(`BridgeApiNode`/`BridgeImplNode`/`SchemasForNode`/`ErrorsForNode`)로 정의했고, 중첩 도메인·입력 없는 RPC를 포함한 13개 `@ts-expect-error` 케이스 전부에서 tsc가 잘못된 키·타입 이름을 메시지에 드러냈다(경로 오타는 "Did you mean to write '...'" 제안까지 포함). 값 타입 제약(`T extends BridgeValue`)은 타입 매개변수 자체에 걸지 않고 `type BridgeValueOrNever<T> = [T] extends [BridgeValue] ? T : never` 조건부 타입으로 우회해야 했다 — 전자는 재귀 처리 중 아직 구체화되지 않은 타입을 다른 제약된 제네릭에 넘기는 순간 라이브러리 자체가 항상 컴파일 에러가 나는 것을 실험으로 확인했다. 남은 편차: `interface`로 선언한 값 타입은 `BridgeValue`(암묵적 index signature)를 만족하지 못해 항상 `never`로 치환된다 — 사용자는 `type` 별칭으로 선언해야 한다(DELTA-06 demo 이전에서 실제로 이 제약에 부딪혀 `interface`를 `type`으로 바꿈).
+- **`impl` 키만으로 기존 manifest와 같은 형식을 만들 수 있다.** 확인됨(DELTA-03). `manifestFromTable(buildRegistrationTableFromContract(...))`과 기존 `publicManifest(contract)`를 4도메인(접두 관계 도메인명 `a`/`a/b` 포함) 혼합 계약으로 비교해 deep-equal 통과(`test/main/registration-table.test.ts`, DELTA-09에서 descriptor API와 함께 삭제 — 동등성 자체는 그 시점까지 계속 재확인됨). 도메인명 정렬 후 operation명 정렬이 "domain/operation" 결합 문자열 통짜 정렬과 다르다는 것도 별도 테스트로 확인해, `manifestFromTable`이 기존 방식을 정확히 재현함을 검증했다.
 
 ## Comments

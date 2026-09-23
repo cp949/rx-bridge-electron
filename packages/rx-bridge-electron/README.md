@@ -4,14 +4,14 @@
 
 ## 진입점과 프로세스 경계
 
-| 진입점                               | 실행 위치     | 책임                                                    |
-| ------------------------------------ | ------------- | ------------------------------------------------------- |
-| `@cp949/rx-bridge-electron/contract` | 모든 프로세스 | 도메인 설명자, 스키마, 계약 조합, 추론된 Renderer 타입  |
-| `@cp949/rx-bridge-electron/main`     | Main          | 핸들러 연결, 권한 확인, 검증, 세션, 진단 정보           |
-| `@cp949/rx-bridge-electron/preload`  | preload       | `contextBridge`로 노출하는 고정 Electron 채널 어댑터    |
-| `@cp949/rx-bridge-electron/renderer` | renderer      | 비동기 Proxy, RPC 클라이언트, `RemoteState`, RxJS Event |
+| 진입점                               | 실행 위치     | 책임                                                                     |
+| ------------------------------------ | ------------- | ------------------------------------------------------------------------ |
+| `@cp949/rx-bridge-electron/contract` | 모든 프로세스 | 계약 타입에서 파생하는 타입(`BridgeApi`/`BridgeImpl`/`SchemasFor`/`ErrorsFor`) |
+| `@cp949/rx-bridge-electron/main`     | Main          | 서버 생성, 핸들러 연결, 권한 확인, 검증, 세션, 진단 정보                 |
+| `@cp949/rx-bridge-electron/preload`  | preload       | `contextBridge`로 노출하는 고정 Electron 채널 어댑터                     |
+| `@cp949/rx-bridge-electron/renderer` | renderer      | 비동기 Proxy, RPC 클라이언트, `RemoteState`, RxJS Event                  |
 
-계약은 특정 프로세스에 종속되지 않는 데이터입니다. 핸들러, Electron 객체, 자격 증명, Node API, 함수, `Observable`, `Subject`는 preload 경계를 넘지 않습니다. Renderer 애플리케이션 코드는 동결된 `BridgeTransport`만 받으며 `ipcRenderer`, `send`, `invoke`, 채널 이름 또는 원시 Electron 이벤트에는 접근할 수 없습니다.
+계약은 런타임 값이 아니라 순수 TS 타입입니다. 핸들러, Electron 객체, 자격 증명, Node API, 함수, `Observable`, `Subject`는 preload 경계를 넘지 않습니다. Renderer 애플리케이션 코드는 동결된 `BridgeTransport`만 받으며 `ipcRenderer`, `send`, `invoke`, 채널 이름 또는 원시 Electron 이벤트에는 접근할 수 없습니다.
 
 `rxjs`와 `electron`은 peer dependency입니다. Electron 런타임은 애플리케이션이 소유하며, 대상 Electron 버전에 맞게 preload를 번들링하고 준비해야 합니다.
 
@@ -25,73 +25,40 @@ GitHub repository: <https://github.com/cp949/rx-bridge-electron>
 
 Install the package and its peer dependencies with npm. The source repository is <https://github.com/cp949/rx-bridge-electron>.
 
-## 도메인 전체 예제
+## Hello world (RPC 1개, State 1개)
+
+계약은 rpc·state·event 카테고리를 갖는 도메인들의 중첩 객체 타입입니다. 스키마도 zod도 필요 없습니다.
 
 ```ts
 // bridge/contract.ts — 공유 선언만 둡니다.
-import {
-  composeContracts,
-  defineDomain,
-  rpc,
-  state,
-  type InferBridge,
-  type Schema,
-} from "@cp949/rx-bridge-electron/contract";
-
-const noInput: Schema<undefined> = {
-  parse: (value) => {
-    if (value !== undefined) throw new TypeError("No input expected");
-    return undefined;
-  },
-};
-const connection: Schema<{ readonly connected: boolean }> = {
-  parse: (value) => {
-    if (
-      value === null ||
-      typeof value !== "object" ||
-      typeof (value as { connected?: unknown }).connected !== "boolean"
-    ) {
-      throw new TypeError("Invalid connection");
-    }
-    return { connected: (value as { connected: boolean }).connected };
-  },
-};
-
-export const device = defineDomain("device", {
-  rpc: { connect: rpc({ input: noInput, output: connection }) },
-  state: { connection: state(connection) },
-});
-export const appContract = composeContracts(device);
-export type AppBridge = InferBridge<typeof appContract>;
+export type AppBridge = { device: {
+  rpc: { connect(): { readonly connected: boolean } };
+  state: { connection: { readonly connected: boolean } };
+} };
 ```
 
 ```ts
-// Main — 권한이 필요한 구현은 계약과 분리합니다.
+// Main
 import { BehaviorSubject } from "rxjs";
 import {
   createBridgeServer,
   currentValueSource,
-  implementDomain,
 } from "@cp949/rx-bridge-electron/main";
-import { appContract, device } from "./bridge/contract.js";
+import type { BridgeImpl } from "@cp949/rx-bridge-electron/contract";
+import type { AppBridge } from "./bridge/contract.js";
 
 const connection = new BehaviorSubject({ connected: false });
-const server = createBridgeServer(
-  appContract,
-  [
-    implementDomain(device, {
-      rpc: { connect: () => ({ connected: true }) },
-      state: { connection: currentValueSource(connection) },
-    }),
-  ],
-  {
-    authorize: (context, operation) =>
-      context.windowRole === "main" || !operation.startsWith("rpc:"),
+const impl: BridgeImpl<AppBridge> = {
+  device: {
+    rpc: { connect: () => ({ connected: true }) },
+    state: { connection: currentValueSource(connection) },
   },
-);
+};
+const server = createBridgeServer(impl, {
+  authorize: (context, operation) =>
+    context.windowRole === "main" || !operation.startsWith("rpc:"),
+});
 ```
-
-`implementDomain`의 rpc handler 입출력 타입과 state/event 소스 값 타입은 넘긴 도메인 계약에서 추론됩니다 — 위 예제의 `connect`/`connection`처럼 캐스팅 없이 그대로 씁니다. 계약에 선언된 operation 키는 모두 필수이고 초과 키는 타입 검사(excess property check)에서 걸립니다. `createBridgeServer`는 생성 시 넘긴 구현 배열을 합성된 계약과 이름 집합 기준으로 재검증합니다: 도메인 누락·중복·계약에 없는 도메인, 도메인별 rpc·state·event 각각의 누락·초과 키, handler·소스 형태(함수 여부, `getValue` 존재 여부 등)가 하나라도 어긋나면 서버 생성이 `TypeError`로 실패합니다(호출 시점이 아니라 시작 시점입니다). `implementDomain`을 거친 값도 다시 검사합니다. 이전에는 handler 안에서 `input as ...`으로 입력을 캐스팅했고 계약에 구현을 넘기지 않은 도메인이 있어도 서버 생성은 성공했습니다 — 근거와 이전 방법은 [ADR 0008](../../docs/adr/0008-contract-registration-match.md)에 있습니다.
 
 ```ts
 // Preload — exposeBridgeInMainWorld()를 호출한 다음 Renderer를 비동기로 초기화합니다.
@@ -120,13 +87,100 @@ api.device.state.connection.subscribe(console.log);
 window.addEventListener("pagehide", () => api.dispose(), { once: true });
 ```
 
+`impl: BridgeImpl<AppBridge>`는 계약이 선언한 모든 도메인·모든 operation에 대응하는 handler/source를 가진 일반 객체입니다. 계약과 구현이 어긋나면(누락, 초과, handler·소스 형태 오류) 컴파일 타임에 실패합니다 — `AppBridge`와 `impl`이 같은 타입에서 파생하므로 별도의 런타임 재검증이 필요 없습니다(근거: [ADR 0012](../../docs/adr/0012-lightweight-type-contract.md)). manifest는 `impl`의 키에서 만들므로, 타입을 우회해(`as any`) 빠뜨린 operation은 애초에 Renderer에 노출되지 않습니다. impl 형태 검사(handler가 함수인지, state가 `getValue`를 갖는지 등)는 타입을 우회한 값을 상대로 한 방어선으로 유지되며, 위반 시 서버 생성이 `TypeError`로 실패합니다.
+
 `bindElectronBridge({ ipcMain, server, namespace, allowedOrigins })`로 서버를 연결하고, 허용한 각 최상위 창에 `attach(webContents, role)`을 호출합니다. Main을 종료하기 전에 연결을 해제해야 합니다. `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색 및 창 생성 제한, 명시적 신뢰 origin 허용 목록을 사용하세요. `dispose()` 뒤 서버와 bind는 다시 쓸 수 없습니다 — 되돌릴 수 없는 종료이므로, 다시 연결하려면 새 `createBridgeServer`와 `bindElectronBridge`를 만드세요.
+
+## 스키마 점진 도입
+
+도메인 스키마는 선택이며 operation 단위로 부분·점진 도입합니다. 위 hello world는 스키마 없이 동작합니다 — 구조·크기 검사(`parseBridgeValue`)는 스키마 유무와 무관하게 항상 적용됩니다(아래 "검증, 한도, 범위 밖 기능" 참고).
+
+검증하고 싶은 operation만 `options.schemas`에 채웁니다. 타입은 `SchemasFor<AppBridge>`에서 도출되어 경로 오타와 스키마 출력 타입 불일치를 컴파일 에러로 잡습니다. 스키마는 `Schema<T>`(`parse(value: unknown): T`) 구조면 되고 zod에 의존하지 않습니다.
+
+```ts
+import { createBridgeServer } from "@cp949/rx-bridge-electron/main";
+import type { Schema } from "@cp949/rx-bridge-electron/contract";
+
+const connectionSchema: Schema<{ readonly connected: boolean }> = {
+  parse(value) {
+    if (
+      value === null ||
+      typeof value !== "object" ||
+      typeof (value as { connected?: unknown }).connected !== "boolean"
+    )
+      throw new TypeError("Invalid connection");
+    return value as { readonly connected: boolean };
+  },
+};
+
+const server = createBridgeServer(impl, {
+  schemas: { device: { state: { connection: connectionSchema } } },
+});
+```
+
+RPC는 `{ input?: Schema<I>; output?: Schema<O> }`, State·Event는 `Schema<T>` 하나입니다. 입력이 없는 RPC는 `input` 항목 자체가 없습니다. 없는 항목은 도메인 스키마 없이 통과합니다. 요청 처리 순서는 `parseBridgeValue(input)`(항상) → 입력 스키마(있으면, 실패 시 `INVALID_ARGUMENT`) → handler → 출력 스키마(있으면) → `parseBridgeValue` + clone(항상)입니다.
+
+스키마를 계약·구현과 분리된 파일에 두고 싶으면 `satisfies SchemasFor<AppBridge>`로 타입 검사를 유지한 채 값만 다른 파일에 둡니다(예: `main/schemas.ts`). 여러 operation에 걸쳐 스키마를 선언·조합하는 실제 예시는 `packages/rx-bridge-electron/test/main/impl-schemas-fixture.ts`, 데모 앱의 `apps/demo/src/main/schemas.ts`에 있습니다.
+
+```ts
+// main/schemas.ts
+export const schemas = {
+  device: { state: { connection: connectionSchema } },
+} satisfies SchemasFor<AppBridge>;
+
+// main/index.ts
+import { schemas } from "./schemas.js";
+const server = createBridgeServer(impl, { schemas });
+```
+
+스키마는 Main에만 두며 Renderer 번들에 포함되지 않습니다 — Renderer는 계약 타입만 참조합니다.
+
+## 허용 에러 코드
+
+`options.errors: ErrorsFor<AppBridge>`도 계약과 같은 모양의 선택적 중첩 map이며, RPC operation에만 허용 도메인 에러 코드 목록(`readonly string[]`)을 둘 수 있습니다. handler가 `code`·`message`(그리고 선택적으로 clone-safe `details`)를 가진 값을 던지고 그 `code`가 목록에 있으면 그 코드로 응답하고, 목록에 없거나 형태가 어긋나면 안전한 `INTERNAL` 오류로 바뀝니다. Renderer 쪽 에러 코드 타입 추론은 하지 않습니다(범위 밖).
+
+```ts
+export const errors = {
+  device: { rpc: { connect: ["DEVICE_TIMEOUT"] } },
+} satisfies ErrorsFor<AppBridge>;
+
+// handler 안에서
+throw Object.assign(new Error("Device response timeout"), {
+  code: "DEVICE_TIMEOUT",
+});
+
+const server = createBridgeServer(impl, { errors });
+```
+
+## Event buffer 옵션
+
+계약은 타입이라 값을 담을 수 없으므로, Event buffer(용량과 overflow 정책)는 Main에서 source를 만들 때 옵션으로 둡니다. 생략하면 기본값(`capacity: 100`, `overflow: "error"`)을 씁니다.
+
+```ts
+import { Subject } from "rxjs";
+import { broadcastEvent, scopedEvent } from "@cp949/rx-bridge-electron/main";
+
+const data$ = new Subject<{ readonly text: string }>();
+
+// 문서 세션 전체가 하나의 upstream을 공유합니다.
+const dataEvent = broadcastEvent(data$, {
+  buffer: { capacity: 256, overflow: "drop-oldest" },
+});
+
+// 구독마다 별도 upstream을 만듭니다(context별로 다른 값을 흘려보낼 때).
+const scopedDataEvent = scopedEvent(
+  (context) => data$, // 또는 context.windowRole에 따라 다른 Observable
+  { buffer: { capacity: 64, overflow: "error" } },
+);
+```
+
+`overflow`는 `"error"`(대기 값 전달 뒤 `STREAM_OVERFLOW`로 종료), `"drop-oldest"`, `"drop-newest"` 중 하나입니다. plain `Observable<T>`을 그대로 impl에 두면 buffer 옵션 없이 기본값을 씁니다.
 
 ## 런타임 동작
 
-`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 도메인 아래에 종류 계층을 두는 `api.<domain path>.rpc|state|event.<operation>`입니다(`api.device.rpc.connect()`, `api.device.state.connection`, `api.device.event.data`). 도메인에 정의가 없는 종류는 노출하지 않습니다. operation 이름은 `/`를 포함할 수 없고, 묶음은 도메인 경로(`defineDomain("device/serial", ...)` → `api.device.serial.rpc.open()`)로 표현합니다. 도메인 경로의 segment로 `rpc`, `state`, `event`를 쓸 수 없습니다(근거: [ADR 0007](../../docs/adr/0007-hierarchical-renderer-api.md)).
+`createRendererApi()`는 Proxy를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Proxy는 선언된 경로만 노출합니다. `then` 속성 때문에 Proxy가 Promise처럼 동작하지 않습니다. 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 도메인 아래에 종류 계층을 두는 `api.<domain path>.rpc|state|event.<operation>`입니다(`api.device.rpc.connect()`, `api.device.state.connection`, `api.device.event.data`). 도메인에 정의가 없는 종류는 노출하지 않습니다. operation 이름은 `/`를 포함할 수 없고, 묶음은 중첩 도메인(`{ device: { serial: { rpc: {...} } } }` → `api.device.serial.rpc.open()`)으로 표현합니다. 도메인 경로의 segment로 `rpc`, `state`, `event`를 쓸 수 없습니다(근거: [ADR 0007](../../docs/adr/0007-hierarchical-renderer-api.md)).
 
-루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출은 되돌릴 수 없는 최종 종료입니다(근거: [ADR 0006](../../docs/adr/0006-shutdown-contract.md)). 진행 중인 RPC는 `RemoteError("CANCELLED", "Renderer API is disposed.")`로 즉시 reject되고, 이미 Main에 전송된 요청에는 best-effort cancel을 보냅니다. 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`됩니다(`error`가 아닙니다). 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝납니다. 반복 `dispose()` 호출은 no-op입니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 첫 segment가 `dispose`인 도메인 이름(`defineDomain("dispose", ...)`, `defineDomain("dispose/x", ...)`)은 거부됩니다. 하위 segment나 operation 이름으로는 계속 쓸 수 있습니다(예: `device/dispose` 도메인, `api.device.rpc.dispose`).
+루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출은 되돌릴 수 없는 최종 종료입니다(근거: [ADR 0006](../../docs/adr/0006-shutdown-contract.md)). 진행 중인 RPC는 `RemoteError("CANCELLED", "Renderer API is disposed.")`로 즉시 reject되고, 이미 Main에 전송된 요청에는 best-effort cancel을 보냅니다. 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`됩니다(`error`가 아닙니다). 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝납니다. 반복 `dispose()` 호출은 no-op입니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 최상위 도메인 이름이 `dispose`인 계약(`{ dispose: {...} }`, `{ dispose: { x: {...} } }`)은 거부됩니다. 하위 segment나 operation 이름으로는 계속 쓸 수 있습니다(예: `device/dispose` 도메인, `api.device.rpc.dispose`).
 
 각 RPC는 structured clone이 가능한 입력값 하나를 받습니다. `AbortSignal`과 `timeoutMs`는 별도 `CallOptions`로 전달합니다. 취소, timeout, 응답 중 하나만 최종 결과가 됩니다. 원격 실패는 `FORBIDDEN`, `INVALID_ARGUMENT`, `CANCELLED`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED` 같은 프로토콜 코드를 가진 `RemoteError` 값으로 전달됩니다. `DEADLINE_EXCEEDED`는 Renderer의 로컬 `timeoutMs`뿐 아니라 Main이 `resourceLimits.maxRpcDurationMs`로 스스로 설정한 서버 deadline에서도 올 수 있습니다 — 둘 중 먼저 확정되는 쪽이 최종 결과입니다.
 
@@ -139,18 +193,18 @@ window.addEventListener("pagehide", () => api.dispose(), { once: true });
 
 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 1회 받습니다. `undefined`도 유효한 현재값으로 전달됩니다. 아직 값을 받지 못한 `connecting` 상태(첫 로컬 구독자가 원격 구독을 열었지만 첫 값이 도착하기 전)에서 늦게 구독하면 즉시 아무 값도 받지 않고 첫 값을 기다립니다.
 
-하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다.
+하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다(위 "Event buffer 옵션" 참고, 생략 시 기본값).
 
 ## 검증, 한도, 범위 밖 기능
 
-Main은 핸들러를 호출하기 전에 RPC 입력을, 전송하기 전에 출력을, 전달하기 전에 스트림 값을 검증합니다. v1 payload는 `undefined`, `null`, 원시 값, 배열, 일반 객체 트리만 허용합니다. 순환 참조, 함수, symbol, 사용자 정의 prototype, typed array, transferable을 거부합니다. 기본 한도는 깊이 32, 항목 10,000개, 문자열당 UTF-8 1,000,000 byte, 전체 크기 16 MiB(`maxTotalBytes`)입니다. 전체 크기는 노드·문자열 byte·bigint 자릿수를 순회하며 근사 계산한 값이라 실제 V8 structured clone 크기와 다를 수 있습니다. 계약의 `payloadLimits`로 필드별 상향·하향이 가능하며, 이 한도는 서버가 강제합니다(Electron 어댑터·preload는 envelope 구조만 검사합니다).
+Main은 핸들러를 호출하기 전에 RPC 입력을, 전송하기 전에 출력을, 전달하기 전에 스트림 값을 검증합니다. v1 payload는 `undefined`, `null`, 원시 값, 배열, 일반 객체 트리만 허용합니다. 순환 참조, 함수, symbol, 사용자 정의 prototype, typed array, transferable을 거부합니다. 기본 한도는 깊이 32, 항목 10,000개, 문자열당 UTF-8 1,000,000 byte, 전체 크기 16 MiB(`maxTotalBytes`)입니다. 전체 크기는 노드·문자열 byte·bigint 자릿수를 순회하며 근사 계산한 값이라 실제 V8 structured clone 크기와 다를 수 있습니다. `createBridgeServer`의 `payloadLimits` 서버 옵션으로 필드별 상향·하향이 가능하며, 이 한도는 서버가 강제합니다(Electron 어댑터·preload는 envelope 구조만 검사합니다). 이 구조·크기 검사는 도메인 스키마(`options.schemas`) 유무와 무관하게 모든 operation에 항상 적용됩니다 — 줄어드는 것은 사용자가 손으로 쓰는 코드량이지 이 검사가 아닙니다.
 
 입력과 출력의 검증 실패는 서로 다른 오류 코드로 응답합니다. 요청 envelope나 RPC 입력이 이 규칙을 어기면 `INVALID_ARGUMENT`로 거부됩니다. 반면 RPC 출력과 스트림(State/Event) 값의 검증 실패는 `INTERNAL`입니다 — handler나 출력 스키마가 만든 값도 전송 전에 같은 규칙으로 다시 검증하며, 출력 스키마가 변환한 결과도 예외 없이 재검사 대상입니다. handler가 선언되지 않은 예외를 던지거나 출력 스키마 자체가 예외를 던져도(선언된 오류 코드를 가진 예외라도) `INTERNAL`로 응답하고, 선언된 도메인 에러라도 `message`나 `details`가 위 한도를 넘으면 `INTERNAL`로 대체됩니다. `authorize` 콜백이 예외를 던지거나 reject해도 RPC·State·Event 모두 `INTERNAL`입니다. 검증 실패 시점에 요청이 이미 취소된 상태라면 `CANCELLED`가 우선합니다.
 
 Main은 세션(연결된 `webContents`의 현재 문서)별로 진행 중 RPC 수, 구독 수, RPC 실행 시간, retired client ID 보관량도 제한합니다. `createBridgeServer`의 `resourceLimits` 옵션으로 설정하며, 지정하지 않은 필드는 기본값을 씁니다.
 
 ```ts
-const server = createBridgeServer(appContract, implementations, {
+const server = createBridgeServer(impl, {
   resourceLimits: {
     maxConcurrentRpc: 32, // 기본 64
     maxSubscriptions: 128, // 기본 256
@@ -165,7 +219,7 @@ const server = createBridgeServer(appContract, implementations, {
 `createBridgeServer`의 `diagnostics` 옵션으로 `DiagnosticsSink`를 연결하면 RPC 완료(성공·실패 `outcome` 포함)·취소·Main deadline 만료, 출력 검증 실패, Event 큐 깊이·드롭, 보안·입력·자원 한도 거부 사유(`rejected`, 11개 `RejectReason`), 세션·구독의 생성과 해제를 닫힌 타입 이벤트로 관측할 수 있습니다. 사유는 enum 코드, 식별자는 등록된 와이어 key만 실리며 자격 증명·원시 payload·origin·clientId·requestId·subscriptionId·`Error` 객체는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다.
 
 ```ts
-const server = createBridgeServer(appContract, implementations, {
+const server = createBridgeServer(impl, {
   diagnostics: {
     record: (event) => {
       if (event.type === "rejected")
@@ -185,8 +239,9 @@ const { sessions, rpcInFlight, subscriptions, queuedEvents } =
 
 이전 버전에서 올라오는 경우 다음을 확인하세요.
 
-1. **기본 자원 한도로 이전에 통과하던 호출이 실패할 수 있습니다.** 5분을 넘는 RPC, 16 MiB를 넘는 payload, 세션당 64개를 넘는 동시 RPC, 세션당 256개를 넘는 구독이 이제 기본값에서 거부됩니다. 위 예제처럼 `resourceLimits`(RPC·구독·시간·retired 보관)나 계약의 `payloadLimits`(`maxTotalBytes` 포함)로 상향하세요. Renderer에서 `timeoutMs: Infinity`를 쓰던 호출은 Main `maxRpcDurationMs`도 `Infinity`로 맞춰야 Main이 먼저 `DEADLINE_EXCEEDED`로 끊지 않습니다.
+1. **기본 자원 한도로 이전에 통과하던 호출이 실패할 수 있습니다.** 5분을 넘는 RPC, 16 MiB를 넘는 payload, 세션당 64개를 넘는 동시 RPC, 세션당 256개를 넘는 구독이 이제 기본값에서 거부됩니다. 위 예제처럼 서버 옵션 `resourceLimits`(RPC·구독·시간·retired 보관)나 `payloadLimits`(`maxTotalBytes` 포함)로 상향하세요. Renderer에서 `timeoutMs: Infinity`를 쓰던 호출은 Main `maxRpcDurationMs`도 `Infinity`로 맞춰야 Main이 먼저 `DEADLINE_EXCEEDED`로 끊지 않습니다.
 2. **사용자 정의 transport(자체 `BridgeTransport` 구현)는 `subscriptionId`를 `<nonce>:<scope>:<seq base36>` 형식으로, 한 문서 세션 안에서 증가하는 순서로 보내야 합니다.** Main이 세션별 워터마크로 재사용·늦은 도착을 판정하기 때문입니다. `@cp949/rx-bridge-electron/renderer`가 공개하는 `createOpaqueId(scope)`를 그대로 쓰는 것을 권장합니다. 형식에 맞지 않는 ID는 `INVALID_ARGUMENT`로 거부됩니다.
 3. **`TransportErrorCode`에 `RESOURCE_EXHAUSTED`가 추가됐습니다.** 오류 코드를 망라해 분기하던(`switch`의 `default`가 없거나 union을 좁게 전제한) 코드는 이 코드도 처리하도록 확인하세요.
-4. **계약의 `payloadLimits`가 이제 Electron 어댑터에도 적용됩니다.** 이전에는 어댑터가 하드코딩된 한도로 wire를 먼저 검사해 계약이 선언한 더 큰 한도가 실제로는 동작하지 않았습니다. 기본값보다 큰 `payloadLimits`를 선언했다면 이제 그 한도만큼 큰 입력이 실제로 handler까지 도달합니다.
+4. **`payloadLimits`가 서버 옵션이 되며 Electron 어댑터에도 적용됩니다.** 이전에는 어댑터가 하드코딩된 한도로 wire를 먼저 검사해 더 큰 한도를 선언해도 실제로는 동작하지 않았습니다. 기본값보다 큰 `payloadLimits`를 선언했다면 이제 그 한도만큼 큰 입력이 실제로 handler까지 도달합니다.
 5. **`DiagnosticsSink`로 받는 `rpc-finished` 이벤트에 `outcome: "ok" | "error"` 필드가 추가됐습니다.** `BridgeDiagnostic`을 망라해 분기하던(`switch`의 `default`가 없거나 이벤트 모양을 좁게 전제한) sink 구현은 이 필드와 새 이벤트 6종(`rpc-timed-out`, `rejected`, `session-opened`, `session-closed`, `subscription-opened`, `subscription-closed`)도 처리하도록 확인하세요.
+6. **계약을 런타임 값(도메인 조합 함수로 만들던 descriptor 트리)으로 선언하던 API는 순수 TS 타입으로 바뀌었습니다.** 도메인 조합 함수가 반환하던 구현 객체는 `impl: BridgeImpl<B>`의 해당 도메인 필드로, 계약·구현·옵션 3개 인자를 받던 서버 생성 함수는 `createBridgeServer<B>(impl, options)`로 바뀌었습니다. 계약에서 Renderer 타입을 추론하던 옛 타입은 `BridgeApi<B>`(`B`는 계약 타입)로 바뀌었습니다. 옛 API 이름과 자세한 이전 방법은 [ADR 0012](../../docs/adr/0012-lightweight-type-contract.md)의 "이전(migration)" 절에 있습니다.
