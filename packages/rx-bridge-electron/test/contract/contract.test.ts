@@ -7,6 +7,7 @@ import {
   publicManifest,
   rpc,
   state,
+  type DomainContract,
   type Schema,
 } from "../../src/contract/index.js";
 
@@ -140,5 +141,17 @@ describe("contract composition", () => {
     });
 
     expect(domain.definitions.rpc?.dispose).toBeDefined();
+    expect(defineDomain("device/dispose", {}).name).toBe("device/dispose");
+  });
+
+  test("rejects a reserved dispose domain assembled without defineDomain", () => {
+    const forged = {
+      name: "dispose",
+      definitions: {},
+    } as unknown as DomainContract;
+
+    expect(() => composeContracts(forged)).toThrow(
+      /reserved segment 'dispose'/,
+    );
   });
 });

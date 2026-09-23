@@ -1,4 +1,8 @@
-import { assertPathSegments, type DomainContract } from "./define-domain.js";
+import {
+  assertDomainName,
+  assertPathSegments,
+  type DomainContract,
+} from "./define-domain.js";
 import type { PayloadLimits } from "../protocol/index.js";
 
 export interface ComposedContract<
@@ -71,11 +75,7 @@ export function composeContracts(
     if (Object.hasOwn(domainsByName, domain.name)) {
       throw new TypeError(`Duplicate domain name '${domain.name}'.`);
     }
-    if (assertPathSegments(domain.name, "Domain name")[0] === "dispose") {
-      throw new TypeError(
-        `Domain name '${domain.name}' contains reserved segment 'dispose'.`,
-      );
-    }
+    assertDomainName(domain.name);
     for (const category of ["rpc", "state", "event"] as const) {
       const definitions = domain.definitions[category];
       if (definitions === undefined) {

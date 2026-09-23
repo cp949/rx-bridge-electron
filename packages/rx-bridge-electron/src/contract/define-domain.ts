@@ -75,6 +75,12 @@ export function assertPathSegments(
   return segments;
 }
 
+export function assertDomainName(name: string): void {
+  if (assertPathSegments(name, "Domain name")[0] === "dispose") {
+    throw new TypeError("Domain name contains reserved segment 'dispose'.");
+  }
+}
+
 function assertDescriptors(
   definitions: Record<string, unknown>,
   category: "rpc" | "state" | "event",
@@ -104,10 +110,7 @@ export function defineDomain<
   Name extends string,
   Definitions extends DomainDefinitions,
 >(name: Name, definitions: Definitions): DomainContract<Name, Definitions> {
-  const nameSegments = assertPathSegments(name, "Domain name");
-  if (nameSegments[0] === "dispose") {
-    throw new TypeError("Domain name contains reserved segment 'dispose'.");
-  }
+  assertDomainName(name);
   assertOwnDataRecord(definitions, "Domain definitions");
   for (const key of Object.keys(definitions)) {
     if (key !== "rpc" && key !== "state" && key !== "event") {

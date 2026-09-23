@@ -185,6 +185,39 @@ describe("renderer handshake and API proxy", () => {
     await expect(resultPromise).resolves.toEqual({ connected: true });
   });
 
+  test("exposes root dispose without listing it and keeps nested dispose operations", async () => {
+    const transport = new FakeTransport();
+    transport.handshake = Promise.resolve({
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: {
+        rpc: ["rpc:hardware/connect", "rpc:hardware/dispose"],
+        state: [],
+        event: [],
+      },
+    });
+    const api = await createRendererApi<{
+      readonly hardware: { dispose(): Promise<string> };
+    }>(transport);
+
+    expect("dispose" in api).toBe(true);
+    expect(Object.keys(api)).toEqual(["hardware"]);
+    expect(api.hardware.dispose).not.toBe(api.dispose);
+    expect(() => {
+      api.dispose();
+      api.dispose();
+    }).not.toThrow();
+
+    const resultPromise = api.hardware.dispose();
+    const invocation = transport.invocations[0];
+    expect(invocation).toMatchObject({ key: "rpc:hardware/dispose" });
+    transport.resolveInvocation(0, {
+      ...success(invocation!.requestId),
+      result: "disposed",
+    });
+    await expect(resultPromise).resolves.toBe("disposed");
+  });
+
   test("keeps CallOptions separate from the one serializable RPC input", async () => {
     const transport = new FakeTransport();
     const api = await createRendererApi<AppBridge>(transport);
