@@ -7,6 +7,7 @@ import {
   type RpcResponse,
   type WireRpcRequest,
 } from "../protocol/index.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
@@ -111,7 +112,10 @@ export async function dispatchRegistered(
   try {
     output = parseOutput(registration.descriptor.output, result, limits);
   } catch {
-    diagnostics?.record({ type: "validation-failed", key: envelope.key });
+    recordDiagnostic(diagnostics, {
+      type: "validation-failed",
+      key: envelope.key,
+    });
     if (context.signal.aborted)
       return respond({
         type: "error",

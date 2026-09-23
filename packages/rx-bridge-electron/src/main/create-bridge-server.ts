@@ -8,6 +8,7 @@ import type {
   WireStreamCommand,
 } from "../protocol/index.js";
 import { parseOpaqueIdSequence } from "../protocol/index.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
 import { registerImplementations } from "./registration.js";
@@ -158,7 +159,7 @@ export function createBridgeServer<Contract extends ComposedContract>(
         } finally {
           sessions.finishRpc(session, id, controller);
           sessions.releaseRpc(session);
-          options.diagnostics?.record({
+          recordDiagnostic(options.diagnostics, {
             type: "rpc-finished",
             key: envelope.key,
             durationMs: performance.now() - started,

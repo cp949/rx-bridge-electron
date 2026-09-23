@@ -13,6 +13,7 @@ import {
   type WireStreamCommand,
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
@@ -363,7 +364,7 @@ export class StreamHub {
         this.#limits,
       );
     } catch {
-      this.#diagnostics?.record({
+      recordDiagnostic(this.#diagnostics, {
         type: "validation-failed",
         key: consumer.key,
       });
@@ -378,12 +379,12 @@ export class StreamHub {
       if (queue === undefined) return;
       const result = queue.push(value);
       if (result.dropped > 0)
-        this.#diagnostics?.record({
+        recordDiagnostic(this.#diagnostics, {
           type: "stream-dropped",
           key: consumer.key,
           count: result.dropped,
         });
-      this.#diagnostics?.record({
+      recordDiagnostic(this.#diagnostics, {
         type: "stream-queue",
         key: consumer.key,
         depth: queue.length,
@@ -409,7 +410,7 @@ export class StreamHub {
     ) {
       hasValue = true;
       value = consumer.pendingEvents?.shift();
-      this.#diagnostics?.record({
+      recordDiagnostic(this.#diagnostics, {
         type: "stream-queue",
         key: consumer.key,
         depth: consumer.pendingEvents?.length ?? 0,

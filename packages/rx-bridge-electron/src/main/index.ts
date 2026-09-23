@@ -21,7 +21,9 @@ export type {
   BridgeDiagnostic,
   BridgeServer,
   DiagnosticsSink,
+  DiagnosticsSnapshot,
   DomainImplementation,
+  RejectReason,
   SenderIdentity,
 } from "./types.js";
 export type { WireCancelRequest, WireRpcRequest } from "../protocol/index.js";

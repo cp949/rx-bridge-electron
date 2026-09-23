@@ -37,12 +37,34 @@ export type Authorize = (
   context: BridgeContext,
   operationId: string,
 ) => boolean | Promise<boolean>;
+export type RejectReason =
+  | "frame-not-main"
+  | "origin-not-allowed"
+  | "sender-unauthorized"
+  | "authorize-denied"
+  | "version-mismatch"
+  | "malformed-envelope"
+  | "unknown-operation"
+  | "invalid-input"
+  | "payload-too-large"
+  | "rpc-limit"
+  | "subscription-limit";
+
+export interface DiagnosticsSnapshot {
+  readonly sessions: number;
+  readonly rpcInFlight: number;
+  readonly subscriptions: number;
+  readonly queuedEvents: number;
+}
+
 export type BridgeDiagnostic =
   | {
       readonly type: "rpc-finished";
       readonly key: string;
       readonly durationMs: number;
+      readonly outcome?: "ok" | "error";
     }
+  | { readonly type: "rpc-timed-out"; readonly key: string }
   | { readonly type: "rpc-cancelled"; readonly key: string }
   | { readonly type: "validation-failed"; readonly key: string }
   | {
@@ -54,7 +76,16 @@ export type BridgeDiagnostic =
       readonly type: "stream-dropped";
       readonly key: string;
       readonly count: number;
-    };
+    }
+  | {
+      readonly type: "rejected";
+      readonly reason: RejectReason;
+      readonly key?: string;
+    }
+  | { readonly type: "session-opened" }
+  | { readonly type: "session-closed" }
+  | { readonly type: "subscription-opened"; readonly key: string }
+  | { readonly type: "subscription-closed"; readonly key: string };
 export interface DiagnosticsSink {
   record(event: BridgeDiagnostic): void;
 }

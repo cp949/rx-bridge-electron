@@ -1,4 +1,5 @@
 import { BridgeProtocolError } from "../protocol/index.js";
+import { recordDiagnostic } from "./diagnostics.js";
 import type { ResourceLimits } from "./resource-limits.js";
 import type {
   AttachedTarget,
@@ -174,7 +175,10 @@ export class DocumentSessions {
     if (work === undefined) return;
     state?.active.delete(id);
     work.controller.abort();
-    this.#diagnostics?.record({ type: "rpc-cancelled", key: work.key });
+    recordDiagnostic(this.#diagnostics, {
+      type: "rpc-cancelled",
+      key: work.key,
+    });
   }
 
   public beginStream(
