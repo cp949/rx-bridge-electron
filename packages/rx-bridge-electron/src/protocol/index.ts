@@ -1,6 +1,7 @@
 export {
   BridgeProtocolError,
   parseBridgeValue,
+  PayloadLimitError,
   type BridgeValue,
   type PayloadLimits,
 } from "./bridge-value.js";

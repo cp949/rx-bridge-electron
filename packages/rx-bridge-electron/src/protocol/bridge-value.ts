@@ -27,6 +27,20 @@ export class BridgeProtocolError extends Error {
   }
 }
 
+/**
+ * Raised in place of {@link BridgeProtocolError} when a value is rejected
+ * because it exceeds a configured {@link PayloadLimits} threshold, so
+ * callers can distinguish size-limit rejections from structural ones
+ * without matching on the message string. Public `code`/`message` are
+ * unchanged.
+ */
+export class PayloadLimitError extends BridgeProtocolError {
+  public constructor(message: string) {
+    super("INVALID_ARGUMENT", message);
+    this.name = "PayloadLimitError";
+  }
+}
+
 interface EnterFrame {
   readonly kind: "enter";
   readonly depth: number;
@@ -44,6 +58,10 @@ const textEncoder = new TextEncoder();
 
 function invalidArgument(message: string): never {
   throw new BridgeProtocolError("INVALID_ARGUMENT", message);
+}
+
+function limitExceeded(message: string): never {
+  throw new PayloadLimitError(message);
 }
 
 function assertLimit(name: string, value: number): void {
@@ -75,7 +93,7 @@ function assertDataProperties(
     }
     const keyBytes = textEncoder.encode(key).byteLength;
     if (keyBytes > maxStringBytes) {
-      invalidArgument(
+      limitExceeded(
         "Bridge object key exceeds the configured maximum byte length.",
       );
     }
@@ -124,7 +142,7 @@ export function parseBridgeValue(
     }
     totalBytes += delta;
     if (totalBytes > maxTotalBytes) {
-      invalidArgument(
+      limitExceeded(
         "Bridge value exceeds the configured maximum total byte size.",
       );
     }
@@ -140,7 +158,7 @@ export function parseBridgeValue(
       continue;
     }
     if (frame.depth > limits.maxDepth) {
-      invalidArgument("Bridge value exceeds the configured maximum depth.");
+      limitExceeded("Bridge value exceeds the configured maximum depth.");
     }
 
     addBytes(8);
@@ -158,7 +176,7 @@ export function parseBridgeValue(
       case "string": {
         const byteLength = textEncoder.encode(frame.value).byteLength;
         if (byteLength > limits.maxStringBytes) {
-          invalidArgument(
+          limitExceeded(
             "Bridge string exceeds the configured maximum byte length.",
           );
         }
@@ -203,7 +221,7 @@ export function parseBridgeValue(
     );
     entries += keys.length;
     if (entries > limits.maxEntries) {
-      invalidArgument(
+      limitExceeded(
         "Bridge value exceeds the configured maximum entry count.",
       );
     }

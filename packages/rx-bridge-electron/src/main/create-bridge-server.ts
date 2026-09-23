@@ -87,7 +87,13 @@ export function createBridgeServer<Contract extends ComposedContract>(
   });
   return {
     handshake(sender, clientId) {
-      if (sessions.establish(sender, clientId) === undefined) return undefined;
+      if (sessions.establish(sender, clientId) === undefined) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "sender-unauthorized",
+        });
+        return undefined;
+      }
       return { protocolVersion: 1, clientId, manifest };
     },
     attach(target: AttachedTarget): () => void {
@@ -97,24 +103,45 @@ export function createBridgeServer<Contract extends ComposedContract>(
       sender: SenderIdentity,
       envelope: WireRpcRequest,
     ): Promise<RpcResponse> {
-      if (envelope.protocolVersion !== 1)
+      if (envelope.protocolVersion !== 1) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "version-mismatch",
+        });
         return error(
           envelope,
           "VERSION_MISMATCH",
           "Unsupported protocol version.",
         );
+      }
       const session = sessions.establish(sender, envelope.clientId);
-      if (session === undefined)
+      if (session === undefined) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "sender-unauthorized",
+        });
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
+      }
       const registration = findRpc(contract, registrations, envelope.key);
-      if (registration === undefined)
+      if (registration === undefined) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "unknown-operation",
+        });
         return error(envelope, "NOT_FOUND", "Unknown bridge operation.");
-      if (!sessions.tryAcquireRpc(session))
+      }
+      if (!sessions.tryAcquireRpc(session)) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "rpc-limit",
+          key: envelope.key,
+        });
         return error(
           envelope,
           "RESOURCE_EXHAUSTED",
           "Too many concurrent bridge requests.",
         );
+      }
       const id = keyOf(sender, envelope.clientId, envelope.requestId);
       const controller = sessions.beginRpc(session, id, envelope.key);
       const context: BridgeContext = {
@@ -143,12 +170,18 @@ export function createBridgeServer<Contract extends ComposedContract>(
             sessions.current(sender, envelope.clientId) !== session
           )
             return error(envelope, "CANCELLED", "Request cancelled.");
-          if (!allowed)
+          if (!allowed) {
+            recordDiagnostic(options.diagnostics, {
+              type: "rejected",
+              reason: "authorize-denied",
+              key: envelope.key,
+            });
             return error(
               envelope,
               "FORBIDDEN",
               "Bridge operation is forbidden.",
             );
+          }
           return await dispatchRegistered(
             registration,
             envelope,
@@ -199,10 +232,22 @@ export function createBridgeServer<Contract extends ComposedContract>(
       command: WireStreamCommand,
       send: StreamSender,
     ): Promise<void> {
-      if (command.protocolVersion !== 1) return;
+      if (command.protocolVersion !== 1) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "version-mismatch",
+        });
+        return;
+      }
       if (command.type !== "subscribe") {
         const session = sessions.current(sender, command.clientId);
-        if (session === undefined) return;
+        if (session === undefined) {
+          recordDiagnostic(options.diagnostics, {
+            type: "rejected",
+            reason: "sender-unauthorized",
+          });
+          return;
+        }
         if (command.type === "unsubscribe")
           sessions.cancelStream(
             session,
@@ -212,9 +257,19 @@ export function createBridgeServer<Contract extends ComposedContract>(
         return;
       }
       const session = sessions.establish(sender, command.clientId);
-      if (session === undefined) return;
+      if (session === undefined) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "sender-unauthorized",
+        });
+        return;
+      }
       const sequence = parseOpaqueIdSequence(command.subscriptionId);
       if (sequence === undefined) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "invalid-input",
+        });
         streams.reject(
           sender,
           command,
@@ -231,6 +286,10 @@ export function createBridgeServer<Contract extends ComposedContract>(
       const begin = sessions.beginStream(session, id, sequence);
       if (begin.kind === "duplicate") return;
       if (begin.kind === "exhausted") {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "subscription-limit",
+        });
         streams.reject(
           sender,
           command,
@@ -283,6 +342,13 @@ export function createBridgeServer<Contract extends ComposedContract>(
         return;
       }
       if (!allowed) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "authorize-denied",
+          ...(streams.isRegistered(command.key)
+            ? { key: command.key }
+            : {}),
+        });
         streams.reject(
           sender,
           command,

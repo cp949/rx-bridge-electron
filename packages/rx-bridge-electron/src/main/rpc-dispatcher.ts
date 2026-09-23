@@ -2,6 +2,7 @@ import type { ComposedContract, RpcDescriptor } from "../contract/index.js";
 import {
   BridgeProtocolError,
   parseBridgeValue,
+  PayloadLimitError,
   type BridgeValue,
   type PayloadLimits,
   type RpcResponse,
@@ -65,17 +66,43 @@ export async function dispatchRegistered(
       requestId: envelope.requestId,
       ...response,
     }) as RpcResponse;
+  let parsed: BridgeValue;
+  try {
+    parsed = parseBridgeValue(envelope.input, limits);
+  } catch (cause) {
+    if (context.signal.aborted)
+      return respond({
+        type: "error",
+        error: { code: "CANCELLED", message: "Request cancelled." },
+      });
+    recordDiagnostic(diagnostics, {
+      type: "rejected",
+      reason:
+        cause instanceof PayloadLimitError ? "payload-too-large" : "invalid-input",
+      key: envelope.key,
+    });
+    return respond({
+      type: "error",
+      error: {
+        code: "INVALID_ARGUMENT",
+        message: "Invalid bridge argument.",
+      },
+    });
+  }
   let input: BridgeValue;
   try {
-    input = registration.descriptor.input.parse(
-      parseBridgeValue(envelope.input, limits),
-    );
+    input = registration.descriptor.input.parse(parsed);
   } catch {
     if (context.signal.aborted)
       return respond({
         type: "error",
         error: { code: "CANCELLED", message: "Request cancelled." },
       });
+    recordDiagnostic(diagnostics, {
+      type: "rejected",
+      reason: "invalid-input",
+      key: envelope.key,
+    });
     return respond({
       type: "error",
       error: {

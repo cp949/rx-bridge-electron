@@ -126,6 +126,10 @@ export class StreamHub {
     }
   }
 
+  public isRegistered(key: string): boolean {
+    return this.#registrations.has(key);
+  }
+
   public subscribe(
     sender: SenderIdentity,
     clientId: string,
@@ -137,6 +141,10 @@ export class StreamHub {
   ): void {
     const registration = this.#registrations.get(command.key);
     if (registration === undefined) {
+      recordDiagnostic(this.#diagnostics, {
+        type: "rejected",
+        reason: "unknown-operation",
+      });
       this.reject(
         sender,
         command,
