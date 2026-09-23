@@ -1,5 +1,7 @@
 # `createBridgeServer`는 생성 시 합성된 계약 전체를 기준으로 구현 등록을 이름 집합으로 재검증한다
 
+> [ADR 0012](0012-lightweight-type-contract.md)가 이 문서를 대체한다. 계약이 타입이 되고 `impl: BridgeImpl<B>`가 같은 타입 `B`에서 파생되면서, 이 문서가 다루는 전제(런타임 `DomainContract`·`DomainImplementation`·`implementDomain`, 그리고 "같은 이름이지만 다른 정의의 도메인"이라는 참조 불일치 문제)가 성립하지 않는다. 본문은 이력으로 보존한다.
+
 이전까지 `implementDomain`은 도메인 하나 단위로 rpc·state·event의 누락·초과와 소스 형태를 검사했지만, `createBridgeServer`는 그 결과를 그대로 신뢰했다. 도메인 단위 조회는 `Array#find`(`rpc-dispatcher.ts`의 `findRpc`, `stream-hub.ts` 생성자)로 이루어져 계약에 없는 도메인의 구현은 조용히 무시되고, 같은 `domainName`이 두 번 등록되면 먼저 등록된 쪽만 살아남았다. 계약에 선언된 도메인에 구현이 아예 없어도 서버는 생성에 성공했고, 실패는 그 operation을 실제로 호출한 시점에 `NOT_FOUND "Unknown bridge operation."`/`"Unknown bridge stream."`로만 드러났다. `StreamHub`에 넘기는 인자도 `as readonly StreamDomainImplementation[]`로 캐스팅되어, 인자 타입(`DomainImplementation[]`, rpc만 있음)과 실제로 기대하는 형태(state·event 포함)가 컴파일 타임에 맞지 않아도 타입 검사를 통과했다.
 
 ## 결정: 생성 시 계약 전체와 대조하고, 첫 불일치에서 `TypeError`를 던진다
