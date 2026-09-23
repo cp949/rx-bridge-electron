@@ -467,4 +467,59 @@ describe("RPC output boundary revalidation", () => {
       { type: "validation-failed", key: "rpc:boundary/transform" },
     ]);
   });
+
+  test("returns declared error details unaffected by later mutation of the thrown object", async () => {
+    const details: { retry: boolean; extra?: string } = { retry: true };
+    const handler = vi.fn(async () => {
+      throw Object.assign(new Error("device unavailable"), {
+        code: "DEVICE_GONE",
+        details,
+      });
+    });
+    const { server } = setupOutput(object, handler);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    if (response.type !== "error") throw new Error("expected error");
+    const returned = response.error.details;
+    details.extra = "mutated";
+    expect(returned).toEqual({ retry: true });
+    expect(returned).not.toBe(details);
+  });
+
+  test("reads a declared error code only once", async () => {
+    const codes = ["DEVICE_GONE", "DEVICE_GONE", "UNDECLARED"];
+    const thrown = { message: "device unavailable" };
+    Object.defineProperty(thrown, "code", {
+      enumerable: true,
+      get: () => codes.shift(),
+    });
+    const handler = vi.fn(async () => {
+      throw thrown;
+    });
+    const { server } = setupOutput(object, handler);
+    const response = await server.dispatchRpc(sender(), transformRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "DEVICE_GONE", message: "device unavailable" },
+    });
+  });
+
+  test("sanitizes a thrown object whose error fields throw on access", async () => {
+    const thrown = {};
+    Object.defineProperty(thrown, "code", {
+      enumerable: true,
+      get: () => {
+        throw new Error("/private/token: secret");
+      },
+    });
+    const handler = vi.fn(async () => {
+      throw thrown;
+    });
+    const { server } = setupOutput(object, handler);
+    await expect(
+      server.dispatchRpc(sender(), transformRequest()),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+  });
 });
