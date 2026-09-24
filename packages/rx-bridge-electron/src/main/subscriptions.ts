@@ -9,6 +9,7 @@ import {
   type StreamMessage,
   type WireStreamCommand,
 } from "../protocol/index.js";
+import { authorizeOperation, bridgeContext } from "./authorization.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import {
@@ -23,12 +24,7 @@ import type {
   StateRegistrationEntry,
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
-import type {
-  Authorize,
-  BridgeContext,
-  DiagnosticsSink,
-  SenderIdentity,
-} from "./types.js";
+import type { Authorize, DiagnosticsSink, SenderIdentity } from "./types.js";
 
 export type StreamSender = (message: StreamMessage) => void;
 
@@ -267,51 +263,31 @@ export class Subscriptions {
       return;
     }
 
-    const context: BridgeContext = {
-      requestId: command.subscriptionId,
-      clientId: command.clientId,
-      windowRole: session.target.role,
+    const context = bridgeContext(
+      session,
       sender,
-      signal: controller.signal,
-    };
-    let allowed: boolean;
-    try {
-      allowed =
-        this.#authorize === undefined
-          ? true
-          : await this.#authorize(context, registration.bridgeOperation);
-    } catch {
-      if (this.#finishPending(session, state, command.subscriptionId, entry))
-        this.#endUnstarted(
-          command,
-          send,
-          { kind: "rejected", error: internalError },
-          session.signal,
-        );
-      return;
-    }
+      { requestId: command.subscriptionId, clientId: command.clientId },
+      controller.signal,
+    );
+    const pending = authorizeOperation(
+      this.#authorize,
+      this.#diagnostics,
+      context,
+      registration.bridgeOperation,
+    );
+    const verdict = pending instanceof Promise ? await pending : pending;
     if (!this.#finishPending(session, state, command.subscriptionId, entry))
       return;
-    if (!allowed) {
-      recordDiagnostic(this.#diagnostics, {
-        type: "rejected",
-        reason: "authorize-denied",
-        key: command.key,
-      });
+    if (verdict.type === "rejected") {
       this.#endUnstarted(
         command,
         send,
-        {
-          kind: "rejected",
-          error: {
-            code: "FORBIDDEN",
-            message: "Bridge operation is forbidden.",
-          },
-        },
+        { kind: "rejected", error: verdict.error },
         session.signal,
       );
       return;
     }
+    if (verdict.type === "cancelled") return;
     this.#start(session, state, sender, command, send, registration);
   }
 
@@ -363,8 +339,11 @@ export class Subscriptions {
   }
 
   /**
-   * `authorize` 대기가 여전히 유효한지 확인하고 slot을 반환한다(성공·실패
-   * 무관하게 반환은 항상 일어난다). `false`면 이미 취소됐거나(unsubscribe·
+   * `authorize` 대기가 여전히 유효한지 확인하고 slot을 반환한다. authorize
+   * 판정 뒤, 번역 전에 호출된다 — `authorize-denied` 진단은 이 호출보다
+   * 먼저(공유 단계 안에서) 기록되므로 slot 반환보다 앞선다(RPC와 같은 순서).
+   * 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된 pending
+   * `onAbort`가 retire 통지를 맡는다. `false`면 이미 취소됐거나(unsubscribe·
    * retire) signal이 abort된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
    */
   #finishPending(
@@ -443,13 +422,12 @@ export class Subscriptions {
       if (registration.kind === "state") {
         this.#startShared(consumer, command.key, registration.source);
       } else if (registration.delivery.mode === "scoped") {
-        const context: BridgeContext = {
-          requestId: command.subscriptionId,
-          clientId: command.clientId,
-          windowRole: session.target.role,
+        const context = bridgeContext(
+          session,
           sender,
-          signal: controller.signal,
-        };
+          { requestId: command.subscriptionId, clientId: command.clientId },
+          controller.signal,
+        );
         const source = registration.delivery.factory(context);
         if (consumer.closed) return;
         if (!(source instanceof Observable))
