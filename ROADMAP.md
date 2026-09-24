@@ -112,7 +112,7 @@
 
 ### Event source 등록 시 검증·정규화 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 01)
 
-- [ ] **RD-029 — Event source의 모양·buffer 규칙을 registration 한 곳이 소유하고, 등록 시 `broadcast`/`scoped`로 정규화한다.** 지금 registration은 event source의 `mode`만 판별한다. `buffer.capacity` 검증은 helper(`broadcastEvent`/`scopedEvent`)와 `BoundedQueue` 생성자에만 있고, `overflow`는 어디서도 검증하지 않는다(오타가 조용히 `drop-oldest`로 동작). source interface는 구조적이라 helper 없이 직접 작성한 source가 타입을 통과한다. capacity 0인 직접 작성 source를 구독하면 `Subscriptions.#start`가 `try` 밖에서 `BoundedQueue` 생성에 실패한다. 그 결과 terminal 없이 `controlStream`이 reject하고(adapter 두 개 모두 `void`라 unhandled rejection), 구독 slot이 세션 retire까지 샌다(ADR 0009 위반). **구조:**
+- [x] **RD-029 — Event source의 모양·buffer 규칙을 registration 한 곳이 소유하고, 등록 시 `broadcast`/`scoped`로 정규화한다.** 지금 registration은 event source의 `mode`만 판별한다. `buffer.capacity` 검증은 helper(`broadcastEvent`/`scopedEvent`)와 `BoundedQueue` 생성자에만 있고, `overflow`는 어디서도 검증하지 않는다(오타가 조용히 `drop-oldest`로 동작). source interface는 구조적이라 helper 없이 직접 작성한 source가 타입을 통과한다. capacity 0인 직접 작성 source를 구독하면 `Subscriptions.#start`가 `try` 밖에서 `BoundedQueue` 생성에 실패한다. 그 결과 terminal 없이 `controlStream`이 reject하고(adapter 두 개 모두 `void`라 unhandled rejection), 구독 slot이 세션 retire까지 샌다(ADR 0009 위반). **구조:**
   - 먼저 `BoundedQueue` 생성을 `try` 안으로 옮겨 누수를 막는다.
   - registration이 모양, broadcast `source` 타입, scoped `factory` 타입, `capacity`, `overflow`를 검증하고, `createBridgeServer` 시점에 경로를 포함한 `TypeError`를 던진다.
   - helper는 검증 없는 순수 생성자가 된다(`currentValueSource` 제외).
@@ -128,7 +128,7 @@
   - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
   - architecture·ADR 0012·README·`CONTEXT.md`에 반영한다.
 
-  계획: `_works/20260925-06-event-source-normalize/`.
+  계획: `_works/20260925-06-event-source-normalize/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(slot 누수 한 줄 수정, RED→GREEN) → DELTA-02(scoped 전달 test 4건, coverage 0 안전망) → DELTA-03(registration이 모양·capacity·overflow·factory/source 타입을 검증하는 test 9건, helper는 순수 생성자로 전환) → DELTA-04(event entry를 `delivery: {mode:"broadcast"|"scoped"}`로 등록 시점 정규화, `Subscriptions`의 `isScopedSource`·`#broadcastSource` 제거, 동작 변화 없음) → DELTA-05(`controlStream` 최종 방어 catch와 "reject하지 않는다" 계약 주석) → DELTA-06(architecture·ADR 0012 개정 note·`impl-types.ts`·README·`CONTEXT.md` 반영) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest) 36 files/637 tests 통과, 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `grep -n 'isScopedSource\|#broadcastSource' src/main/subscriptions.ts`·`grep -rn 'assertEventBuffer' src` 모두 0건. 기존 test 단언 변경은 `create-bridge-server-impl.test.ts`의 helper capacity test 1건(의도적 전환)뿐. demo `test:electron`은 제외 범위(패키지 verify의 Electron acceptance로 대체)라 별도 실행하지 않음.
 
 ## 현재 범위 밖의 확장
 
