@@ -1,5 +1,7 @@
 # Main은 진단 이벤트와 스냅샷 조회로 세션·RPC·구독 수명주기와 거부 사유를 관측 가능하게 한다
 
+> [ADR 0014](0014-stream-lookup-before-authorize.md)가 stream 등록 조회 판정 시점을 `authorize` 앞으로 옮겼다. 아래 §6의 "등록 조회를 통과한 경우만 `key`를 넣는다" 규칙 자체는 바뀌지 않았지만, `subscription-limit`이 이제 그 규칙을 통과해 `key`를 포함한다(이전에는 등록 조회 전에 판정돼 `key`가 없었다). §9의 `StreamHub`는 `Subscriptions`로 이름이 바뀌었다. 이 문서의 다른 결정은 그대로 유효하다.
+
 ## 상황
 
 Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-finished`, `rpc-cancelled`, `validation-failed`, `stream-queue`, `stream-dropped`)뿐이었다. 보안 거부(`sender-unauthorized` 등)·입력 거부(`invalid-input`, `payload-too-large`)·자원 한도 거부(`rpc-limit`, `subscription-limit`)의 사유, Main deadline 만료, RPC 성공·실패 구분, 세션·구독의 생성과 해제는 기록하지 않았다. 활성 세션·RPC·구독 수, 대기 중 이벤트 수를 조회할 방법도 없었다. 7개 호출 지점 모두 `diagnostics?.record(...)`를 try로 감싸지 않아 sink가 throw하면 dispatch·stream 경로로 예외가 전파됐다. ROADMAP RD-007.
@@ -59,13 +61,13 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
    - `subscription-limit`: `maxSubscriptions` 초과.
    - 워터마크 이하 subscriptionId·중복 구독의 조용한 무시는 이벤트를 남기지 않는다(범위 밖).
 
-6. **`key` 포함 규칙**: 등록 조회(RPC·stream key 존재 확인)를 통과한 경우만 `key`를 넣는다. `authorize-denied`, `invalid-input`, `payload-too-large`, `rpc-limit`은 key 있음. `subscription-limit`과 subscriptionId 형식 오류의 `invalid-input`은 등록 조회 전에 판정되므로 key 없음(`beginStream`이 `StreamHub.subscribe`의 등록 조회보다 먼저 실행된다). `unknown-operation`, `version-mismatch`, `sender-unauthorized`, `frame-not-main`, `origin-not-allowed`, `malformed-envelope`은 key 없음.
+6. **`key` 포함 규칙**: 등록 조회(RPC·stream key 존재 확인)를 통과한 경우만 `key`를 넣는다. `authorize-denied`, `invalid-input`(RPC 입력 스키마 검증 실패), `payload-too-large`, `rpc-limit`, `subscription-limit`은 key 있음([ADR 0014](0014-stream-lookup-before-authorize.md) 이후 stream 등록 조회가 slot 판정보다 먼저 실행되므로 `subscription-limit`도 이 규칙을 통과한다). subscriptionId 형식 오류의 `invalid-input`은 등록 조회 전에(ID 파싱 단계에서) 판정되므로 key 없음. `unknown-operation`, `version-mismatch`, `sender-unauthorized`, `frame-not-main`, `origin-not-allowed`, `malformed-envelope`은 key 없음.
 
 7. **`payload-too-large` / `invalid-input` 구분**: 메시지 문자열 매칭으로 판정하지 않는다. `src/protocol/bridge-value.ts`에 `PayloadLimitError extends BridgeProtocolError`를 추가해 `maxTotalBytes`·`maxStringBytes`·`maxDepth`·`maxEntries` 초과 지점만 이 서브클래스를 던지고, `rpc-dispatcher.ts`가 `instanceof PayloadLimitError`로 분기한다. 구조 오류(허용되지 않는 값 타입·symbol 키 등)는 기존 `BridgeProtocolError`를 그대로 던져 `invalid-input`으로 분류된다. 공개 `BridgeProtocolError`의 `name`·`code`(`INVALID_ARGUMENT`)·`message` 계약은 바뀌지 않는다 — `PayloadLimitError`는 내부 판정 표식일 뿐이며 `./protocol` 공개 entry에서 export하지 않는다. 요청이 이미 취소된 상태(aborted)면 기존대로 `CANCELLED`를 응답하고 이벤트는 기록하지 않는다.
 
 8. **`rpc-timed-out`과 `outcome`**: Main deadline 만료는 `{ type: "rpc-timed-out", key }` 1회만 기록하고 `rpc-cancelled`는 기록하지 않는다(기존 동작 유지). 순서는 `rpc-timed-out` → (handler가 실제로 끝날 때) `rpc-finished`. `rpc-finished.outcome`은 handler work의 실제 응답이 성공(`RpcResponse`의 성공 타입)이면 `"ok"`, 그 외(도메인 에러, 출력 검증 실패, `authorize` false, 취소, `authorize` 예외 — [ADR 0011](0011-authorize-exception-internal.md) 이후 work가 `INTERNAL`로 응답)는 `"error"`다. deadline이 먼저 응답했어도 outcome은 handler 쪽 work의 실제 결과로 판정한다(deadline 응답 시점이 아니다).
 
-9. **수명주기 이벤트**: `session-opened`는 `DocumentSessions.establish`가 새 `DocumentSession`을 만들어 attachment의 현재 세션으로 등록한 직후, `session-closed`는 `#retire`에서 세션이 존재할 때 1회(detach, lifecycle 사건, 같은 webContents의 새 clientId, dispose 모두 이 단일 지점을 거친다 — dispose 반복 호출은 추가 이벤트를 내지 않는다). `subscription-opened`는 `StreamHub.subscribe`가 consumer를 등록한 직후(`subscribed` 전송 전, key 포함), `subscription-closed`는 `#close`에서 `closed`가 처음 true가 될 때(key 포함). `authorize` 대기 중인 구독(`pendingStreams`)은 opened/closed 이벤트 대상이 아니다 — 승인·거부·세션 retire로 최종 확정될 때만 해당 경로의 이벤트가 발생한다.
+9. **수명주기 이벤트**: `session-opened`는 `DocumentSessions.establish`가 새 `DocumentSession`을 만들어 attachment의 현재 세션으로 등록한 직후, `session-closed`는 `#retire`에서 세션이 존재할 때 1회(detach, lifecycle 사건, 같은 webContents의 새 clientId, dispose 모두 이 단일 지점을 거친다 — dispose 반복 호출은 추가 이벤트를 내지 않는다). `subscription-opened`는 `Subscriptions`가 `authorize` 승인 뒤 consumer를 등록한 직후(`subscribed` 전송 전, key 포함), `subscription-closed`는 그 consumer가 처음 닫힐 때(key 포함). `authorize` 대기 중인 구독(등록 전 pending 상태)은 opened/closed 이벤트 대상이 아니다 — 승인·거부·세션 retire로 최종 확정될 때만 해당 경로의 이벤트가 발생한다.
 
 10. **스냅샷**: `server.getDiagnosticsSnapshot(): DiagnosticsSnapshot` 공개 메서드, `{ sessions, rpcInFlight, subscriptions, queuedEvents }`.
     - `sessions`: 현재 활성 attachment(현재 세션이 있는 attachment) 수.
