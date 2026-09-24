@@ -106,6 +106,7 @@ export interface StreamBridgeServer extends BridgeServer {
     sender: SenderIdentity,
     value: unknown,
   ): HandshakeResponse | RpcResponse;
+  /** 반환된 promise는 reject하지 않는다(RD-029) — adapter가 `void`로 버리기 때문이다. */
   controlStream(
     sender: SenderIdentity,
     value: unknown,
@@ -243,32 +244,41 @@ function buildBridgeServer(
       value: unknown,
       send: StreamSender,
     ): Promise<void> {
-      let command;
+      // 계약: 이 메서드는 reject하지 않는다(RD-029). 두 adapter
+      // (`electron-adapter.ts`, `testing/loopback-transport.ts`)가 반환된
+      // promise를 `void`로 버리므로, reject하면 unhandled rejection이 된다.
+      // 알려진 예외 경로는 모두 위에서 개별 처리되어 여기 도달하지 않는다 —
+      // 이 catch는 남은 경로에 대한 최종 방어일 뿐이다.
       try {
-        command = parseWireStreamCommand(value);
-      } catch (cause) {
-        reject(classifyParseFailure(cause));
-        return;
-      }
-      if (command.type !== "subscribe") {
-        const admission = sessions.current(sender, command.clientId);
-        if ("reason" in admission) {
-          reject(admission.reason);
+        let command;
+        try {
+          command = parseWireStreamCommand(value);
+        } catch (cause) {
+          reject(classifyParseFailure(cause));
           return;
         }
-        subscriptions.control(admission.session, command);
-        return;
+        if (command.type !== "subscribe") {
+          const admission = sessions.current(sender, command.clientId);
+          if ("reason" in admission) {
+            reject(admission.reason);
+            return;
+          }
+          subscriptions.control(admission.session, command);
+          return;
+        }
+        const admission = sessions.establish(sender, command.clientId);
+        if ("reason" in admission) {
+          reject(admission.reason);
+          sendSubscribeFailure(command, send, {
+            code: "FORBIDDEN",
+            message: SENDER_UNAUTHORIZED_MESSAGE,
+          });
+          return;
+        }
+        await subscriptions.subscribe(admission.session, sender, command, send);
+      } catch {
+        // 최종 방어: 조용히 무시한다. 진단 기록도, 재throw도 하지 않는다.
       }
-      const admission = sessions.establish(sender, command.clientId);
-      if ("reason" in admission) {
-        reject(admission.reason);
-        sendSubscribeFailure(command, send, {
-          code: "FORBIDDEN",
-          message: SENDER_UNAUTHORIZED_MESSAGE,
-        });
-        return;
-      }
-      await subscriptions.subscribe(admission.session, sender, command, send);
     },
     dispose(): void {
       if (disposed) return;

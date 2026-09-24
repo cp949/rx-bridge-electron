@@ -303,7 +303,10 @@ function normalizeEventBuffer(
       `Event source '${path}' buffer overflow must be "error", "drop-oldest", or "drop-newest".`,
     );
   }
-  return Object.freeze({ capacity: buffer.capacity, overflow: buffer.overflow });
+  return Object.freeze({
+    capacity: buffer.capacity,
+    overflow: buffer.overflow,
+  });
 }
 
 /**
