@@ -40,6 +40,24 @@ export interface OperationKeyCase {
    * 표현할 수 없는 이유.
    */
   readonly mainSkipReason?: string;
+  /**
+   * DELTA-02: `verdict: "reject"` case에서 코어(`src/protocol/operation-key.ts`)가
+   * 내는 첫 실패 이유. manifest를 `rpc`→`state`→`event` 순서, 각 배열은
+   * 선언 순서로 훑으며 `parseWireKey` → (배열 category와 파싱된 category
+   * 대조, 불일치면 `"category-mismatch"`) → `OperationPathTrie.add`를
+   * 적용했을 때 처음 실패하는 지점의 reason이다. `"category-mismatch"`는
+   * 코어가 내는 reason이 아니라 이 대조를 수행하는 호출자(테스트) 쪽 표시다.
+   * accept case에는 없다.
+   */
+  readonly reason?:
+    | "empty-segment"
+    | "dotted-segment"
+    | "reserved-segment"
+    | "nested-operation"
+    | "unknown-category"
+    | "leaf-namespace-collision"
+    | "duplicate-or-collision"
+    | "category-mismatch";
 }
 
 const empty: readonly string[] = [];
@@ -91,46 +109,55 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 도메인의 선행 빈 segment",
     manifest: rpcOnly("rpc:/x"),
     verdict: "reject",
+    reason: "empty-segment",
   },
   {
     label: "거부: 도메인 중간의 빈 segment(연속 슬래시)",
     manifest: rpcOnly("rpc:a//x"),
     verdict: "reject",
+    reason: "empty-segment",
   },
   {
     label: "거부: dotted 도메인 segment",
     manifest: rpcOnly("rpc:a.b/x"),
     verdict: "reject",
+    reason: "dotted-segment",
   },
   {
     label: "거부: 예약어 '__proto__' 도메인 segment",
     manifest: rpcOnly("rpc:__proto__/x"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'prototype' 도메인 segment",
     manifest: rpcOnly("rpc:prototype/x"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'constructor' 도메인 segment",
     manifest: rpcOnly("rpc:constructor/x"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'then' 도메인 segment",
     manifest: rpcOnly("rpc:then/x"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: root 'dispose' 도메인 segment",
     manifest: rpcOnly("rpc:dispose/x"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 카테고리 segment(root 위치, 도메인 자체가 'rpc')",
     manifest: rpcOnly("rpc:rpc/x"),
     verdict: "reject",
+    reason: "reserved-segment",
     mainSkipReason:
       "impl 트리 어느 노드에서든 key 'rpc'는 항상 그 노드의 rpc 카테고리로 " +
       "해석된다. 도메인 전체가 정확히 'rpc' 한 segment뿐이면(이웃 segment와 " +
@@ -140,6 +167,7 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 카테고리 segment(중첩 위치, 'hardware/state')",
     manifest: { rpc: empty, state: ["state:hardware/state/x"], event: empty },
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 카테고리 segment(깊은 위치, 'hardware/event/log')",
@@ -149,6 +177,7 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
       event: ["event:hardware/event/log/x"],
     },
     verdict: "reject",
+    reason: "reserved-segment",
   },
 
   // --- 거부(operation) -----------------------------------------------------
@@ -156,31 +185,37 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 빈 operation 이름",
     manifest: rpcOnly("rpc:a/"),
     verdict: "reject",
+    reason: "empty-segment",
   },
   {
     label: "거부: dotted operation 이름",
     manifest: rpcOnly("rpc:a/b.c"),
     verdict: "reject",
+    reason: "dotted-segment",
   },
   {
     label: "거부: 예약어 '__proto__' operation 이름",
     manifest: rpcOnly("rpc:a/__proto__"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'prototype' operation 이름",
     manifest: rpcOnly("rpc:a/prototype"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'constructor' operation 이름",
     manifest: rpcOnly("rpc:a/constructor"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
   {
     label: "거부: 예약어 'then' operation 이름",
     manifest: rpcOnly("rpc:a/then"),
     verdict: "reject",
+    reason: "reserved-segment",
   },
 
   // --- 거부(형태) ------------------------------------------------------------
@@ -188,11 +223,13 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 도메인 없는 key('rpc:x', slash 없음)",
     manifest: rpcOnly("rpc:x"),
     verdict: "reject",
+    reason: "empty-segment",
   },
   {
     label: "거부: prefix 없음",
     manifest: rpcOnly("hardware.connect"),
     verdict: "reject",
+    reason: "unknown-category",
     mainSkipReason:
       "Main impl 트리는 카테고리(rpc/state/event) 노드를 통해서만 operation을 " +
       "등록한다 — 'category:' prefix가 아예 없는 wire key는 어느 카테고리로도 " +
@@ -202,6 +239,7 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 알 수 없는 prefix",
     manifest: rpcOnly("foo:a/x"),
     verdict: "reject",
+    reason: "unknown-category",
     mainSkipReason:
       "impl 트리의 카테고리는 rpc/state/event 셋뿐이다 — 'foo:' 같은 " +
       "알 수 없는 prefix에 대응하는 카테고리 노드가 없다.",
@@ -212,16 +250,19 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: leaf/namespace 충돌(leaf 먼저)",
     manifest: rpcOnly("rpc:a/b", "rpc:a/b/c"),
     verdict: "reject",
+    reason: "leaf-namespace-collision",
   },
   {
     label: "거부: leaf/namespace 충돌(namespace 먼저, 순서 반대)",
     manifest: rpcOnly("rpc:a/b/c", "rpc:a/b"),
     verdict: "reject",
+    reason: "duplicate-or-collision",
   },
   {
     label: "거부: 같은 카테고리 완전 중복",
     manifest: rpcOnly("rpc:a/b", "rpc:a/b"),
     verdict: "reject",
+    reason: "duplicate-or-collision",
     mainSkipReason:
       "impl 트리의 operation은 JS 객체 key라 유일하다 — 같은 경로를 같은 " +
       "카테고리에 두 번 등록하는 impl을 구성할 수 없다(두 번째가 첫 번째를 " +
@@ -231,11 +272,13 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     label: "거부: 카테고리 간 중복(rpc·state 같은 경로)",
     manifest: { rpc: ["rpc:a/x"], state: ["state:a/x"], event: empty },
     verdict: "reject",
+    reason: "duplicate-or-collision",
   },
   {
     label: "거부: 카테고리 간 leaf/namespace 충돌(rpc·event)",
     manifest: { rpc: ["rpc:a/b"], state: empty, event: ["event:a/b/c"] },
     verdict: "reject",
+    reason: "leaf-namespace-collision",
   },
 
   // --- Renderer 전용 -----------------------------------------------------
@@ -244,5 +287,6 @@ export const operationKeyCases: readonly OperationKeyCase[] = [
     manifest: rpcOnly("state:a/x"),
     verdict: "reject",
     rendererOnly: true,
+    reason: "category-mismatch",
   },
 ];
