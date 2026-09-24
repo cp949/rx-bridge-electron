@@ -44,7 +44,7 @@ Electron 어댑터는 `allowedOrigins`를 받아 attach 시점에 현재 main fr
 
 `bindElectronBridge({ ipcMain?, server, namespace?, allowedOrigins })`가 반환하는 `attach(contents, role?)`으로 Electron IPC 채널을 연결한다. `ipcMain`을 생략하면 호출 시점에 `import * as electron from "electron"`(네임스페이스 import)으로 얻은 `electron.ipcMain`을 읽고, 주입값이 있으면 항상 그 값이 우선한다. `namespace`를 생략하면 Main·preload 공통 기본값 `"default"`를 쓰며 채널은 `rx-bridge-electron:v1:default:*`가 된다. `role`을 생략하면 `"default"`다. role은 `authorize`의 `context.windowRole`로 전달되는 입력이므로, 역할로 인가를 나누는 앱은 창마다 명시한다.
 
-preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBridge`·`ipcRenderer`를 호출 시점에 `electron.*`에서 해석하고(주입 우선), `namespace` 기본값은 Main과 같은 상수를 공유한다. `globalName` 기본값은 `"rxBridge"`다. Renderer의 `createRendererApi<B>(transport?)`는 `transport`를 생략하면 `globalThis.rxBridge`를 읽는다 — `globalName`을 기본값과 다르게 바꾼 소비자는 transport를 직접 만들어 넘겨야 하며, 그 경로에서만 `declare global`이 다시 필요하다. 두 기본값(`globalName`과 `createRendererApi`가 읽는 전역 이름)이 어긋나면 축약형 배선이 항상 실패하므로 두 지점은 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`, `src/renderer/transport.ts`)를 공유한다.
+preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBridge`·`ipcRenderer`를 호출 시점에 `electron.*`에서 해석하고(주입 우선), `namespace` 기본값은 Main과 같은 상수를 공유한다(정의 위치는 `src/protocol/electron-channels.ts`의 `DEFAULT_ELECTRON_BRIDGE_NAMESPACE`·`ELECTRON_BRIDGE_CHANNELS`이고, `/main`은 이를 재수출한다). `globalName` 기본값은 `"rxBridge"`다. Renderer의 `createRendererApi<B>(transport?)`는 `transport`를 생략하면 `globalThis.rxBridge`를 읽는다 — `globalName`을 기본값과 다르게 바꾼 소비자는 transport를 직접 만들어 넘겨야 하며, 그 경로에서만 `declare global`이 다시 필요하다. 두 기본값(`globalName`과 `createRendererApi`가 읽는 전역 이름)이 어긋나면 축약형 배선이 항상 실패하므로 두 지점은 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`, `src/renderer/transport.ts`)를 공유한다.
 
 이 기본값들은 기존 함수의 인자를 선택화한 것이며 별도의 API를 추가하지 않는다 — 모든 인자를 명시하는 기존 호출은 동작이 바뀌지 않는다. `pagehide`에서 `api.dispose()`를 자동 호출하던 hello-world 예제는 이제 그 등록을 두지 않는다: navigation·창 파괴 시 Main이 이미 문서 세션을 retire하므로(위 "문서 세션과 정리" 참고) 불필요했다. `dispose()`는 브리지가 살아있는 동안 Renderer가 스스로 정리를 끝내려 할 때(SPA teardown) 쓰는 용도로 남는다. 근거와 기각한 대안은 [ADR 0013](adr/0013-wiring-defaults.md)에 있다.
 
@@ -71,7 +71,7 @@ v1 payload는 `undefined`, `null`, boolean, number, bigint, string, 배열, 일�
 
 전체 크기는 순회 중 근사 byte를 누적해 계산한다: 노드마다(원시값·배열·객체·`null`·`undefined` 모두) 8 byte, 문자열은 추가로 UTF-8 byte 길이, object key는 UTF-8 byte 길이(배열 `length`는 제외하지만 배열 원소의 index 문자열 키는 포함), bigint는 추가로 `ceil(abs(value).toString(16).length / 2)` byte. 실제 V8 structured clone 크기와는 다를 수 있는 근사값이다. 누적값이 `maxTotalBytes`를 넘으면 다른 payload 규칙과 같은 실패 분류를 따른다: RPC 입력은 `INVALID_ARGUMENT`, RPC 출력·stream 값·도메인 에러 `details`는 `INTERNAL`.
 
-payload 한도는 서버(`createBridgeServer(impl, { payloadLimits })`)가 이 서버 옵션 기준으로만 적용한다(계약은 타입이라 값을 가질 수 없어 한도를 담지 못한다 — ADR 0012가 ADR 0004의 이 부분을 개정했다). Electron 어댑터와 preload는 envelope 구조(순환 참조·함수·prototype 등 값 프로필)만 검사하고 크기 한도는 강제하지 않는다(근거: [ADR 0004](adr/0004-validated-bounded-payloads.md)).
+payload 한도는 서버(`createBridgeServer(impl, { payloadLimits })`)가 이 서버 옵션 기준으로만 적용한다(계약은 타입이라 값을 가질 수 없어 한도를 담지 못한다 — ADR 0012가 ADR 0004의 이 부분을 개정했다). envelope 자체(구조·순환 참조·함수·prototype 등 값 프로필)는 server(Main)·preload·Renderer가 각자 protocol의 `parse*`(`parseHandshakeRequest`/`parseWireRpcRequest`/`parseWireCancelRequest`/`parseWireStreamCommand`/`parseHandshakeResponse`/`parseRendererRpcRequest`/`parseRendererStreamCommand`/`parseRpcResponse`/`parseStreamMessage`)로 검사한다 — Electron 어댑터는 이 parse를 하지 않는다(`SenderIdentity` 번역과 채널 등록만 한다, 위 "요청 경로와 신뢰 경계" 2번). 이 envelope parse 단계의 구조 한도(깊이·항목 수·문자열 byte)는 `payloadLimits`가 아니라 protocol 내부 상수 `ENVELOPE_LIMITS`(`src/protocol/messages.ts`)이고 넉넉한 고정값이라 크기 한도로 기능하지 않는다(근거: [ADR 0004](adr/0004-validated-bounded-payloads.md), [ADR 0016](adr/0016-sender-admission.md) 결정 2).
 
 ## 세션 자원 한도
 
@@ -86,7 +86,7 @@ Main은 연결된 `webContents`의 현재 문서 세션 단위로 진행 중 RPC
 
 RPC 슬롯은 취소나 deadline으로 응답을 먼저 보내도 handler Promise가 실제로 끝날 때 반환한다 — `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유한다. 구독 슬롯은 unsubscribe·거부·세션 retire 뒤 즉시 반환한다. source 쪽 종료(완료·오류·`error` 정책 overflow)는 source를 즉시 분리하지만, 이미 대기 중인 값을 ack 순서대로 모두 보낸 뒤 terminal(`complete` 또는 `error`, overflow는 `STREAM_OVERFLOW`)을 보내고 그 뒤에 슬롯을 반환한다. ack를 보내지 않는 소비자는 unsubscribe·세션 retire 전까지 슬롯 1개와 대기 값(Event는 최대 buffer capacity)을 계속 점유한다 — 그 세션의 한도 안에서만 영향이 있다.
 
-stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 세션별 워터마크(마지막으로 수락한 sequence)로 판정한다. `subscriptionId`는 `<nonce>:<scope>:<seq base36>` 형식(`createOpaqueId` 산출 형식)이어야 하며, 형식 오류는 `INVALID_ARGUMENT`, 워터마크 이하는 메시지 없이 무시한다. RPC `requestId`는 워터마크 대상이 아니다.
+stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 세션별 워터마크(마지막으로 수락한 sequence)로 판정한다. `subscriptionId`는 `<nonce>:<scope>:<seq base36>` 형식(`createOpaqueId` 산출 형식, 조립은 `src/protocol/opaque-id.ts`의 pure 함수 `formatOpaqueId`가 하고 `renderer/ids.ts`의 `createOpaqueId`가 nonce·sequence 상태를 쥔 채 호출한다)이어야 하며, 형식 오류는 같은 파일의 `parseOpaqueIdSequence`가 판정해 `INVALID_ARGUMENT`, 워터마크 이하는 메시지 없이 무시한다. RPC `requestId`는 워터마크 대상이 아니다.
 
 stream 구독 요청은 ID 형식 → 세션별 워터마크 → 등록 조회 → 구독 슬롯 → `authorize` 순서로 판정한다(RPC와 같은 순서). 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`이고, `authorize`는 등록된 key만 받는다. 구독 슬롯 한도 초과(`subscription-limit`)는 등록 조회를 통과한 뒤 판정되므로 진단에 key를 포함한다. 이 수명주기(admission부터 terminal·slot 반환까지)는 Main의 `Subscriptions` 모듈 하나가 소유한다. 근거는 [ADR 0014](adr/0014-stream-lookup-before-authorize.md)에 있다.
 

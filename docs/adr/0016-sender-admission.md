@@ -2,6 +2,8 @@
 
 - 관련: ROADMAP.md#RD-018
 
+> **개정 (RD-019, `ROADMAP.md#RD-019`)**: 결정 2가 정의한 envelope parse 한도(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)는 이제 `src/protocol/messages.ts`의 모듈 내부 상수 `ENVELOPE_LIMITS` 하나이고, 이 상수를 쓰던 호출자 5곳(옛 preload·`rpc-client.ts`·`stream-multiplexer.ts`·`create-renderer-api.ts`의 각자 상수, `create-bridge-server.ts`의 `envelopeLimits`)이 이 하나를 공유한다 — 값 자체는 바뀌지 않았다. `:54`가 `protocol-error.ts`를 별도 파일에 둔 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 RD-019가 채널 상수 정의를 `src/protocol/electron-channels.ts`로 옮기며 사라졌다 — `:54`에 개정 표시를 남겼다(파일 분리 자체는 유지). `:79`가 범위 밖으로 미룬 "채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것"은 RD-019가 처리했다. 이 문서의 판정 순서·사유 매핑·wire 응답 모양 결정은 그대로 유효하다.
+
 ## 상황
 
 요청을 보낸 frame·origin·clientId가 현재 렌더러 문서 세션에 속하는지 판정하는 로직("sender admission")이 세 군데 흩어져 있었다. `DocumentSessions.establish`와 `current`가 같은 4조건(attachment 존재, `isMainFrame`, `isCurrentMainFrame`, `isAllowedOrigin`)을 각자 따로 검사했고, Electron 어댑터의 handshake 핸들러(`electron-adapter.ts`)가 `identity.isMainFrame`과 `options.allowedOrigins.includes`로 세 번째 검사를 더 했다(origin 목록은 `targetFor`가 만드는 `isAllowedOrigin`과 같은 소스지만 handshake만 직접 다시 읽었다).
@@ -53,6 +55,8 @@ RPC 거부는 사유와 무관하게 `FORBIDDEN "Bridge sender is not authorized
 
 이 helper를 별도 파일에 둔 이유는 preload 번들 제약 때문이다: preload는 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들하고, adapter의 fallback도 이 helper를 쓴다. `create-bridge-server.ts`(값으로 `rxjs`와 서버 구현을 가져온다)에 두면 preload 번들에 server와 `rxjs`가 끌려온다(ADR 0010 §14가 기록한 것과 같은 제약, TRP-002). `protocol-error.ts`는 `RpcResponse` 타입 전용 import 하나만 가지며 런타임 import가 없다.
 
+_(개정: RD-019 — 채널 상수(`ELECTRON_BRIDGE_CHANNELS` 등)의 정의가 `src/protocol/electron-channels.ts`로 옮겨져 `electron-adapter.ts`는 그 상수를 재수출만 한다. preload도 이제 `src/protocol/electron-channels.ts`에서 직접 import하므로, 이 문단이 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 더 이상 성립하지 않는다. 그렇다고 `protocol-error.ts`를 `create-bridge-server.ts`에 합칠 이유가 생기는 것은 아니다 — 이 파일이 런타임 import 없는 leaf로 남아야 preload가 `create-bridge-server.ts`(`rxjs`)를 값으로 끌어들일 경로 자체가 없다는 성질은 채널 상수 이동과 무관하게 유지된다. 파일 분리는 그대로 둔다.)_
+
 cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(void, 기존과 동일) — 대신 진단에 기록한다(결정 4).
 
 ## 결정 4: cancel도 다른 채널과 같은 verdict로 거부를 기록한다
@@ -76,7 +80,7 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 
 ## 범위 밖
 
-- 후보 05: 채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것(TRP-002). preload는 계속 `electron-adapter.ts`에서 `ELECTRON_BRIDGE_CHANNELS`를 import한다.
+- 후보 05: 채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것(TRP-002). preload는 계속 `electron-adapter.ts`에서 `ELECTRON_BRIDGE_CHANNELS`를 import한다. — RD-019에서 처리(위 개정 표시, [ADR 0013](0013-wiring-defaults.md)).
 - 후보 06: loopback adapter. 이 ADR의 새 시그니처(`unknown` 인자, server가 판정 전부 소유)는 그 adapter를 만들 수 있는 전제만 마련한다 — adapter 자체는 이 작업의 범위가 아니다.
 - `DocumentSessions.retiredClientCount`(test 전용 인터페이스), `RejectReason` enum 값 추가·삭제, wire 응답에 거부 사유 싣기.
 
@@ -91,6 +95,6 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 ## 관련 ADR
 
 - [ADR 0010](0010-operational-diagnostics.md) — 진단 이벤트·`RejectReason`·Symbol 통로(§14)·중복 방지(§15)의 원본 결정. 이 ADR이 §5·§7·§14·§15에 개정 표시를 남겼다.
-- [ADR 0013](0013-wiring-defaults.md) — `electron-adapter.ts`가 preload 번들에 들어가는 제약과 `ELECTRON_BRIDGE_CHANNELS` 공유 이유(TRP-002의 원본 근거).
+- [ADR 0013](0013-wiring-defaults.md) — 채널 이름·기본 namespace의 원 결정과 `ELECTRON_BRIDGE_CHANNELS` 공유 이유(TRP-002의 원본 근거). RD-019 개정 절이 정의 위치를 `src/protocol/electron-channels.ts`로 옮긴 사실을 기록한다(`/main`은 재수출만).
 - [ADR 0014](0014-stream-lookup-before-authorize.md) — 구독 수명주기를 `Subscriptions` 모듈 하나로 모은 선례(이 ADR이 admission을 `DocumentSessions` 하나로 모은 것과 같은 모양).
 - [ADR 0015](0015-rpc-request-lifecycle.md) — `dispatchRpc`의 판정 순서 서술(:15)에 이 ADR로의 개정 표시를 남겼다.

@@ -2,6 +2,8 @@
 
 - 관련: RD-014, 체크리스트 `_works/_completed/20260924-08-wiring-shorthand/checklist.md`(로컬 작업 폴더)
 
+> **개정 (RD-019, `ROADMAP.md#RD-019`)**: 아래 "namespace 기본값은 `"default"`" 결정(:15)이 정의하던 채널 이름·기본 namespace 상수(`ELECTRON_BRIDGE_CHANNELS`·`DEFAULT_ELECTRON_BRIDGE_NAMESPACE`·`ElectronBridgeChannels`)는 이제 `src/protocol/electron-channels.ts`에 있다. `src/main/electron-adapter.ts`는 이 모듈에서 값으로 import해 재사용하고, `src/main/index.ts`는 세 심볼을 그대로 재수출만 한다 — 채널 형식(`rx-bridge-electron:v1:${namespace}:*`), 기본값(`"default"`), `/main`의 공개 이름은 바뀌지 않았다. `./protocol`(공개 `@cp949/rx-bridge-electron/protocol`) export에는 넣지 않았다 — protocol의 공개 표면은 transport 중립(Electron IPC를 모르는 소비자도 쓰는 `parse*`·`withEnvelope`·`PROTOCOL_VERSION`)으로 남기고, 이 채널 상수는 Electron 어댑터 전용이기 때문이다. eslint `@typescript-eslint/no-restricted-imports`(루트 `eslint.config.js`)가 `src/{preload,protocol,renderer}/**`에서 `src/main/*`의 값 import를 에러로 잡는다(`import type`은 허용) — 채널 상수를 얻으려고 preload가 다시 `src/main/*`를 값으로 import하는 구조([TRP-002](../traps/TRP-002-preload-bundle-server-import.md))가 재발하지 않게 lint로 막는다. 상세 결정은 [ADR 0016](0016-sender-admission.md)의 RD-019 개정 절에 있다.
+
 ## 문제
 
 `bindElectronBridge`·`exposeBridgeInMainWorld`·`createRendererApi`는 지금 `ipcMain`·`contextBridge`·`ipcRenderer`·`namespace`·`role`·`transport`를 전부 호출자가 명시해야 한다. README hello-world 기준으로 배선 코드가 Main·preload·Renderer 세 지점에 걸쳐 필요 이상으로 길다. 목표는 이 배선을 import를 제외하고 Main 3줄·preload 2줄·Renderer 2줄 이하로 줄이는 것이다. 이 문서는 그 축약이 기존 계약(채널 형식, 서버·어댑터 분리, 보안 경계)을 건드리지 않고 인자 선택화만으로 이루어지도록 기본값과 해석 순서를 고정한다.
