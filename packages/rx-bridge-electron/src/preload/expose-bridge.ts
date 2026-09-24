@@ -1,4 +1,10 @@
 import type { ContextBridge, IpcRenderer, IpcRendererEvent } from "electron";
+// Named import(`import { contextBridge, ipcRenderer } from "electron"`)는 Electron 밖(Node
+// 유닛 테스트 등)에서 "electron" 패키지가 실행 파일 경로 문자열 하나만 export하기 때문에
+// ESM 링크 단계에서 SyntaxError를 낸다. namespace import는 그 환경에서도 링크가 되고, 없는
+// 프로퍼티 접근은 단순히 undefined를 반환한다 — 그래서 실제 조회는 호출 시점에 프로퍼티
+// 접근으로 미룬다. ADR 0013 참고.
+import * as electron from "electron";
 
 import {
   parseHandshakeResponse,
@@ -12,7 +18,10 @@ import {
   type RpcResponse,
   type StreamMessage,
 } from "../protocol/index.js";
-import { ELECTRON_BRIDGE_CHANNELS } from "../main/electron-adapter.js";
+import {
+  DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
+  ELECTRON_BRIDGE_CHANNELS,
+} from "../main/electron-adapter.js";
 import type { BridgeTransport } from "../renderer/transport.js";
 
 const limits = {
@@ -22,9 +31,9 @@ const limits = {
 };
 
 export interface ExposeBridgeOptions {
-  readonly contextBridge: ContextBridge;
-  readonly ipcRenderer: IpcRenderer;
-  readonly namespace: string;
+  readonly contextBridge?: ContextBridge;
+  readonly ipcRenderer?: IpcRenderer;
+  readonly namespace?: string;
   readonly globalName?: string;
   readonly clientId?: string;
 }
@@ -33,13 +42,38 @@ function newClientId(): string {
   return `client-${crypto.randomUUID()}`;
 }
 
-export function exposeBridgeInMainWorld(options: ExposeBridgeOptions): void {
-  const channels = ELECTRON_BRIDGE_CHANNELS(options.namespace);
+export function exposeBridgeInMainWorld(
+  options: ExposeBridgeOptions = {},
+): void {
+  // 주입값이 항상 우선한다. 둘 다 없으면(preload 밖, 예: Node 유닛 테스트에서 이 기본값
+  // 경로를 탄 경우) `electron.contextBridge`/`electron.ipcRenderer`는 undefined이며
+  // (namespace import이므로 여기서 링크 에러는 나지 않는다), 아래에서 명확한 에러로
+  // 실패한다. ADR 0013 참고.
+  const contextBridge = options.contextBridge ?? electron.contextBridge;
+  if (contextBridge === undefined) {
+    throw new TypeError(
+      "exposeBridgeInMainWorld requires 'contextBridge': no 'contextBridge' " +
+        "option was given and Electron's 'contextBridge' export is unavailable " +
+        "in this runtime (not running inside Electron's preload script). Pass " +
+        "'contextBridge' explicitly, e.g. in unit tests.",
+    );
+  }
+  const ipcRenderer = options.ipcRenderer ?? electron.ipcRenderer;
+  if (ipcRenderer === undefined) {
+    throw new TypeError(
+      "exposeBridgeInMainWorld requires 'ipcRenderer': no 'ipcRenderer' " +
+        "option was given and Electron's 'ipcRenderer' export is unavailable " +
+        "in this runtime (not running inside Electron's preload script). Pass " +
+        "'ipcRenderer' explicitly, e.g. in unit tests.",
+    );
+  }
+  const namespace = options.namespace ?? DEFAULT_ELECTRON_BRIDGE_NAMESPACE;
+  const channels = ELECTRON_BRIDGE_CHANNELS(namespace);
   const clientId = options.clientId ?? newClientId();
   const transport: BridgeTransport = Object.freeze({
     async connect(): Promise<HandshakeResponse> {
       return parseHandshakeResponse(
-        await options.ipcRenderer.invoke(channels.handshake, {
+        await ipcRenderer.invoke(channels.handshake, {
           protocolVersion: 1,
           clientId,
         }),
@@ -49,7 +83,7 @@ export function exposeBridgeInMainWorld(options: ExposeBridgeOptions): void {
     async invoke(request: RendererRpcRequest): Promise<RpcResponse> {
       const parsed = parseRendererRpcRequest(request, limits);
       return parseRpcResponse(
-        await options.ipcRenderer.invoke(channels.rpc, {
+        await ipcRenderer.invoke(channels.rpc, {
           ...parsed,
           protocolVersion: 1,
           clientId,
@@ -58,14 +92,14 @@ export function exposeBridgeInMainWorld(options: ExposeBridgeOptions): void {
       );
     },
     cancel(requestId: string): void {
-      options.ipcRenderer.send(channels.cancel, {
+      ipcRenderer.send(channels.cancel, {
         protocolVersion: 1,
         clientId,
         requestId,
       });
     },
     control(command: RendererStreamCommand): void {
-      options.ipcRenderer.send(channels.control, {
+      ipcRenderer.send(channels.control, {
         ...parseRendererStreamCommand(command, limits),
         protocolVersion: 1,
         clientId,
@@ -77,12 +111,9 @@ export function exposeBridgeInMainWorld(options: ExposeBridgeOptions): void {
           listener(parseStreamMessage(value, limits));
         } catch {}
       };
-      options.ipcRenderer.on(channels.stream, wrapped);
-      return () => options.ipcRenderer.removeListener(channels.stream, wrapped);
+      ipcRenderer.on(channels.stream, wrapped);
+      return () => ipcRenderer.removeListener(channels.stream, wrapped);
     },
   });
-  options.contextBridge.exposeInMainWorld(
-    options.globalName ?? "rxBridge",
-    transport,
-  );
+  contextBridge.exposeInMainWorld(options.globalName ?? "rxBridge", transport);
 }
