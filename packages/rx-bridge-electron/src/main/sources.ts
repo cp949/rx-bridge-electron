@@ -7,19 +7,14 @@ export interface CurrentValueSource<T> extends Observable<T> {
   getValue(): T;
 }
 
-/**
- * Event source 버퍼가 가득 찼을 때의 처리 정책. 예전에는
- * `contract/descriptors.ts`의 `event()` descriptor가 정의했지만, 경량 계약은
- * descriptor가 없으므로(DELTA-09) 이 개념을 실제로 쓰는 main 쪽(source
- * 생성·등록 테이블)에 둔다.
- */
+/** Event source 버퍼가 가득 찼을 때의 처리 정책. */
 export type OverflowPolicy = "error" | "drop-oldest" | "drop-newest";
 
 /**
- * Event source의 배압 버퍼 설정. 경량 계약(impl 기반 `createBridgeServer`,
- * DELTA-04)은 descriptor `event()`가 없으므로 버퍼 설정을 source 생성 시점에
- * 둔다 — 생략 시 `DEFAULT_EVENT_BUFFER`(capacity 100, overflow "error")를
- * `main/registration.ts`의 `buildRegistrationTableFromImpl`이 적용한다.
+ * Event source의 배압 버퍼 설정. source 생성 시점(`broadcastEvent`·
+ * `scopedEvent`)에 정한다 — 생략 시 `DEFAULT_EVENT_BUFFER`(capacity 100,
+ * overflow "error")를 `main/registration.ts`의 `buildRegistrationTableFromImpl`이
+ * 적용한다.
  */
 export interface EventSourceBuffer {
   readonly capacity: number;
@@ -74,11 +69,7 @@ export function currentValueSource<T extends BridgeValue>(
   );
 }
 
-/**
- * `capacity`가 양의 안전 정수인지 검증한다. `contract/descriptors.ts`의
- * `event()`가 하던 규칙과 동일하다(DELTA-04: 경량 계약 impl 경로는 descriptor가
- * 없으므로 이 검증을 source 생성 함수로 옮긴다).
- */
+/** `capacity`가 양의 안전 정수인지 source 생성 시점에 검증한다. */
 function assertEventBuffer(
   buffer: EventSourceBuffer | undefined,
 ): EventSourceBuffer | undefined {

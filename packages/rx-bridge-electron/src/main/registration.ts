@@ -25,9 +25,7 @@ import type { RpcHandler } from "./types.js";
 /**
  * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
  * 경량 계약 impl 트리 검증(`buildRegistrationTableFromImpl`)이 "사용자가 만든
- * 중첩 객체가 안전한 plain object인가"를 판단할 때 쓴다. 원래
- * `contract/define-domain.ts`(descriptor API)에 있었으나, descriptor API 제거
- * (DELTA-09)로 이 impl 검증 경로만 남아 이곳으로 옮겼다.
+ * 중첩 객체가 안전한 plain object인가"를 판단할 때 쓴다.
  */
 function assertOwnDataRecord(
   value: unknown,
@@ -121,16 +119,14 @@ function assertNoPathCollision(
 
 /**
  * 경로("도메인/operation") → 등록 항목으로 정규화된 서버 내부 테이블.
- * dispatcher/subscriptions는 descriptor 트리 대신 이 테이블만 읽는다. 이렇게
- * 하면 이후 추가될 impl 기반 공개 API도 같은 테이블 모양을 만들어 같은
- * 코어를 쓸 수 있다(DELTA-04). `input`/`output` 스키마는 선택이며 없으면
- * 조회자가 `parseBridgeValue` 결과를 그대로 쓴다.
+ * `RpcRequests`·`Subscriptions`는 impl 트리가 아니라 이 테이블만 읽는다.
+ * `input`/`output` 스키마는 선택이며 없으면 조회자가 `parseBridgeValue`
+ * 결과를 그대로 쓴다.
  */
 export interface RpcRegistrationEntry {
   readonly kind: "rpc";
   readonly domainName: string;
   readonly operation: string;
-  readonly path: readonly [domainName: string, operation: string];
   readonly handler: RpcHandler;
   readonly input?: Schema<BridgeValue>;
   readonly output?: Schema<BridgeValue>;
@@ -141,7 +137,6 @@ export interface StateRegistrationEntry {
   readonly kind: "state";
   readonly domainName: string;
   readonly operation: string;
-  readonly path: readonly [domainName: string, operation: string];
   readonly source: CurrentValueSource<BridgeValue>;
   readonly output?: Schema<BridgeValue>;
 }
@@ -150,7 +145,6 @@ export interface EventRegistrationEntry {
   readonly kind: "event";
   readonly domainName: string;
   readonly operation: string;
-  readonly path: readonly [domainName: string, operation: string];
   readonly source: EventSource;
   readonly output?: Schema<BridgeValue>;
   readonly buffer: {
@@ -158,9 +152,6 @@ export interface EventRegistrationEntry {
     readonly overflow: OverflowPolicy;
   };
 }
-
-export type RegistrationEntry =
-  RpcRegistrationEntry | StateRegistrationEntry | EventRegistrationEntry;
 
 export interface RegistrationTable {
   readonly rpc: ReadonlyMap<string, RpcRegistrationEntry>;
@@ -205,14 +196,13 @@ export function manifestFromTable(table: RegistrationTable): PublicManifest {
 }
 
 // ---------------------------------------------------------------------------
-// 경량 계약(impl 기반) 등록 테이블 빌더 (DELTA-04, RD-011).
+// 경량 계약(impl 기반) 등록 테이블 빌더.
 //
 // impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수 객체 트리)를
 // 직접 순회하며 이름 규칙·형태·leaf/namespace 충돌을 한 번에 검증하고
-// `RegistrationTable`을 만든다. impl 트리 자신이 유일한 진실 소스다 —
-// descriptor 계약을 거치지 않는다(DELTA-09에서 descriptor API 자체를
-// 제거했다). `options.schemas`/`options.errors`도 impl 트리와 같은 모양으로
-// 병렬 순회한다.
+// `RegistrationTable`을 만든다. impl 트리 자신이 유일한 진실 소스다.
+// `options.schemas`/`options.errors`도 impl 트리와 같은 모양으로 병렬
+// 순회한다.
 // ---------------------------------------------------------------------------
 
 /** 경량 계약 event source의 기본 버퍼(확정 결정 4: capacity 100, overflow "error"). */
@@ -339,7 +329,6 @@ function walkImplNode(
           kind: "rpc",
           domainName,
           operation,
-          path: [domainName, operation],
           handler: value as RpcHandler,
           ...(schemaEntry.input === undefined
             ? {}
@@ -366,7 +355,6 @@ function walkImplNode(
           kind: "state",
           domainName,
           operation,
-          path: [domainName, operation],
           source: value as CurrentValueSource<BridgeValue>,
           ...(stateOutput === undefined ? {} : { output: stateOutput }),
         });
@@ -395,7 +383,6 @@ function walkImplNode(
           kind: "event",
           domainName,
           operation,
-          path: [domainName, operation],
           source,
           ...(eventOutput === undefined ? {} : { output: eventOutput }),
           buffer,
@@ -464,8 +451,7 @@ function assertNoExtraOptionPaths(
 /**
  * 경량 계약 impl 트리(rpc/state/event 카테고리와 중첩 도메인이 섞인 순수
  * 객체)와 선택적 `schemas`/`errors` map으로부터 `RegistrationTable`을 직접
- * 만든다. impl 트리 자신이 유일한 진실 소스다 — descriptor 계약을 거치지
- * 않는다.
+ * 만든다. impl 트리 자신이 유일한 진실 소스다.
  */
 export function buildRegistrationTableFromImpl(
   impl: unknown,
