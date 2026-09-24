@@ -23,6 +23,26 @@ import type {
   SenderIdentity,
 } from "./types.js";
 
+/**
+ * ADR 0011 "CANCELLED 우선" 규칙의 단일 정의 지점. `signal`이 aborted면
+ * 취소 오류 응답을 돌려주고, 아니면 `undefined`를 돌려줘 호출부가 원래
+ * 분기(성공 처리·다른 오류 분류·진단 기록)를 계속 타게 한다. 이 오류의
+ * 메시지 문자열은 이 함수 밖에서 만들지 않는다.
+ */
+function cancelledIfAborted(
+  signal: AbortSignal,
+  envelope: WireRpcRequest,
+): RpcResponse | undefined {
+  if (!signal.aborted) return undefined;
+  return {
+    protocolVersion: 1,
+    clientId: envelope.clientId,
+    requestId: envelope.requestId,
+    type: "error",
+    error: { code: "CANCELLED", message: "Request cancelled." },
+  } as RpcResponse;
+}
+
 /** 진행 중인 요청 하나. `key`는 진단 기록용, `controller`는 취소·deadline abort. */
 interface ActiveRequest {
   readonly key: string;
@@ -39,9 +59,10 @@ interface SessionState {
 /**
  * RPC 요청 1건의 수명주기 전체(등록 조회·slot부터 `authorize`·validation
  * pipeline·handler·deadline·retire·slot 반환까지)를 소유한다.
- * `create-bridge-server.ts`는 세션 해석과 "세션이 여전히 현재인가" 판정만
- * 맡기고, 그 결과를 `isCurrentSession`으로 넘긴다 — 이 클래스는
- * `DocumentSessions`를 모른다(`DocumentSession` 타입만 참조).
+ * `create-bridge-server.ts`는 세션 해석만 맡긴다 — 이 클래스는
+ * `DocumentSessions`를 모른다(`DocumentSession` 타입만 참조). "세션이
+ * 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부 `session.signal`을
+ * abort하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
  */
 export class RpcRequests {
   readonly #table: RegistrationTable;
@@ -75,16 +96,11 @@ export class RpcRequests {
     return this.#inFlight;
   }
 
-  /**
-   * RPC 요청 1건을 처리한다. `session`은 이미 해석된 현재 세션,
-   * `isCurrentSession`은 `authorize` 대기 뒤 세션이 여전히 현재인지 재검사하는
-   * 판정 함수다(DELTA-03에서 제거 예정, ADR 0015 참고).
-   */
+  /** RPC 요청 1건을 처리한다. `session`은 이미 해석된 현재 세션이다. */
   public async dispatch(
     session: DocumentSession,
     sender: SenderIdentity,
     envelope: WireRpcRequest,
-    isCurrentSession: () => boolean,
   ): Promise<RpcResponse> {
     const respond = (
       response:
@@ -145,13 +161,14 @@ export class RpcRequests {
               ? true
               : await this.#authorize(context, envelope.key);
         } catch {
-          response = controller.signal.aborted
-            ? error("CANCELLED", "Request cancelled.")
-            : error("INTERNAL", "Internal bridge error.");
+          response =
+            cancelledIfAborted(controller.signal, envelope) ??
+            error("INTERNAL", "Internal bridge error.");
           return response;
         }
-        if (controller.signal.aborted || !isCurrentSession()) {
-          response = error("CANCELLED", "Request cancelled.");
+        const cancelled = cancelledIfAborted(controller.signal, envelope);
+        if (cancelled !== undefined) {
+          response = cancelled;
           return response;
         }
         if (!allowed) {
@@ -302,11 +319,8 @@ export class RpcRequests {
     try {
       parsed = parseBridgeValue(envelope.input, this.#limits);
     } catch (cause) {
-      if (context.signal.aborted)
-        return respond({
-          type: "error",
-          error: { code: "CANCELLED", message: "Request cancelled." },
-        });
+      const cancelled = cancelledIfAborted(context.signal, envelope);
+      if (cancelled !== undefined) return cancelled;
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",
         reason:
@@ -330,11 +344,8 @@ export class RpcRequests {
           ? parsed
           : registration.input.parse(parsed);
     } catch {
-      if (context.signal.aborted)
-        return respond({
-          type: "error",
-          error: { code: "CANCELLED", message: "Request cancelled." },
-        });
+      const cancelled = cancelledIfAborted(context.signal, envelope);
+      if (cancelled !== undefined) return cancelled;
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",
         reason: "invalid-input",
@@ -352,11 +363,8 @@ export class RpcRequests {
     try {
       result = await registration.handler(input, context);
     } catch (error) {
-      if (context.signal.aborted)
-        return respond({
-          type: "error",
-          error: { code: "CANCELLED", message: "Request cancelled." },
-        });
+      const cancelled = cancelledIfAborted(context.signal, envelope);
+      if (cancelled !== undefined) return cancelled;
       if (error instanceof BridgeProtocolError)
         return respond({
           type: "error",
@@ -367,11 +375,8 @@ export class RpcRequests {
         error: serializeError(error, registration.errors, this.#limits),
       });
     }
-    if (context.signal.aborted)
-      return respond({
-        type: "error",
-        error: { code: "CANCELLED", message: "Request cancelled." },
-      });
+    const cancelledAfterHandler = cancelledIfAborted(context.signal, envelope);
+    if (cancelledAfterHandler !== undefined) return cancelledAfterHandler;
     let output: BridgeValue;
     try {
       output = parseOutput(registration.output, result, this.#limits);
@@ -380,11 +385,8 @@ export class RpcRequests {
         type: "validation-failed",
         key: envelope.key,
       });
-      if (context.signal.aborted)
-        return respond({
-          type: "error",
-          error: { code: "CANCELLED", message: "Request cancelled." },
-        });
+      const cancelled = cancelledIfAborted(context.signal, envelope);
+      if (cancelled !== undefined) return cancelled;
       return respond({
         type: "error",
         error: { code: "INTERNAL", message: "Internal bridge error." },

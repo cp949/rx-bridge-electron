@@ -207,12 +207,7 @@ function buildBridgeServer(
         });
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
       }
-      return rpcRequests.dispatch(
-        session,
-        sender,
-        envelope,
-        () => sessions.current(sender, envelope.clientId) === session,
-      );
+      return rpcRequests.dispatch(session, sender, envelope);
     },
     cancel(sender: SenderIdentity, envelope: WireCancelRequest): void {
       const session = sessions.current(sender, envelope.clientId);
