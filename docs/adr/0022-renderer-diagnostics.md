@@ -104,7 +104,7 @@
 
 9. **`handshake-failed`**: `createRendererApi`가 reject하기 직전에 1회 기록한다. `connect` throw·reject `transport`. `parseHandshakeResponse`의 `VERSION_MISMATCH` `version-mismatch`, 그 외 parse 실패 `malformed`. manifest entry 거부(wire key 문법·카테고리·경로 충돌) `invalid-manifest`. reject 값(`RemoteError("INTERNAL")`과 문구)은 바꾸지 않는다. `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 배선 오류라 기록하지 않는다.
 
-10. **기록 시점**: 내부 상태를 갱신한 뒤, 사용자 통지(Promise reject/resolve, subscriber `next`·`error`·`complete`) 전에 동기로 기록한다. sink 안에서 API를 다시 호출해도 내부 상태는 이미 일관된다.
+10. **기록 시점**: 내부 상태를 갱신한 뒤, 사용자 통지(Promise reject/resolve, subscriber `next`·`error`·`complete`) 전에 동기로 기록한다. sink 안에서 API를 다시 호출해도 내부 상태는 이미 일관된다(종료 경로에서 이 "이미 일관된다"가 실제로 성립하는 근거는 [ADR 0006](0006-shutdown-contract.md)의 RD-030 개정 note를 본다 — `dispose()`의 `rpc-settled` sink 재진입 시점에는 종료 플래그가 수명 객체 하나에서 이미 확정돼 있다).
 
 11. **sink 예외 격리와 기본 무출력**: ADR 0010 결정 11·12와 같다. `record`의 동기 throw는 삼키고, 반환된 Promise는 await하지 않는다. sink가 없으면 완전히 조용하다. 격리 함수는 `src/renderer`에 둔다 — Renderer 번들이 `src/main`을 import하지 않는다.
 

@@ -89,8 +89,7 @@ function unsubscribeCommands(
   commands: readonly RendererStreamCommand[],
 ): UnsubscribeCommand[] {
   return commands.filter(
-    (command): command is UnsubscribeCommand =>
-      command.type === "unsubscribe",
+    (command): command is UnsubscribeCommand => command.type === "unsubscribe",
   );
 }
 
@@ -490,8 +489,7 @@ describe("api.dispose() root shutdown", () => {
 
       const countOpened = (key: string): number =>
         sinkEvents.filter(
-          (event) =>
-            event.type === "subscription-opened" && event.key === key,
+          (event) => event.type === "subscription-opened" && event.key === key,
         ).length;
 
       // 재진입 지점에서 정확히 1회 실행되는 hook 본체. 재진입 동작 축에
@@ -513,8 +511,7 @@ describe("api.dispose() root shutdown", () => {
             transport.controls.length - controlsBefore;
           reentrantSubscribeOpenedDelta =
             countOpened("state:hardware/status$") - openedBefore;
-          reentrantSubscribeSnapshotAfter =
-            api.hardware.state.status$.snapshot;
+          reentrantSubscribeSnapshotAfter = api.hardware.state.status$.snapshot;
         } else if (action === "rpc") {
           const invocationsBefore = transport.invocations.length;
           reentrantRpcPromise = api.hardware.rpc.connect();
@@ -646,9 +643,8 @@ describe("api.dispose() root shutdown", () => {
       const controlsSinceDispose = transport.controls.slice(
         controlsBeforeDispose,
       );
-      const unsubscribesSinceDispose = unsubscribeCommands(
-        controlsSinceDispose,
-      );
+      const unsubscribesSinceDispose =
+        unsubscribeCommands(controlsSinceDispose);
       expect(controlsSinceDispose).toHaveLength(2);
       expect(unsubscribesSinceDispose).toHaveLength(2);
       expect(

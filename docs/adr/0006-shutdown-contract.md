@@ -27,6 +27,8 @@
 
 로컬에서 이미 확정된(reject된) RPC에 뒤늦게 Main 응답이 도착해도 caller에게 전달하지 않는다 — 기존 `settled` 가드(`rpc-client.ts`)를 그대로 쓴다. `dispose()` 이후 도착한 stream 메시지도 이미 listener를 제거했으므로 구독자에게 전달되지 않는다.
 
+_(개정: RD-030 — 종료 플래그는 수명 객체(`src/renderer/api-lifetime.ts`) 하나가 소유하고, 모든 부작용(RPC 확정, stream 정리) 전에 한 번 확정한다. 위 "사용자 코드가 동기로 실행되는 지점은 4번의 `complete()` 콜백 하나뿐이다"라는 서술은 ADR 0022가 `rpc-settled`·`subscription-closed` 진단 sink를 추가하면서 깨졌다 — 두 sink도 부작용 도중 동기로 호출되는 사용자 코드 지점이다. 세 지점(`rpc-settled` sink, `subscription-closed` sink, `complete()` 콜백) 중 어디서 재진입해도 종료 뒤 규칙(RPC·subscribe는 전송 없이 동기 `CANCELLED`, `dispose()`는 no-op)을 따른다. "루트 dispose가 `rpcClient.dispose()` 다음 `streams[Symbol.dispose]()`를 호출한다"는 서술은 수명 객체가 ② RPC 확정 → ③ stream 정리를 실행하는 것으로 대체됐다 — 순서 자체는 같다.)_
+
 ## Main: `server.dispose()`와 bind `dispose()`
 
 `DocumentSessions`(`packages/rx-bridge-electron/src/main/document-sessions.ts`)의 `#disposing`은 현재 `dispose()`의 `finally`에서 `false`로 되돌아가는 재진입 가드일 뿐, 종료 후 상태를 표현하지 않는다. 이를 되돌아가지 않는 `#disposed`로 바꾼다. 이 이후:
