@@ -1,6 +1,6 @@
 # Renderer 진단 훅 추가
 
-- Status: open
+- Status: 승격 (ROADMAP.md#RD-028)
 - 출처: `_works/20260924-05-operational-diagnostics/`(RD-007 운영 진단 작업, checklist.md "범위(제외)" 및
   "확정된 설계 결정" 2, 17).
 
