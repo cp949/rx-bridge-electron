@@ -152,6 +152,29 @@
 
   계획: `_works/20260925-07-renderer-api-lifetime/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(재진입 매트릭스 test 9건 추가, RED 2건 확보: `rpc-settled` 지점의 `subscribe`·`dispose` 재진입) → DELTA-02(`src/renderer/api-lifetime.ts` 신규, `ApiLifetime`이 종료 플래그·절차를 소유하고 `RpcClient`·`StreamMultiplexer`·`LocalGeneration`이 이를 읽게 전환, 매트릭스 9/9 GREEN) → DELTA-03(ADR 0006에 RD-030 개정 note, ADR 0022 결정 10에 교차 참조, `docs/architecture.md` Renderer dispose 서술 갱신) → DELTA-04(전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/648 tests 통과(리뷰에서 RPC 확정 중 sink 재진입 구독 해제 test 1건 추가), 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `grep -rn '#disposed' src/renderer`·`grep -n 'Symbol.dispose' src/renderer/stream-multiplexer.ts` 모두 0건. 기존 test 단언 변경 0건(`git diff dev -- packages/rx-bridge-electron/test` 삭제·변경 줄 0). 범위 밖으로 둔 envelope 대조 중복 2곳과 생성자 인자 전달, 리뷰 후보 03(generation terminal 경로 통합)은 계획대로 이 작업에 포함하지 않았다.
 
+### 원격 구독 generation terminal 경로 단일화 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 03)
+
+- [ ] **RD-031 — `StreamMultiplexer`의 generation terminal 처리를 한 경로로 모으고, dispose 뒤 acknowledge 전송을 막는다.** 지금 terminal 지점 5곳(open의 subscribe 실패, `close`, `closeAll`, `#dispatch`의 `error`·`complete`)이 map 삭제·`subscription-closed` 진단·unsubscribe 전송·handler 통지·guard를 각자 반복한다. `transport-failed(control)` 기록도 3곳에 복제돼 있다. batch의 acknowledge 전송(`#dispatch`)에는 종료 검사가 없다. 그래서 `next` 콜백 안에서 `api.dispose()`를 부르면 control이 `["subscribe","unsubscribe","acknowledge"]` 순서로 나간다. 이는 ADR 0006의 "종료 뒤 추가 전송 없음"과 어긋난다. 반면 로컬 마지막 구독자 해제 뒤의 acknowledge는 기존 test(`remote-event.test.ts` "acknowledges an accepted batch after a synchronous last-subscriber unsubscribe")가 계약으로 고정한 동작이라 유지한다. **구조:**
+  - `#terminate(subscriptionId, generation, cause)` 한 곳이 1회 보장(map identity 검사) → 삭제 → `subscription-closed` 진단 → cause에 따른 unsubscribe → cause에 따른 handler 통지를 이 순서로 수행한다. cause → 동작은 표 하나로 둔다.
+  - `#sendControl(message)` 한 곳이 전송 throw를 삼키고 `transport-failed(control)`를 기록한다. subscribe 전송 실패만 open에서 직접 처리해 `#terminate(transport-failed)`로 넘긴다(ADR 0022 결정 8 중복 방지).
+  - acknowledge 전송 앞에 `lifetime.disposed` 검사를 둔다. 억제한 acknowledge는 진단으로 기록하지 않는다.
+  - `open`의 호출 전제(종료 검사는 `LocalGeneration.subscribe`)는 유지하고 주석만 새 구조에 맞춘다. `LocalGeneration`은 바꾸지 않는다. `StreamGenerationHandlers`에 "terminal 통지 최대 1회, terminate 뒤 handler 호출 없음" 계약을 주석으로 둔다.
+  - 공개 API·wire·진단 종류는 바꾸지 않는다. 새 ADR은 만들지 않는다.
+
+  **범위 밖(보류):**
+  - generation 레코드 2벌(`Generation`·`StreamGeneration`) 병합: 01 리뷰 카드 08(multiplexer = wire 순서·ack 내부 seam)을 다시 여는 일이다.
+  - `LocalGeneration`의 closed·identity 검사 축소.
+  - envelope 대조 중복과 생성자 인자 전달(RD-030 범위 밖 항목 그대로).
+
+  **완료 기준:**
+  - `next` 콜백 안의 `api.dispose()` 시나리오 test가 수정 전 RED, 수정 후 GREEN이다(control `["subscribe","unsubscribe"]`).
+  - 기존 test 단언 변경 0건.
+  - `stream-multiplexer.ts`에서 `type: "subscription-closed"` 기록 1곳, `channel: "control"` 기록 1곳.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0006 개정 note, ADR 0022 결정 8 교차 참조, `docs/architecture.md` Renderer dispose 서술, 리뷰 02.html 카드 03 완료 표시를 반영한다.
+
+  계획: `_works/20260925-08-stream-generation-terminal/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
