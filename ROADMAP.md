@@ -196,6 +196,39 @@
 
   계획: `_works/20260925-09-stream-end-notice/`. **결과:** 완료 조건 전부 충족, 승인된 편차 1건. DELTA-01(거부 응답 `subscribed` 전송 도중 동기 detach test RED 확보 — `expected ['subscribed'] to deeply equal ['subscribed', 'error']`, 비통지 `destroyed` test는 수정 전부터 GREEN) → DELTA-02(`EndCause`·`endNotice`·`#endUnstarted` 판정 표 도입, `rejectAdmission` 위임, `sendSubscribeFailure`·`#reject`·`notifiesRenderer` 제거, `SENDER_UNAUTHORIZED_MESSAGE`를 `document-sessions.ts`로 이동, `internalError` 상수 정리로 GREEN 전환) → DELTA-03(ADR 0020 결정 2에 거부 전송 도중 retire 규칙 추가, `docs/architecture.md` "문서 세션과 정리" 절 갱신) → DELTA-04(전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/652 tests 통과, 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `grep -rn "sendSubscribeFailure|notifiesRenderer|#reject" packages/rx-bridge-electron/src` 0건, `grep -c '"Internal bridge error."' subscriptions.ts` 1건(상수 정의만), `grep -c 'withEnvelope(' subscriptions.ts` 5→3, `create-bridge-server.ts` stream 프레임 조립 0건. **편차:** DELTA-02 진행 중 `notifiesRenderer` 삭제 계획이 `test/main/session-registry.test.ts`의 `describe("Main retire reason on session.signal")`(6 test, `notifiesRenderer` 직접 import해 unit 계약 고정)와 충돌하는 것을 발견 — 사용자 확인 후 `notifiesRenderer` 삭제를 유지하고 해당 describe를 `createBridgeServer` seam 기준(`describe("Main retire reason drives stream terminal notify")`)으로 재작성해 같은 계약(반환값 대신 실제 stream 메시지로 검증)을 고정했다. "기존 test 단언 변경 0건" 조건은 이 파일 1건에 한해 예외로 적용했다(근거: `_works/_completed/20260925-09-stream-end-notice/DELTA-02.md` "## 결정"). 범위 밖으로 둔 리뷰 후보 05(RPC·stream 공유 authorize 단계)·06(consumer 전달 창 내부 seam)은 계획대로 이 작업에 포함하지 않았다. **리뷰 후속:** 계획의 "`#reject` 진입 guard는 도달하지 않는다" 전제가 틀렸다 — `diagnostics.record`가 `rejected` 진단을 받는 중 동기로 detach·dispose하면 도달하고, 실제 adapter에서도 열린다. 수정 전에는 아무것도 보내지 않았고(`subscribed`도 없음) 지금은 결정 9 표대로 `subscribed`(0)+`CANCELLED`를 보낸다. `subscriptions.test.ts`에 test 1건을 추가해 고정하고(수정 전 코드에서 `expected [] to deeply equal ['subscribed', 'error']`), ADR 0020 개정 note·`docs/architecture.md`에 이 창을 적었다. 재작성한 `session-registry.test.ts` 침묵 test 3건은 retire가 일어나지 않아도 통과했다(lifecycle retire 제거 mutation에서 6/6 통과) — `getDiagnosticsSnapshot().subscriptions` 단언을 더했다. 패키지 `verify` 36 files/653 tests.
 
+### RPC·stream 공유 authorize 단계 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 05)
+
+- [ ] **RD-033 — RPC와 stream에 복제된 authorize 구간을 공유 판정 단계 하나로 모으고, 두 경로는 판정을 응답·프레임으로 번역만 하게 한다.** 지금 `RpcRequests.dispatch`와 `Subscriptions.subscribe`가 같은 구간을 각자 반복한다: context 조립, `authorize` 호출("생략 시 전부 허용" 포함), 예외 → `INTERNAL`(진단 없음), abort 시 취소 우선, `authorize-denied` 진단 → `FORBIDDEN`. `BridgeContext` 조립은 scoped factory까지 3곳, `"Internal bridge error."` 정의는 5곳(상수 2, 리터럴 3)이다. **구조:**
+  - 신규 `src/main/authorization.ts`는 `bridgeContext(...)`와 순수 함수 `authorizeOperation(authorize, diagnostics, context, operation)`을 둔다. 판정은 `allowed` / `rejected(error)` / `cancelled` 중 하나다.
+  - 판정 규칙: authorize가 settle한 뒤 signal이 aborted면 `cancelled`. 아니면 throw는 `INTERNAL`(진단 없음), deny는 `authorize-denied` 진단 뒤 `FORBIDDEN`이다.
+  - `authorize`를 생략하면 판정을 동기로 돌려줘 같은 tick 진행을 보존한다.
+  - 번역: RPC는 `cancelled`를 `cancelledIfAborted`로, `rejected`를 응답으로 바꾸고, 판정 뒤 abort를 다시 검사하지 않는다. stream은 `#finishPending`(slot 반환)을 거쳐 `rejected`를 `#endUnstarted`로 넘긴다.
+  - stream 거부 진단은 이제 slot 반환 전에 기록된다(RPC와 같은 순서). wire 출력은 같다. sink 안에서 읽는 snapshot의 `subscriptions`만 1 더 크다.
+  - `INTERNAL` payload는 `error-serializer.ts`의 export 하나로 모은다.
+  - 생성자 시그니처·`create-bridge-server.ts` 배선·wire 모양·오류 코드·진단 종류는 바꾸지 않는다. 새 ADR은 만들지 않는다.
+
+  **범위 밖(보류):**
+  - 등록 조회·slot·한도 거부 공유와 `unknown-operation` 문구 차이: slot·취소 의미가 달라 합치면 shallow해진다. 문구는 wire에서 관찰된다.
+  - 두 module 생성자 5-인자 동일성.
+  - 리뷰 후보 06·07·08.
+
+  **완료 기준:**
+  - refactor 전에 characterization test 7건을 추가하고 GREEN을 확인한다. 대상:
+    - stream·RPC `authorize-denied` sink 재진입 detach
+    - RPC cancel 뒤 늦은 deny
+    - stream unsubscribe 뒤 늦은 deny
+    - stream detach 뒤 늦은 throw
+    - authorize 생략 시 RPC·stream 같은 tick 진행
+
+    이 test들은 refactor 뒤에도 GREEN이다.
+
+  - 기존 test 단언 변경 0건이다.
+  - `packages/rx-bridge-electron/src`의 `"Internal bridge error."`·`"Bridge operation is forbidden."`·`reason: "authorize-denied"`가 각 1건, `src/main`의 `windowRole:`이 1건이다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0011 개정 note, `docs/architecture.md` 판정 순서 서술, 리뷰 02.html 카드 05 완료 표시를 반영한다.
+
+  계획: `_works/20260925-10-authorize-step/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
