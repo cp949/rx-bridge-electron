@@ -92,6 +92,16 @@ describe("renderer handshake and API proxy", () => {
     await expect(apiPromise).resolves.toHaveProperty("hardware.rpc.connect");
   });
 
+  // RD-017 DELTA-05: 이름 규칙(segment·예약어 검증) 자체는
+  // `src/protocol/operation-key.ts` 코어 하나가 소유하고
+  // `test/protocol/operation-key.test.ts`가 case table로 전 규칙을 직접
+  // 검증한다(대응 case는 `operation-key-cases.ts`). 여기 남긴 이름 관련
+  // 2행(non-canonical entry, leaf namespace collision)은 "Renderer가 실제로
+  // 그 코어를 호출해 거부한다"는 seam만 본다. 삭제한 4행(reserved dispose
+  // root segment, reserved category root/nested/deep segment)은 코어
+  // table에 같은 wire key의 대응 case가 있다("## 결과" 대조표 참고). 이름과
+  // 무관한 3행(missing manifest, unsupported protocol, unknown manifest
+  // field)은 그대로 유지한다.
   test.each([
     ["missing manifest", { protocolVersion: 1, clientId: "client-1" }],
     [
@@ -128,42 +138,6 @@ describe("renderer handshake and API proxy", () => {
           state: [],
           event: [],
         },
-      },
-    ],
-    [
-      "reserved dispose root segment",
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: {
-          rpc: ["rpc:dispose/x"],
-          state: [],
-          event: [],
-        },
-      },
-    ],
-    [
-      "reserved category root segment",
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: { rpc: ["rpc:rpc/x"], state: [], event: [] },
-      },
-    ],
-    [
-      "reserved category nested domain segment",
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: { rpc: [], state: ["state:hardware/state/x"], event: [] },
-      },
-    ],
-    [
-      "reserved category deep domain segment",
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: { rpc: [], state: [], event: ["event:hardware/event/log/x"] },
       },
     ],
   ])(

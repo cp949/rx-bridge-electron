@@ -170,22 +170,15 @@ describe("createBridgeServer(impl, options): impl 형태 오류는 생성 시점
 });
 
 describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시점에 실패한다", () => {
-  test("예약된 segment를 도메인 이름으로 쓰면 실패한다", () => {
-    expect(() =>
-      createBridgeServer({
-        constructor: { rpc: { ping: () => 1 } },
-      }),
-    ).toThrow(TypeError);
-  });
-
-  test("operation 이름에 '/'가 있으면 실패한다", () => {
-    expect(() =>
-      createBridgeServer({
-        device: { rpc: { "a/b": () => 1 } },
-      }),
-    ).toThrow(TypeError);
-  });
-
+  // RD-017 DELTA-05: 이름 규칙(segment·예약어 검증) 자체는
+  // `src/protocol/operation-key.ts` 코어 하나가 소유하고
+  // `test/protocol/operation-key.test.ts`가 case table로 전 규칙을 직접
+  // 검증한다(대응 case는 `operation-key-cases.ts`). 여기 남긴 대표 건은
+  // "Main이 실제로 그 코어를 호출해 거부한다"는 seam만 본다 — 규칙의 모든
+  // 갈래를 다시 열거하지 않는다. 구성: 예약 segment 1(도메인 이름 전체
+  // 검증), impl namespace key(`"a/b"` 형태) split 1(Main `walkImplNode`
+  // 고유 관심사라 코어 test가 덮지 못함, checklist 사실 정정), 경로 충돌
+  // 1(leaf/namespace), 카테고리 간 중복 1, 허용 2.
   test("leaf(operation)와 namespace(중첩 도메인)가 충돌하면 실패한다", () => {
     expect(() =>
       createBridgeServer({
@@ -209,56 +202,23 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).toThrow(TypeError);
   });
 
-  // DELTA-07: 옛 descriptor API의 이름 규칙 test.each(20행)에서, walkImplNode가
-  // 같은 assertDomainName/assertPathSegments를 공유해 impl 트리에도 그대로
-  // 적용됨을 보이는 대표 사례만 옮겼다. "constructor" 예약 세그먼트·"/"가 든 operation 이름·
-  // leaf/namespace 충돌은 위에서 이미 다른 이름으로 검증됐다(중복이라 다시
-  // 옮기지 않음). "도메인이 정확히 'rpc'/'state'/'event' 그 자체"인 경우는
-  // impl 트리의 최상위에서 그 키가 항상 카테고리로 해석되어 애초에 구성할 수
-  // 없다 — 대신 그 세그먼트가 경로 어딘가에 있을 때(예: "sub/rpc") 거부되는지로
-  // 같은 가드를 확인한다.
+  // RD-017 DELTA-05: 나머지 8행(빈 segment·dotted segment·"__proto__"·
+  // "prototype"·root "dispose"·nested "dispose"·nested "state"·deep
+  // "event")은 코어 table(`operation-key-cases.ts`)에 대응 case가 있어
+  // 삭제했다("## 결과" 대조표 참고). 여기 남긴 2행만 seam 대표다: 도메인
+  // 이름 전체가 예약어인 경우(atomic segment 검증)와, impl namespace key에
+  // "/"가 들어 그 key 자체가 여러 segment로 쪼개지는 경우(Main
+  // `walkImplNode`의 `"a/b"` split, 코어가 덮지 못하는 Main 고유 관심사).
   test.each([
-    ["empty domain segment", { "": { rpc: { x: () => 1 } } }, /empty/i],
     [
-      "dotted domain segment",
-      { "hardware.device": { rpc: { x: () => 1 } } },
-      /dotted/i,
-    ],
-    ["reserved 'then' segment", { then: { rpc: { x: () => 1 } } }, /reserved/i],
-    [
-      "reserved '__proto__' segment",
-      { ["__proto__"]: { rpc: { x: () => 1 } } },
-      /reserved/i,
+      "reserved 'then' segment",
+      { then: { rpc: { x: () => 1 } } },
+      /reserved segment 'then'/,
     ],
     [
-      "reserved 'prototype' segment",
-      { prototype: { rpc: { x: () => 1 } } },
-      /reserved/i,
-    ],
-    [
-      "reserved 'dispose' segment",
-      { dispose: { rpc: { x: () => 1 } } },
-      /reserved/i,
-    ],
-    [
-      "reserved 'dispose' segment nested",
-      { "dispose/x": { rpc: { x: () => 1 } } },
-      /reserved/i,
-    ],
-    [
-      "reserved 'rpc' segment nested",
+      "reserved 'rpc' segment nested (namespace key split)",
       { "sub/rpc": { rpc: { x: () => 1 } } },
-      /reserved/i,
-    ],
-    [
-      "reserved 'state' segment nested",
-      { "device/state": { rpc: { x: () => 1 } } },
-      /reserved/i,
-    ],
-    [
-      "reserved 'event' segment nested",
-      { "device/event/log": { rpc: { x: () => 1 } } },
-      /reserved/i,
+      /reserved segment 'rpc'/,
     ],
   ] as const)(
     "%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)",

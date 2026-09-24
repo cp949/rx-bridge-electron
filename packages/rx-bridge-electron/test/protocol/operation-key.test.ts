@@ -1,10 +1,14 @@
-// RD-017 DELTA-02: `operation-key-cases.ts`의 공유 case table을 코어
-// `src/protocol/operation-key.ts`에 직접 돌린다. DELTA-01의
-// `operation-key-parity.test.ts`가 Main·Renderer "seam"(impl 등록,
-// handshake 파싱)을 통해 간접으로 이 table을 검증한다면, 이 파일은 코어
+// RD-017: `operation-key-cases.ts`의 공유 case table을 코어
+// `src/protocol/operation-key.ts`에 직접 돌린다. 이 파일은 코어
 // 함수(`parseWireKey`·`checkDomainSegments`·`checkOperationName`·
-// `OperationPathTrie`)를 직접 호출해 같은 판정을 낸다는 것과, 각 reject
+// `OperationPathTrie`)를 직접 호출해 판정을 낸다는 것과, 각 reject
 // case의 verdict `reason`이 case table에 적어 둔 값과 같다는 것을 고정한다.
+// DELTA-01에서는 Main·Renderer "seam"(impl 등록, handshake 파싱)을 통해
+// 간접으로 이 table을 검증하는 harness(`operation-key-parity.test.ts`)가
+// 함께 있었지만, DELTA-05에서 그 harness를 제거하고 규칙 검증은 이 파일
+// 하나로 모았다 — Main·Renderer는 이제 대표 seam test 몇 건으로만 "코어를
+// 실제로 호출한다"는 사실을 확인한다(`test/main/create-bridge-server-impl.test.ts`,
+// `test/renderer/rpc-client.test.ts`).
 //
 // manifest 한 건을 판정하는 절차는 `rpc`→`state`→`event` 순서, 각 배열은
 // 선언 순서로 모든 key를 훑으며: `parseWireKey` → (파싱된 category가 그

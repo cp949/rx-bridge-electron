@@ -1,22 +1,20 @@
-// RD-017 DELTA-01: operation key(wire key `category:domain/op`) 문법에 대해
-// Main(`createBridgeServer` impl 등록)과 Renderer(`createRendererApi` handshake
-// 파싱)가 "같은 wire key 집합에 같은 판정(accept/reject)을 낸다"는 현재 사실을
-// 고정하는 공유 case table이다. `operation-key-parity.test.ts`가 이 table을
-// Main·Renderer 양쪽 seam에 그대로 돌린다. DELTA-02~04에서 두 구현을 코어
-// `src/protocol/operation-key.ts`로 교체한 뒤에도 이 table의 판정은 그대로
-// 유지돼야 한다(DELTA-05에서 코어 table-driven test로 옮겨 감).
+// RD-017: operation key(wire key `category:domain/op`) 문법의 accept/reject
+// 판정을 고정하는 공유 case table이다. DELTA-01(동등성 고정)에서 Main·Renderer
+// seam 양쪽에 이 table을 돌려 "두 구현이 같은 wire key 집합에 같은 판정을
+// 낸다"는 사실을 고정했고(그 seam harness는 DELTA-05에서 제거됨), DELTA-02
+// 이후로는 `operation-key.test.ts`가 이 table을 코어
+// (`src/protocol/operation-key.ts`)에 직접 돌려 문법 자체를 검증하는 유일한
+// 소비자다.
 //
 // 각 case의 `manifest`는 실제 handshake manifest와 같은 모양
 // (`{ rpc, state, event }`, 각각 wire key 문자열 배열)이다. `verdict`는 그
 // 전체 조합이 accept(정상 등록/handshake) 되는지 reject(생성·handshake 실패)
 // 되는지를 나타낸다.
 //
-// Main은 impl 트리(중첩 객체)로 등록을 "생성"하는 쪽이라 일부 wire key는
-// Main 쪽 impl 트리로 표현할 수 없다(예: prefix 자체가 없는 문자열, 존재하지
-// 않는 prefix, 같은 카테고리 완전 중복 — JS 객체 key는 유일하다). 그런
-// case는 `mainSkipReason`에 이유를 적고, Renderer만 거부하는 형태 불일치
-// case(prefix와 배열 category 불일치)는 `rendererOnly: true`로 표시한다.
-// `operation-key-parity.test.ts`는 이 두 표시를 보고 Main 실행을 건너뛴다.
+// `mainSkipReason`·`rendererOnly` 필드는 DELTA-01 seam harness(Main impl
+// 트리로 표현 불가능한 case, Renderer 전용 형태 불일치 case를 구분해 건너뛰던
+// 표시)가 남긴 이력이다 — 코어 table-driven test는 이 표시와 무관하게 모든
+// case를 wire key 문자열 그대로 실행한다(DELTA-02 "## 결과" 참고).
 
 export type OperationKeyVerdict = "accept" | "reject";
 
