@@ -188,6 +188,34 @@ describe("renderer RPC races", () => {
     await Promise.resolve();
   });
 
+  test("sends cancel once when transport.cancel re-enters the call's abort", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const controller = new AbortController();
+    const recordCancel = transport.cancel.bind(transport);
+    transport.cancel = (requestId) => {
+      recordCancel(requestId);
+      controller.abort();
+    };
+    const api = await createRendererApi<AppBridge>(transport);
+    const settlements: string[] = [];
+
+    const resultPromise = api.hardware.rpc.connect(
+      { deviceId: "d1" },
+      { signal: controller.signal, timeoutMs: 25 },
+    );
+    const requestId = transport.invocations[0]!.requestId;
+    const observed = resultPromise.then(
+      () => settlements.push("response"),
+      (error: RemoteError) => settlements.push(error.code),
+    );
+    await vi.advanceTimersByTimeAsync(25);
+    await observed;
+
+    expect(settlements).toHaveLength(1);
+    expect(transport.cancellations).toEqual([requestId]);
+  });
+
   test("times out through the cancellation path and clears the timer", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();

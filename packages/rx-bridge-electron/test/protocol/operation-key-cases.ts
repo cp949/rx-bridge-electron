@@ -1,7 +1,8 @@
 /**
  * operation key(wire key `category:domain/op`) 문법의 accept/reject 판정
  * case table이다. `operation-key.test.ts`가 코어(`src/protocol/operation-key.ts`)에
- * 직접 돌린다.
+ * 직접 돌리고, `test/renderer/create-renderer-api.test.ts`가 충돌 행을 Renderer
+ * handshake seam에 돌린다.
  *
  * 각 case의 `manifest`는 handshake manifest와 같은 모양(`{ rpc, state, event }`,
  * 각각 wire key 배열)이다. reject case의 `reason`은 manifest를 `rpc`→`state`→

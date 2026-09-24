@@ -50,9 +50,8 @@ function success(
 
 /**
  * `test/protocol/operation-key-cases.ts` 공유 표에서 충돌(leaf/namespace ·
- * 중복) case만 고른다. DELTA-02 characterization test 전용: `addPath`
- * throw(도달 불가로 추정) 삭제 전, `OperationPathTrie`가 이 충돌들을 이미
- * 거부한다는 것을 실측으로 고정한다.
+ * 중복) case만 고른다. Renderer manifest 충돌의 유일한 판정자가
+ * `OperationPathTrie`임을 공개 seam에서 고정하는 test에 쓴다.
  */
 function isTrieCollisionCase(caseEntry: OperationKeyCase): caseEntry is Extract<
   OperationKeyCase,
@@ -163,13 +162,12 @@ describe("renderer handshake and API proxy", () => {
     },
   );
 
-  // DELTA-02 characterization: `OperationPathTrie`가 충돌을 판정하는지 실측
-  // 확인한다. 문구가 trie 문구(`Leaf/namespace collision at '…'` ·
-  // `Duplicate path or leaf/namespace collision at '…'`)여야 하고, `addPath`
-  // 문구(`Manifest contains …`)가 아니어야 한다 — 후자가 나오면 `addPath`의
-  // throw가 실제로 도달한다는 뜻이라 삭제하면 안 된다.
+  // Renderer manifest tree(`addPath`)는 충돌을 검사하지 않고 삽입만 한다.
+  // 충돌은 `OperationPathTrie` verdict가 번역된 문구(`Leaf/namespace
+  // collision at '…'` · `Duplicate path or leaf/namespace collision at '…'`)로
+  // 거부돼야 한다.
   test.each(operationKeyCases.filter(isTrieCollisionCase))(
-    "rejects a colliding manifest via the trie, not addPath: $label",
+    "rejects a colliding manifest with the path trie verdict: $label",
     async (caseEntry) => {
       const transport = new FakeTransport();
       transport.handshake = Promise.resolve({

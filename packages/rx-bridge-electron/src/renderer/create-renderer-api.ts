@@ -108,8 +108,9 @@ function rejectManifestEntry(
   }
 }
 
-// 삽입 전제: `OperationPathTrie`(addManifestPath 호출부)가 leaf/namespace
-// 충돌과 중복 경로를 이미 거부했다 — 여기서는 삽입만 한다.
+// 삽입만 한다. `addManifestPath`가 먼저 `OperationPathTrie`로 카테고리 제외
+// 경로의 leaf/namespace 충돌과 중복을 거부했다. 여기서 끼우는 카테고리
+// segment는 도메인에 올 수 없는 예약어라 새 충돌을 만들지 않는다.
 function addPath<Leaf>(
   root: PathNode<Leaf>,
   segments: readonly string[],
