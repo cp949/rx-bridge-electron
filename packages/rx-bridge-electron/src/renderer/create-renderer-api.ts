@@ -12,6 +12,15 @@ import {
   type PayloadLimits,
   type ProtocolEnvelope,
 } from "../protocol/index.js";
+// `./index.ts`는 이 모듈을 re-export하지 않는다(checklist 결정 2) — 파일
+// 경로로 직접 import한다.
+import {
+  OPERATION_CATEGORIES,
+  OperationPathTrie,
+  parseWireKey,
+  type OperationCategory,
+  type OperationKeyReject,
+} from "../protocol/operation-key.js";
 import { RemoteError } from "./remote-error.js";
 import { RemoteEvent } from "./remote-event.js";
 import { RemoteStateClient } from "./remote-state.js";
@@ -35,14 +44,6 @@ const handshakeLimits: PayloadLimits = {
   maxStringBytes: Number.MAX_SAFE_INTEGER,
 };
 
-const categories = ["rpc", "state", "event"] as const;
-const reservedSegments = new Set([
-  "__proto__",
-  "prototype",
-  "constructor",
-  "then",
-]);
-
 type AddCallOptions<Value> =
   Value extends Observable<unknown>
     ? Value
@@ -65,7 +66,7 @@ export type RendererApi<B> = AddCallOptions<BridgeApi<B>> &
   Disposable & { readonly dispose: () => void };
 
 interface ManifestLeaf {
-  readonly category: (typeof categories)[number];
+  readonly category: OperationCategory;
   readonly key: string;
 }
 
@@ -100,32 +101,37 @@ function assertExactKeys(
   }
 }
 
-function parseSegments(
+/**
+ * wire key 파싱 실패 verdict를 `RemoteError`로 번역한다. Main
+ * `assertDomainName`/`assertOperationName`(`registration.ts:90-127`)과 같은
+ * reason→문구 매핑을 쓰되, Renderer는 `parseWireKey`로 도메인·operation을
+ * 한 번에 검사하므로(호출자가 어느 쪽 segment가 실패했는지 구분해 받지
+ * 않는다) label 없이 manifest entry 전체를 가리키는 문구 하나로 통일한다.
+ * Renderer 메시지 문구는 계약이 아니다(checklist 결정 6, test는 `code`만
+ * 본다).
+ */
+function rejectManifestEntry(
   key: string,
-  category: ManifestLeaf["category"],
-): string[] {
-  const prefix = `${category}:`;
-  if (!key.startsWith(prefix)) {
-    throw internal("Manifest entry has an unsupported category.");
+  verdict: OperationKeyReject,
+): RemoteError {
+  switch (verdict.reason) {
+    case "empty-segment":
+      return internal(
+        `Manifest entry '${key}' cannot contain an empty segment.`,
+      );
+    case "dotted-segment":
+      return internal(
+        `Manifest entry '${key}' cannot contain dotted segments.`,
+      );
+    case "reserved-segment":
+      return internal(
+        `Manifest entry '${key}' contains reserved segment '${verdict.segment}'.`,
+      );
+    case "nested-operation":
+      return internal(`Manifest entry '${key}' cannot be a nested path.`);
+    case "unknown-category":
+      return internal("Manifest entry has an unsupported category.");
   }
-  const path = key.slice(prefix.length);
-  const segments = path.split("/");
-  if (
-    segments.length < 2 ||
-    segments[0] === "dispose" ||
-    segments.some(
-      (segment) =>
-        segment.length === 0 ||
-        segment.includes(".") ||
-        reservedSegments.has(segment),
-    ) ||
-    segments
-      .slice(0, -1)
-      .some((segment) => (categories as readonly string[]).includes(segment))
-  ) {
-    throw internal("Manifest entry has an invalid path.");
-  }
-  return segments;
 }
 
 function addPath<Leaf>(
@@ -152,16 +158,27 @@ function addPath<Leaf>(
 }
 
 function addManifestPath(
-  paths: PathNode<true>,
+  paths: OperationPathTrie,
   root: ManifestNode,
-  category: ManifestLeaf["category"],
+  category: OperationCategory,
   key: string,
 ): void {
-  const segments = parseSegments(key, category);
-  // 와이어 경로 기준 충돌 검사는 Main의 impl 트리 등록 규칙과 같다.
-  addPath(paths, segments, true);
-  const operation = segments[segments.length - 1]!;
-  addPath(root, [...segments.slice(0, -1), category, operation], {
+  const verdict = parseWireKey(key);
+  if (!verdict.ok) {
+    throw rejectManifestEntry(key, verdict);
+  }
+  if (verdict.category !== category) {
+    throw internal("Manifest entry has an unsupported category.");
+  }
+  const segments = [...verdict.domain, verdict.operation];
+  const pathVerdict = paths.add(segments);
+  if (!pathVerdict.ok) {
+    const path = segments.join("/");
+    throw pathVerdict.reason === "leaf-namespace-collision"
+      ? internal(`Leaf/namespace collision at '${path}'.`)
+      : internal(`Duplicate path or leaf/namespace collision at '${path}'.`);
+  }
+  addPath(root, [...verdict.domain, category, verdict.operation], {
     category,
     key,
   });
@@ -192,12 +209,12 @@ function parseHandshake(value: unknown): {
   }
 
   const manifestRecord = asRecord(record.manifest);
-  assertExactKeys(manifestRecord, categories);
-  const manifest = {} as Record<(typeof categories)[number], readonly string[]>;
+  assertExactKeys(manifestRecord, OPERATION_CATEGORIES);
+  const manifest = {} as Record<OperationCategory, readonly string[]>;
   const tree: ManifestNode = { children: new Map() };
-  const paths: PathNode<true> = { children: new Map() };
+  const paths = new OperationPathTrie();
 
-  for (const category of categories) {
+  for (const category of OPERATION_CATEGORIES) {
     const entries = manifestRecord[category];
     if (!Array.isArray(entries)) {
       throw internal("Manifest categories must be arrays.");
