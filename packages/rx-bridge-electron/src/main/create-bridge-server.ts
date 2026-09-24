@@ -15,7 +15,6 @@ import type {
   WireRpcRequest,
   WireStreamCommand,
 } from "../protocol/index.js";
-import { parseOpaqueIdSequence } from "../protocol/index.js";
 import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
 import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
 import { DocumentSessions } from "./document-sessions.js";
@@ -28,7 +27,7 @@ import {
   resolveResourceLimits,
   type ResourceLimits,
 } from "./resource-limits.js";
-import { StreamHub, type StreamSender } from "./stream-hub.js";
+import { Subscriptions, type StreamSender } from "./subscriptions.js";
 import type {
   AttachedTarget,
   Authorize,
@@ -144,7 +143,13 @@ function buildBridgeServer(
   let disposed = false;
   const sessions = new DocumentSessions(resourceLimits, options.diagnostics);
   const manifest = manifestFromTable(table);
-  const streams = new StreamHub(table, limits, options.diagnostics);
+  const subscriptions = new Subscriptions(
+    table,
+    limits,
+    resourceLimits,
+    options.diagnostics,
+    options.authorize,
+  );
   const keyOf = (sender: SenderIdentity, clientId: string, requestId: string) =>
     JSON.stringify([sender.webContentsId, sender.frameId, clientId, requestId]);
   const error = (
@@ -335,12 +340,7 @@ function buildBridgeServer(
           });
           return;
         }
-        if (command.type === "unsubscribe")
-          sessions.cancelStream(
-            session,
-            keyOf(sender, command.clientId, command.subscriptionId),
-          );
-        streams.control(sender, command);
+        subscriptions.control(session, command);
         return;
       }
       const session = sessions.establish(sender, command.clientId);
@@ -351,141 +351,20 @@ function buildBridgeServer(
         });
         return;
       }
-      const sequence = parseOpaqueIdSequence(command.subscriptionId);
-      if (sequence === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "invalid-input",
-        });
-        streams.reject(
-          sender,
-          command,
-          send,
-          {
-            code: "INVALID_ARGUMENT",
-            message: "Invalid bridge subscription ID.",
-          },
-          session.signal,
-        );
-        return;
-      }
-      const id = keyOf(sender, command.clientId, command.subscriptionId);
-      if (!sessions.advanceStreamWatermark(session, sequence)) return;
-      if (!streams.isRegistered(command.key)) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "unknown-operation",
-        });
-        streams.reject(
-          sender,
-          command,
-          send,
-          {
-            code: "NOT_FOUND",
-            message: "Unknown bridge stream.",
-          },
-          session.signal,
-        );
-        return;
-      }
-      const controller = sessions.acquireStreamSlot(session, id);
-      if (controller === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "subscription-limit",
-          key: command.key,
-        });
-        streams.reject(
-          sender,
-          command,
-          send,
-          {
-            code: "RESOURCE_EXHAUSTED",
-            message: "Too many bridge subscriptions.",
-          },
-          session.signal,
-        );
-        return;
-      }
-      const context: BridgeContext = {
-        requestId: command.subscriptionId,
-        clientId: command.clientId,
-        windowRole: session.target.role,
-        sender,
-        signal: controller.signal,
-      };
-      let allowed: boolean;
-      try {
-        allowed =
-          options.authorize === undefined
-            ? true
-            : await options.authorize(context, command.key);
-      } catch {
-        if (
-          sessions.finishStream(session, id, controller) &&
-          sessions.current(sender, command.clientId) === session
-        )
-          streams.reject(
-            sender,
-            command,
-            send,
-            {
-              code: "INTERNAL",
-              message: "Internal bridge error.",
-            },
-            session.signal,
-          );
-        sessions.releaseStream(session, id);
-        return;
-      }
-      if (
-        !sessions.finishStream(session, id, controller) ||
-        sessions.current(sender, command.clientId) !== session
-      ) {
-        sessions.releaseStream(session, id);
-        return;
-      }
-      if (!allowed) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "authorize-denied",
-          key: command.key,
-        });
-        streams.reject(
-          sender,
-          command,
-          send,
-          {
-            code: "FORBIDDEN",
-            message: "Bridge operation is forbidden.",
-          },
-          session.signal,
-        );
-        sessions.releaseStream(session, id);
-        return;
-      }
-      streams.subscribe(
-        sender,
-        command.clientId,
-        session.target.role,
-        command,
-        send,
-        session.signal,
-        () => sessions.releaseStream(session, id),
-      );
+      await subscriptions.subscribe(session, sender, command, send);
     },
     dispose(): void {
       if (disposed) return;
       disposed = true;
       sessions.dispose();
-      streams.dispose();
+      subscriptions.dispose();
     },
     getDiagnosticsSnapshot(): DiagnosticsSnapshot {
       return {
         sessions: sessions.sessionCount(),
         rpcInFlight: sessions.rpcInFlightCount(),
-        subscriptions: sessions.subscriptionCount(),
-        queuedEvents: streams.queuedEventsCount(),
+        subscriptions: subscriptions.subscriptionCount(),
+        queuedEvents: subscriptions.queuedEventsCount(),
       };
     },
   };

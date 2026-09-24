@@ -21,7 +21,7 @@ import {
   type RpcResponse,
   type StreamMessage,
 } from "../protocol/index.js";
-import type { StreamSender } from "./stream-hub.js";
+import type { StreamSender } from "./subscriptions.js";
 import type { StreamBridgeServer } from "./create-bridge-server.js";
 import { recordAdapterRejection } from "./diagnostics.js";
 import type { AttachedTarget, RejectReason, SenderIdentity } from "./types.js";

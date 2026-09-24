@@ -18,9 +18,6 @@ type LifecycleReason =
 
 interface SessionState {
   readonly controller: AbortController;
-  streamWatermark: number;
-  readonly pendingStreams: Map<string, AbortController>;
-  readonly subscriptions: Set<string>;
   readonly active: Map<
     string,
     { readonly key: string; readonly controller: AbortController }
@@ -101,9 +98,6 @@ export class DocumentSessions {
     };
     this.#states.set(session, {
       controller,
-      streamWatermark: 0,
-      pendingStreams: new Map(),
-      subscriptions: new Set(),
       active: new Map(),
       runningRpc: 0,
     });
@@ -154,17 +148,6 @@ export class DocumentSessions {
     return count;
   }
 
-  public subscriptionCount(): number {
-    let count = 0;
-    for (const attachment of this.#attachments.values()) {
-      const session = attachment.current;
-      const state =
-        session === undefined ? undefined : this.#states.get(session);
-      if (state !== undefined) count += state.subscriptions.size;
-    }
-    return count;
-  }
-
   public rpcInFlightCount(): number {
     return this.#globalRunningRpc;
   }
@@ -200,62 +183,6 @@ export class DocumentSessions {
       type: "rpc-cancelled",
       key: work.key,
     });
-  }
-
-  public advanceStreamWatermark(
-    session: DocumentSession,
-    sequence: number,
-  ): boolean {
-    const state = this.#states.get(session);
-    if (state === undefined || sequence <= state.streamWatermark) return false;
-    state.streamWatermark = sequence;
-    return true;
-  }
-
-  public acquireStreamSlot(
-    session: DocumentSession,
-    id: string,
-  ): AbortController | undefined {
-    const state = this.#states.get(session);
-    if (
-      state === undefined ||
-      state.subscriptions.size >= this.#resourceLimits.maxSubscriptions
-    )
-      return undefined;
-    state.subscriptions.add(id);
-    const controller = new AbortController();
-    state.pendingStreams.set(id, controller);
-    return controller;
-  }
-
-  public releaseStream(session: DocumentSession, id: string): void {
-    const state = this.#states.get(session);
-    state?.subscriptions.delete(id);
-  }
-
-  public finishStream(
-    session: DocumentSession,
-    id: string,
-    controller: AbortController,
-  ): boolean {
-    const state = this.#states.get(session);
-    if (
-      state?.pendingStreams.get(id) !== controller ||
-      controller.signal.aborted ||
-      session.signal.aborted
-    )
-      return false;
-    state.pendingStreams.delete(id);
-    return true;
-  }
-
-  public cancelStream(session: DocumentSession, id: string): void {
-    const state = this.#states.get(session);
-    const controller = state?.pendingStreams.get(id);
-    if (controller === undefined) return;
-    state?.pendingStreams.delete(id);
-    this.releaseStream(session, id);
-    controller.abort();
   }
 
   public retiredClientCount(webContentsId: number): number {
@@ -299,8 +226,6 @@ export class DocumentSessions {
       state?.controller.abort();
       for (const id of [...(state?.active.keys() ?? [])])
         this.cancelRpc(session, id);
-      for (const id of [...(state?.pendingStreams.keys() ?? [])])
-        this.cancelStream(session, id);
     }
     if (reason === "destroyed") this.#retiredClients.delete(webContentsId);
   }

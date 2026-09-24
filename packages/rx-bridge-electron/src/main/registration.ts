@@ -132,7 +132,7 @@ function addPath(root: PathNode, path: string): void {
 
 /**
  * 경로("도메인/operation") → 등록 항목으로 정규화된 서버 내부 테이블.
- * dispatcher/stream-hub는 descriptor 트리 대신 이 테이블만 읽는다. 이렇게
+ * dispatcher/subscriptions는 descriptor 트리 대신 이 테이블만 읽는다. 이렇게
  * 하면 이후 추가될 impl 기반 공개 API도 같은 테이블 모양을 만들어 같은
  * 코어를 쓸 수 있다(DELTA-04). `input`/`output` 스키마는 선택이며 없으면
  * 조회자가 `parseBridgeValue` 결과를 그대로 쓴다.

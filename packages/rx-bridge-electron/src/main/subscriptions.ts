@@ -1,6 +1,7 @@
 import { Observable, Subscriber, type Subscription } from "rxjs";
 
 import {
+  parseOpaqueIdSequence,
   type BridgeValue,
   type PayloadLimits,
   type RpcErrorPayload,
@@ -9,6 +10,7 @@ import {
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { recordDiagnostic } from "./diagnostics.js";
+import type { DocumentSession } from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
@@ -16,8 +18,10 @@ import type {
   RegistrationTable,
   StateRegistrationEntry,
 } from "./registration.js";
+import type { ResourceLimits } from "./resource-limits.js";
 import type { EventSource, ScopedEventSource } from "./sources.js";
 import type {
+  Authorize,
   BridgeContext,
   DiagnosticsSink,
   SenderIdentity,
@@ -26,6 +30,8 @@ import type {
 export type StreamSender = (message: StreamMessage) => void;
 
 type Registration = StateRegistrationEntry | EventRegistrationEntry;
+type SubscribeCommand = Extract<WireStreamCommand, { type: "subscribe" }>;
+type ControlCommand = Exclude<WireStreamCommand, { type: "subscribe" }>;
 
 interface SharedSource {
   readonly source: Observable<BridgeValue>;
@@ -33,8 +39,14 @@ interface SharedSource {
   upstream?: Subscription;
 }
 
+/** authorize 대기 중인 구독 하나. 결정되면 제거되고(성공 시) Consumer로 이어진다. */
+interface PendingEntry {
+  readonly controller: AbortController;
+  readonly onAbort: () => void;
+}
+
 interface Consumer {
-  readonly id: string;
+  readonly session: DocumentSession;
   readonly key: string;
   readonly clientId: string;
   readonly subscriptionId: string;
@@ -42,9 +54,7 @@ interface Consumer {
   readonly send: StreamSender;
   readonly registration: Registration;
   readonly controller: AbortController;
-  readonly sessionSignal: AbortSignal;
   readonly onSessionAbort: () => void;
-  readonly onClose: () => void;
   readonly shared?: SharedSource;
   sourceDetached: boolean;
   own?: Subscription;
@@ -60,6 +70,13 @@ interface Consumer {
   closed: boolean;
 }
 
+/** 세션 1개가 소유한 구독 상태. `pending`+`consumers` 합이 slot 점유 수다. */
+interface SessionState {
+  watermark: number;
+  readonly pending: Map<string, PendingEntry>;
+  readonly consumers: Map<string, Consumer>;
+}
+
 const internalError: RpcErrorPayload = {
   code: "INTERNAL",
   message: "Internal bridge error.",
@@ -69,20 +86,38 @@ const overflowError: RpcErrorPayload = {
   message: "Event buffer capacity exceeded.",
 };
 
-export class StreamHub {
+/**
+ * 구독(subscription) 1건의 수명주기 전체(admission부터 terminal·slot 반환까지)를
+ * 소유한다. server(`create-bridge-server.ts`)는 세션 해석과 `sender-unauthorized`
+ * 판정만 하고, subscriptionId 파싱·watermark·등록 조회·slot·`authorize` 대기·
+ * consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
+ */
+export class Subscriptions {
   readonly #registrations = new Map<string, Registration>();
   readonly #shared = new Map<string, SharedSource>();
-  readonly #consumers = new Map<string, Consumer>();
+  readonly #sessions = new WeakMap<DocumentSession, SessionState>();
+  /**
+   * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) — 진단
+   * 집계(`subscriptionCount`·`queuedEventsCount`)에 필요한 순회 수단이다. 세션별
+   * 상태 자체는 `#sessions`(WeakMap)가 세션 수명에 맞춰 소유한다.
+   */
+  readonly #liveStates = new Set<SessionState>();
   readonly #limits: PayloadLimits;
+  readonly #resourceLimits: ResourceLimits;
   readonly #diagnostics: DiagnosticsSink | undefined;
+  readonly #authorize: Authorize | undefined;
 
   public constructor(
     table: RegistrationTable,
     limits: PayloadLimits,
+    resourceLimits: ResourceLimits,
     diagnostics?: DiagnosticsSink,
+    authorize?: Authorize,
   ) {
     this.#limits = limits;
+    this.#resourceLimits = resourceLimits;
     this.#diagnostics = diagnostics;
+    this.#authorize = authorize;
     for (const entry of table.state.values())
       this.#registrations.set(
         `state:${entry.domainName}/${entry.operation}`,
@@ -95,63 +130,227 @@ export class StreamHub {
       );
   }
 
-  public isRegistered(key: string): boolean {
-    return this.#registrations.has(key);
+  public subscriptionCount(): number {
+    let count = 0;
+    for (const state of this.#liveStates)
+      count += state.pending.size + state.consumers.size;
+    return count;
   }
 
   public queuedEventsCount(): number {
     let count = 0;
-    for (const consumer of this.#consumers.values())
-      count += consumer.pendingEvents?.length ?? 0;
+    for (const state of this.#liveStates)
+      for (const consumer of state.consumers.values())
+        count += consumer.pendingEvents?.length ?? 0;
     return count;
   }
 
-  public subscribe(
+  public async subscribe(
+    session: DocumentSession,
     sender: SenderIdentity,
-    clientId: string,
-    role: string,
-    command: Extract<WireStreamCommand, { type: "subscribe" }>,
+    command: SubscribeCommand,
     send: StreamSender,
-    sessionSignal: AbortSignal,
-    onClose: () => void,
-  ): void {
+  ): Promise<void> {
+    const sequence = parseOpaqueIdSequence(command.subscriptionId);
+    if (sequence === undefined) {
+      recordDiagnostic(this.#diagnostics, {
+        type: "rejected",
+        reason: "invalid-input",
+      });
+      this.#reject(
+        command,
+        send,
+        { code: "INVALID_ARGUMENT", message: "Invalid bridge subscription ID." },
+        session.signal,
+      );
+      return;
+    }
+    const state = this.#state(session);
+    if (sequence <= state.watermark) return;
+    state.watermark = sequence;
+
     const registration = this.#registrations.get(command.key);
     if (registration === undefined) {
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",
         reason: "unknown-operation",
       });
-      this.reject(
-        sender,
+      this.#reject(
+        command,
+        send,
+        { code: "NOT_FOUND", message: "Unknown bridge stream." },
+        session.signal,
+      );
+      return;
+    }
+
+    if (
+      state.pending.size + state.consumers.size >=
+      this.#resourceLimits.maxSubscriptions
+    ) {
+      recordDiagnostic(this.#diagnostics, {
+        type: "rejected",
+        reason: "subscription-limit",
+        key: command.key,
+      });
+      this.#reject(
         command,
         send,
         {
-          code: "NOT_FOUND",
-          message: "Unknown bridge stream.",
+          code: "RESOURCE_EXHAUSTED",
+          message: "Too many bridge subscriptions.",
         },
-        sessionSignal,
+        session.signal,
       );
-      onClose();
       return;
     }
-    const id = this.#id(sender, clientId, command.subscriptionId);
-    if (sessionSignal.aborted || this.#consumers.has(id)) {
-      onClose();
+
+    const controller = new AbortController();
+    const entry: PendingEntry = {
+      controller,
+      onAbort: () => {
+        state.pending.delete(command.subscriptionId);
+        this.#pruneIfEmpty(state);
+        controller.abort();
+      },
+    };
+    state.pending.set(command.subscriptionId, entry);
+    this.#liveStates.add(state);
+    session.signal.addEventListener("abort", entry.onAbort, { once: true });
+    if (session.signal.aborted) {
+      session.signal.removeEventListener("abort", entry.onAbort);
+      state.pending.delete(command.subscriptionId);
+      this.#pruneIfEmpty(state);
       return;
     }
+
+    const context: BridgeContext = {
+      requestId: command.subscriptionId,
+      clientId: command.clientId,
+      windowRole: session.target.role,
+      sender,
+      signal: controller.signal,
+    };
+    let allowed: boolean;
+    try {
+      allowed =
+        this.#authorize === undefined
+          ? true
+          : await this.#authorize(context, command.key);
+    } catch {
+      if (this.#finishPending(session, state, command.subscriptionId, entry))
+        this.#reject(
+          command,
+          send,
+          { code: "INTERNAL", message: "Internal bridge error." },
+          session.signal,
+        );
+      return;
+    }
+    if (!this.#finishPending(session, state, command.subscriptionId, entry))
+      return;
+    if (!allowed) {
+      recordDiagnostic(this.#diagnostics, {
+        type: "rejected",
+        reason: "authorize-denied",
+        key: command.key,
+      });
+      this.#reject(
+        command,
+        send,
+        { code: "FORBIDDEN", message: "Bridge operation is forbidden." },
+        session.signal,
+      );
+      return;
+    }
+    this.#start(session, state, sender, command, send, registration);
+  }
+
+  public control(session: DocumentSession, command: ControlCommand): void {
+    const state = this.#sessions.get(session);
+    if (state === undefined) return;
+    if (command.type === "unsubscribe") {
+      const pending = state.pending.get(command.subscriptionId);
+      if (pending !== undefined) {
+        state.pending.delete(command.subscriptionId);
+        this.#pruneIfEmpty(state);
+        session.signal.removeEventListener("abort", pending.onAbort);
+        pending.controller.abort();
+        return;
+      }
+      const consumer = state.consumers.get(command.subscriptionId);
+      if (consumer !== undefined && !consumer.closed) this.#close(consumer);
+      return;
+    }
+    const consumer = state.consumers.get(command.subscriptionId);
+    if (consumer === undefined || consumer.closed) return;
+    if (consumer.inFlight !== command.sequence) return;
+    consumer.inFlight = undefined;
+    this.#flush(consumer);
+  }
+
+  public dispose(): void {
+    for (const state of [...this.#liveStates]) {
+      for (const pending of [...state.pending.values()]) pending.controller.abort();
+      state.pending.clear();
+      for (const consumer of [...state.consumers.values()])
+        if (!consumer.closed) this.#close(consumer);
+    }
+  }
+
+  #state(session: DocumentSession): SessionState {
+    let state = this.#sessions.get(session);
+    if (state === undefined) {
+      state = { watermark: 0, pending: new Map(), consumers: new Map() };
+      this.#sessions.set(session, state);
+    }
+    return state;
+  }
+
+  #pruneIfEmpty(state: SessionState): void {
+    if (state.pending.size === 0 && state.consumers.size === 0)
+      this.#liveStates.delete(state);
+  }
+
+  /**
+   * `authorize` 대기가 여전히 유효한지 확인하고 slot을 반환한다(성공·실패
+   * 무관하게 반환은 항상 일어난다). `false`면 이미 취소됐거나(unsubscribe·
+   * retire) signal이 abort된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
+   */
+  #finishPending(
+    session: DocumentSession,
+    state: SessionState,
+    id: string,
+    entry: PendingEntry,
+  ): boolean {
+    const current = state.pending.get(id);
+    if (current !== entry) return false;
+    const ok = !entry.controller.signal.aborted && !session.signal.aborted;
+    state.pending.delete(id);
+    this.#pruneIfEmpty(state);
+    session.signal.removeEventListener("abort", entry.onAbort);
+    return ok;
+  }
+
+  #start(
+    session: DocumentSession,
+    state: SessionState,
+    sender: SenderIdentity,
+    command: SubscribeCommand,
+    send: StreamSender,
+    registration: Registration,
+  ): void {
     const controller = new AbortController();
     const consumer: Consumer = {
-      id,
+      session,
       key: command.key,
-      clientId,
+      clientId: command.clientId,
       subscriptionId: command.subscriptionId,
       sender,
       send,
       registration,
       controller,
-      sessionSignal,
       onSessionAbort: () => this.#close(consumer),
-      onClose,
       sourceDetached: false,
       pendingState: undefined,
       hasPendingState: false,
@@ -160,15 +359,16 @@ export class StreamHub {
       sequence: 0,
       closed: false,
     };
-    this.#consumers.set(id, consumer);
+    state.consumers.set(command.subscriptionId, consumer);
+    this.#liveStates.add(state);
     recordDiagnostic(this.#diagnostics, {
       type: "subscription-opened",
       key: consumer.key,
     });
-    sessionSignal.addEventListener("abort", consumer.onSessionAbort, {
+    session.signal.addEventListener("abort", consumer.onSessionAbort, {
       once: true,
     });
-    if (sessionSignal.aborted) {
+    if (session.signal.aborted) {
       this.#close(consumer);
       return;
     }
@@ -187,8 +387,8 @@ export class StreamHub {
       ) {
         const context: BridgeContext = {
           requestId: command.subscriptionId,
-          clientId,
-          windowRole: role,
+          clientId: command.clientId,
+          windowRole: session.target.role,
           sender,
           signal: controller.signal,
         };
@@ -242,9 +442,8 @@ export class StreamHub {
     }
   }
 
-  public reject(
-    sender: SenderIdentity,
-    command: Extract<WireStreamCommand, { type: "subscribe" }>,
+  #reject(
+    command: SubscribeCommand,
     send: StreamSender,
     error: RpcErrorPayload,
     sessionSignal: AbortSignal,
@@ -270,50 +469,6 @@ export class StreamHub {
     } catch {
       // A closed renderer route has no subscriber to notify.
     }
-  }
-
-  public control(
-    sender: SenderIdentity,
-    command: Exclude<WireStreamCommand, { type: "subscribe" }>,
-  ): void {
-    const consumer = this.#consumers.get(
-      this.#id(sender, command.clientId, command.subscriptionId),
-    );
-    if (consumer === undefined || consumer.closed) return;
-    if (command.type === "unsubscribe") {
-      this.#close(consumer);
-      return;
-    }
-    if (consumer.inFlight !== command.sequence) return;
-    consumer.inFlight = undefined;
-    this.#flush(consumer);
-  }
-
-  public closeWhere(
-    predicate: (consumer: {
-      readonly sender: SenderIdentity;
-      readonly clientId: string;
-    }) => boolean,
-  ): void {
-    for (const consumer of [...this.#consumers.values()])
-      if (predicate(consumer)) this.#close(consumer);
-  }
-
-  public dispose(): void {
-    this.closeWhere(() => true);
-  }
-
-  #id(
-    sender: SenderIdentity,
-    clientId: string,
-    subscriptionId: string,
-  ): string {
-    return JSON.stringify([
-      sender.webContentsId,
-      sender.frameId,
-      clientId,
-      subscriptionId,
-    ]);
   }
 
   #isScoped(source: EventSource): source is ScopedEventSource<BridgeValue> {
@@ -474,13 +629,16 @@ export class StreamHub {
       type: "subscription-closed",
       key: consumer.key,
     });
-    consumer.sessionSignal.removeEventListener(
+    consumer.session.signal.removeEventListener(
       "abort",
       consumer.onSessionAbort,
     );
-    this.#consumers.delete(consumer.id);
+    const state = this.#sessions.get(consumer.session);
+    if (state !== undefined) {
+      state.consumers.delete(consumer.subscriptionId);
+      this.#pruneIfEmpty(state);
+    }
     consumer.controller.abort();
     this.#detachSource(consumer);
-    consumer.onClose();
   }
 }
