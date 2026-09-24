@@ -31,10 +31,11 @@ export interface CurrentValueSource<T> extends Observable<T> {
 export type OverflowPolicy = "error" | "drop-oldest" | "drop-newest";
 
 /**
- * Event source의 배압 버퍼 설정. source 생성 시점(`broadcastEvent`·
- * `scopedEvent`)에 정한다 — 생략 시 `DEFAULT_EVENT_BUFFER`(capacity 100,
- * overflow "error")를 `main/registration.ts`의 `buildRegistrationTableFromImpl`이
- * 적용한다.
+ * Event source의 배압 버퍼 설정. `broadcastEvent`·`scopedEvent` 호출 시
+ * 값을 줄 수 있지만, 생략 시 기본값 적용과 `capacity`·`overflow` 값 검증은
+ * `main/registration.ts`의 `buildRegistrationTableFromImpl`(등록 단계)이
+ * 한다 — 두 helper는 검증하지 않는 순수 생성자다. 헬퍼 없이 직접 작성한
+ * source 객체 리터럴도 같은 등록 단계에서 같은 규칙으로 검증된다.
  */
 export interface EventSourceBuffer {
   readonly capacity: number;

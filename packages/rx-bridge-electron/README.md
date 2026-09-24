@@ -287,6 +287,8 @@ const scopedDataEvent = scopedEvent(
 
 `overflow`는 `"error"`(대기 값 전달 뒤 `STREAM_OVERFLOW`로 종료), `"drop-oldest"`, `"drop-newest"` 중 하나입니다. plain `Observable<T>`을 그대로 impl에 두면 buffer 옵션 없이 기본값을 씁니다.
 
+잘못된 buffer(`capacity`, `overflow`)나 source 모양은 helper를 쓰지 않은 직접 작성 source를 포함해 `createBridgeServer` 호출 시 `TypeError`로 실패합니다.
+
 ## 런타임 동작
 
 `createRendererApi()`는 API 객체를 반환하기 전에 handshake를 수행합니다. Main 서버는 직렬화 가능한 manifest를 제공하고, Renderer는 그 manifest로 선언된 경로만 담은 `Object.freeze`된 일반 객체 트리를 만듭니다. 선언되지 않은 경로는 `undefined`이고, 쓰기는 `TypeError`로 실패하며, `then` 속성이 없어 Promise처럼 동작하지 않습니다(근거: [ADR 0021](../../docs/adr/0021-renderer-frozen-api-tree.md)). 정식 operation 경로는 Renderer가 제공한 객체 경로가 아니라 범주를 포함합니다(`rpc:device/connect`, `state:device/connection`). 공개 호출 형태는 도메인 아래에 종류 계층을 두는 `api.<domain path>.rpc|state|event.<operation>`입니다(`api.device.rpc.connect()`, `api.device.state.connection`, `api.device.event.data`). 도메인에 정의가 없는 종류는 노출하지 않습니다. operation 이름은 `/`를 포함할 수 없고, 묶음은 중첩 도메인(`{ device: { serial: { rpc: {...} } } }` → `api.device.serial.rpc.open()`)으로 표현합니다. 도메인 경로의 segment로 `rpc`, `state`, `event`를 쓸 수 없습니다(근거: [ADR 0007](../../docs/adr/0007-hierarchical-renderer-api.md)).

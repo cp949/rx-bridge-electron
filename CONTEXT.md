@@ -23,6 +23,9 @@ _Avoid_: sender 검증, origin check(단독)
 렌더러 문서 세션이 소유하는 State/Event 전달 단위. `subscriptionId`로 식별하며, 수명은 admission(ID 형식·watermark·등록 조회·slot·`authorize`)부터 terminal 전송과 slot 반환까지다. 세션이 retire되면 함께 끝난다. Main에서는 `Subscriptions` 모듈이 소유한다.
 _Avoid_: stream consumer, 스트림 세션
 
+**Event 전달 방식 (event delivery)**:
+Event source가 upstream을 구독자와 공유하는 방식이다. `broadcast`는 key당 upstream `Observable` 하나를 구독자들이 공유한다(plain `Observable`을 그대로 넘기면 `broadcast`와 기본 buffer로 정규화한다). `scoped`는 구독마다 factory가 `BridgeContext`로 upstream을 새로 만들어 구독 사이에 값이 섞이지 않는다. 정규화는 Main 등록(`buildRegistrationTableFromImpl`)이 등록 시점에 한 번 하고, `Subscriptions`는 정규화된 두 갈래만 읽는다. State entry는 정규화 대상이 아니다(이미 등록 시점에 검증된다).
+
 **RPC 요청 (rpc request)**:
 렌더러 문서 세션이 소유하는 요청-응답 단위. `requestId`로 식별하며, 수명은 등록 조회·slot 획득부터 handler 종료와 slot 반환까지다. 응답이 취소·deadline으로 먼저 나가도 slot은 handler가 끝날 때 반환한다. 세션이 retire되면 취소된다. Main에서는 `RpcRequests` 모듈이 소유한다.
 _Avoid_: RPC 호출(call), dispatch
