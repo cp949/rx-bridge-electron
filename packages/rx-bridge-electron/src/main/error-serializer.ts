@@ -4,7 +4,8 @@ import {
   type RpcErrorPayload,
 } from "../protocol/index.js";
 
-const internalError = (): RpcErrorPayload => ({
+/** Main의 `INTERNAL` 응답 payload 단일 정의(ADR 0011). */
+export const internalError: RpcErrorPayload = Object.freeze({
   code: "INTERNAL",
   message: "Internal bridge error.",
 });
@@ -14,7 +15,7 @@ export function serializeError(
   declared: readonly string[],
   limits: PayloadLimits,
 ): RpcErrorPayload {
-  if (error === null || typeof error !== "object") return internalError();
+  if (error === null || typeof error !== "object") return internalError;
   try {
     // Read each field once so accessors cannot change the value after checks.
     const { code, message, details } = error as {
@@ -27,7 +28,7 @@ export function serializeError(
       !declared.includes(code) ||
       typeof message !== "string"
     )
-      return internalError();
+      return internalError;
     parseBridgeValue(message, limits);
     return details === undefined
       ? { code, message }
@@ -40,6 +41,6 @@ export function serializeError(
           ),
         };
   } catch {
-    return internalError();
+    return internalError;
   }
 }

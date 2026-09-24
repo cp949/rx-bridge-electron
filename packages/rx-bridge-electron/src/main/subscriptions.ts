@@ -15,7 +15,7 @@ import {
   SENDER_UNAUTHORIZED_MESSAGE,
   type DocumentSession,
 } from "./document-sessions.js";
-import { serializeError } from "./error-serializer.js";
+import { internalError, serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
   EventRegistrationEntry,
@@ -80,10 +80,6 @@ interface SessionState {
   readonly consumers: Map<string, Consumer>;
 }
 
-const internalError: RpcErrorPayload = {
-  code: "INTERNAL",
-  message: "Internal bridge error.",
-};
 const overflowError: RpcErrorPayload = {
   code: "STREAM_OVERFLOW",
   message: "Event buffer capacity exceeded.",

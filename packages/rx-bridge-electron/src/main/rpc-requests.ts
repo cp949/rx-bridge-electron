@@ -10,7 +10,7 @@ import {
 import { PayloadLimitError } from "../protocol/bridge-value.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import type { DocumentSession } from "./document-sessions.js";
-import { serializeError } from "./error-serializer.js";
+import { internalError, serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
   RegistrationTable,
@@ -162,7 +162,7 @@ export class RpcRequests {
         } catch {
           response =
             cancelledIfAborted(controller.signal, envelope) ??
-            error("INTERNAL", "Internal bridge error.");
+            respond(envelope, { type: "error", error: internalError });
           return response;
         }
         const cancelled = cancelledIfAborted(controller.signal, envelope);
@@ -356,7 +356,7 @@ export class RpcRequests {
       if (error instanceof BridgeProtocolError)
         return respond(envelope, {
           type: "error",
-          error: { code: "INTERNAL", message: "Internal bridge error." },
+          error: internalError,
         });
       return respond(envelope, {
         type: "error",
@@ -377,7 +377,7 @@ export class RpcRequests {
       if (cancelled !== undefined) return cancelled;
       return respond(envelope, {
         type: "error",
-        error: { code: "INTERNAL", message: "Internal bridge error." },
+        error: internalError,
       });
     }
     return respond(envelope, { type: "success", result: output });
