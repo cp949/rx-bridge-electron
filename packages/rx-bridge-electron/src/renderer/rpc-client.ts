@@ -9,19 +9,12 @@ import type { BridgeTransport, CallOptions } from "./transport.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
-export interface RpcClientOptions {
-  readonly defaultTimeoutMs?: number;
-}
-
 function localError(code: string, message: string): RemoteError {
   return new RemoteError(code, message);
 }
 
-function readTimeout(
-  timeoutMs: number | undefined,
-  defaultTimeoutMs: number,
-): number {
-  const timeout = timeoutMs ?? defaultTimeoutMs;
+function readTimeout(timeoutMs: number | undefined): number {
+  const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;
   if (timeout === Number.POSITIVE_INFINITY) {
     return timeout;
   }
@@ -37,21 +30,12 @@ function readTimeout(
 export class RpcClient {
   readonly #transport: BridgeTransport;
   readonly #session: ProtocolEnvelope;
-  readonly #defaultTimeoutMs: number;
   #disposed = false;
   readonly #pending = new Set<() => void>();
 
-  public constructor(
-    transport: BridgeTransport,
-    session: ProtocolEnvelope,
-    options: RpcClientOptions = {},
-  ) {
+  public constructor(transport: BridgeTransport, session: ProtocolEnvelope) {
     this.#transport = transport;
     this.#session = session;
-    this.#defaultTimeoutMs = readTimeout(
-      options.defaultTimeoutMs,
-      DEFAULT_TIMEOUT_MS,
-    );
   }
 
   public call(
@@ -69,7 +53,7 @@ export class RpcClient {
 
     let timeoutMs: number;
     try {
-      timeoutMs = readTimeout(options.timeoutMs, this.#defaultTimeoutMs);
+      timeoutMs = readTimeout(options.timeoutMs);
     } catch (error) {
       return Promise.reject(error);
     }

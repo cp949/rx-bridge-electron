@@ -211,6 +211,31 @@ describe("renderer RPC races", () => {
     await Promise.resolve();
   });
 
+  test("defaults an omitted timeoutMs to 30s: undecided at 29,999ms, DEADLINE_EXCEEDED at 30,000ms, cancelled once", async () => {
+    vi.useFakeTimers();
+    const transport = new FakeTransport();
+    const api = await createRendererApi<AppBridge>(transport);
+
+    const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
+    const requestId = transport.invocations[0]!.requestId;
+    const settlements: string[] = [];
+    const observed = resultPromise.then(
+      () => settlements.push("response"),
+      (error: RemoteError) => settlements.push(error.code),
+    );
+
+    await vi.advanceTimersByTimeAsync(29_999);
+    expect(settlements).toEqual([]);
+    expect(transport.cancellations).toEqual([]);
+
+    await vi.advanceTimersByTimeAsync(1);
+    await observed;
+
+    expect(settlements).toEqual(["DEADLINE_EXCEEDED"]);
+    expect(transport.cancellations).toEqual([requestId]);
+    expect(transport.cancellations.length).toBeLessThanOrEqual(1);
+  });
+
   test("converts validated remote errors and maps malformed responses to INTERNAL", async () => {
     const transport = new FakeTransport();
     const api = await createRendererApi<AppBridge>(transport);

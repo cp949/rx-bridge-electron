@@ -1,4 +1,3 @@
-import type { PublicManifest } from "../contract/index.js";
 import type {
   HandshakeResponse,
   RendererRpcRequest,
@@ -22,11 +21,6 @@ export interface BridgeTransport {
   control(command: RendererStreamCommand): void;
   onStreamMessage(listener: (message: StreamMessage) => void): () => void;
 }
-
-/** The concrete handshake shape supplied by preload at runtime. */
-export type HandshakeWithManifest = HandshakeResponse & {
-  readonly manifest: PublicManifest;
-};
 
 export interface CallOptions {
   readonly signal?: AbortSignal;

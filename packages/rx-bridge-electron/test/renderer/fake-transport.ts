@@ -1,8 +1,6 @@
+import type { BridgeTransport } from "../../src/renderer/index.js";
 import type {
-  BridgeTransport,
-  HandshakeWithManifest,
-} from "../../src/renderer/index.js";
-import type {
+  HandshakeResponse,
   RendererRpcRequest,
   RendererStreamCommand,
   RpcResponse,
@@ -31,7 +29,7 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const defaultHandshake: HandshakeWithManifest = {
+const defaultHandshake: HandshakeResponse = {
   protocolVersion: 1,
   clientId: "client-1",
   manifest: {
