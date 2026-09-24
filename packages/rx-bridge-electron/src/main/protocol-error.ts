@@ -1,4 +1,4 @@
-import type { RpcResponse } from "../protocol/index.js";
+import { withEnvelope, type RpcResponse } from "../protocol/index.js";
 
 /**
  * 파싱조차 실패한 `value`에서 `clientId`·`requestId`를 최대한 복구해 에러
@@ -18,13 +18,11 @@ export function protocolError(
     typeof clientValue === "string" ? clientValue : "invalid-client";
   const requestId =
     typeof requestValue === "string" ? requestValue : "invalid-request";
-  return {
-    protocolVersion: 1,
-    clientId,
+  return withEnvelope(clientId, {
     requestId,
-    type: "error",
+    type: "error" as const,
     error: { code, message },
-  };
+  });
 }
 
 /** envelope parse·admission 거부 공통 응답(`INVALID_ARGUMENT "Invalid bridge request."`). */

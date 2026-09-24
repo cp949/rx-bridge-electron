@@ -16,9 +16,20 @@ export type TransportErrorCode =
   | "VERSION_MISMATCH"
   | "INTERNAL";
 
+/** envelope의 protocol version 값. 와이어 형식의 단일 정의 지점(protocol). */
+export const PROTOCOL_VERSION = 1 as const;
+
 export interface ProtocolEnvelope {
-  readonly protocolVersion: 1;
+  readonly protocolVersion: typeof PROTOCOL_VERSION;
   readonly clientId: string;
+}
+
+/** `protocolVersion`·`clientId`를 채운 envelope에 `body`를 합친다. */
+export function withEnvelope<T extends object>(
+  clientId: string,
+  body: T,
+): ProtocolEnvelope & T {
+  return { protocolVersion: PROTOCOL_VERSION, clientId, ...body };
 }
 
 export type HandshakeRequest = ProtocolEnvelope;
@@ -153,7 +164,7 @@ function readSequence(record: RecordValue): number {
 
 function readEnvelope(record: RecordValue): ProtocolEnvelope {
   const protocolVersion = record.protocolVersion;
-  if (protocolVersion !== 1) {
+  if (protocolVersion !== PROTOCOL_VERSION) {
     if (typeof protocolVersion === "number") {
       throw new BridgeProtocolError(
         "VERSION_MISMATCH",

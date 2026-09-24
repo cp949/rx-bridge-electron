@@ -12,6 +12,7 @@ import {
   parseRendererStreamCommand,
   parseRpcResponse,
   parseStreamMessage,
+  withEnvelope,
   type HandshakeResponse,
   type RendererRpcRequest,
   type RendererStreamCommand,
@@ -76,37 +77,28 @@ export function exposeBridgeInMainWorld(
   const transport: BridgeTransport = Object.freeze({
     async connect(): Promise<HandshakeResponse> {
       return parseHandshakeResponse(
-        await ipcRenderer.invoke(channels.handshake, {
-          protocolVersion: 1,
-          clientId,
-        }),
+        await ipcRenderer.invoke(
+          channels.handshake,
+          withEnvelope(clientId, {}),
+        ),
         limits,
       );
     },
     async invoke(request: RendererRpcRequest): Promise<RpcResponse> {
       const parsed = parseRendererRpcRequest(request, limits);
       return parseRpcResponse(
-        await ipcRenderer.invoke(channels.rpc, {
-          ...parsed,
-          protocolVersion: 1,
-          clientId,
-        }),
+        await ipcRenderer.invoke(channels.rpc, withEnvelope(clientId, parsed)),
         limits,
       );
     },
     cancel(requestId: string): void {
-      ipcRenderer.send(channels.cancel, {
-        protocolVersion: 1,
-        clientId,
-        requestId,
-      });
+      ipcRenderer.send(channels.cancel, withEnvelope(clientId, { requestId }));
     },
     control(command: RendererStreamCommand): void {
-      ipcRenderer.send(channels.control, {
-        ...parseRendererStreamCommand(command, limits),
-        protocolVersion: 1,
-        clientId,
-      });
+      ipcRenderer.send(
+        channels.control,
+        withEnvelope(clientId, parseRendererStreamCommand(command, limits)),
+      );
     },
     onStreamMessage(listener: (message: StreamMessage) => void): () => void {
       const wrapped = (_event: IpcRendererEvent, value: unknown) => {

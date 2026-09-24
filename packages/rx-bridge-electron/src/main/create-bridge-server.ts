@@ -13,6 +13,7 @@ import {
   parseWireCancelRequest,
   parseWireRpcRequest,
   parseWireStreamCommand,
+  withEnvelope,
   type HandshakeResponse,
   type PayloadLimits,
   type RpcResponse,
@@ -200,7 +201,7 @@ function buildBridgeServer(
         reject(admission.reason);
         return invalidRequest(value);
       }
-      return { protocolVersion: 1, clientId: envelope.clientId, manifest };
+      return withEnvelope(envelope.clientId, { manifest });
     },
     attach(target: AttachedTarget): () => void {
       return sessions.attach(target);

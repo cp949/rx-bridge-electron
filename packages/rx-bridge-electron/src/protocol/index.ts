@@ -15,6 +15,8 @@ export {
   parseWireCancelRequest,
   parseWireRpcRequest,
   parseWireStreamCommand,
+  withEnvelope,
+  PROTOCOL_VERSION,
   type HandshakeRequest,
   type HandshakeResponse,
   type HandshakeManifest,

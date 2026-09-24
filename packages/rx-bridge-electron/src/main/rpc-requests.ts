@@ -1,6 +1,7 @@
 import {
   BridgeProtocolError,
   parseBridgeValue,
+  withEnvelope,
   type BridgeValue,
   type PayloadLimits,
   type RpcResponse,
@@ -36,12 +37,10 @@ type RpcResponseBody =
 
 /** 요청 envelope의 `clientId`·`requestId`를 붙여 응답을 만든다. */
 function respond(envelope: WireRpcRequest, body: RpcResponseBody): RpcResponse {
-  return {
-    protocolVersion: 1,
-    clientId: envelope.clientId,
+  return withEnvelope(envelope.clientId, {
     requestId: envelope.requestId,
     ...body,
-  } as RpcResponse;
+  });
 }
 
 /**

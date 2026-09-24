@@ -2,6 +2,7 @@ import { Observable, Subscriber, type Subscription } from "rxjs";
 
 import {
   parseOpaqueIdSequence,
+  withEnvelope,
   type BridgeValue,
   type PayloadLimits,
   type RpcErrorPayload,
@@ -416,22 +417,22 @@ export class Subscriptions {
   ): void {
     if (sessionSignal.aborted) return;
     try {
-      send({
-        protocolVersion: 1,
-        clientId: command.clientId,
-        subscriptionId: command.subscriptionId,
-        type: "subscribed",
-        sequence: 0,
-      });
+      send(
+        withEnvelope(command.clientId, {
+          subscriptionId: command.subscriptionId,
+          type: "subscribed" as const,
+          sequence: 0,
+        }),
+      );
       if (sessionSignal.aborted) return;
-      send({
-        protocolVersion: 1,
-        clientId: command.clientId,
-        subscriptionId: command.subscriptionId,
-        type: "error",
-        sequence: 1,
-        error,
-      });
+      send(
+        withEnvelope(command.clientId, {
+          subscriptionId: command.subscriptionId,
+          type: "error" as const,
+          sequence: 1,
+          error,
+        }),
+      );
     } catch {
       // A closed renderer route has no subscriber to notify.
     }
@@ -596,12 +597,12 @@ export class Subscriptions {
         },
   ): void {
     try {
-      consumer.send({
-        protocolVersion: 1,
-        clientId: consumer.clientId,
-        subscriptionId: consumer.subscriptionId,
-        ...message,
-      } as StreamMessage);
+      consumer.send(
+        withEnvelope(consumer.clientId, {
+          subscriptionId: consumer.subscriptionId,
+          ...message,
+        }),
+      );
     } catch {
       this.#close(consumer);
     }
