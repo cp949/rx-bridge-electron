@@ -172,7 +172,8 @@ describe("Main RPC dispatch", () => {
     // input은 server의 envelope parse(관대한 한도)는 통과하지만 이 파일의
     // 좁은 contract 한도(maxDepth: 3)에서는 걸리는 깊이다. authorize가 먼저
     // FORBIDDEN을 내면 스키마 단계(payload 한도 포함)에 닿지 않는다는 걸
-    // 증명한다 — 순서가 바뀌면 이 값이 INVALID_ARGUMENT를 냈을 것이다(F1).
+    // 증명한다 — 순서가 바뀌면 이 값이 INVALID_ARGUMENT를 낸다. Symbol 같은 구조
+    // 오류 input은 envelope parse에서 먼저 걸려 이 순서를 관측할 수 없다(ADR 0016).
     const authorize = vi.fn(() => false);
     const { handler, server } = setup(vi.fn(), authorize);
     await expect(

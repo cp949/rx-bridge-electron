@@ -45,7 +45,7 @@ test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `w
 
 parse 실패는 `classifyParseFailure` 하나로 분류한다: `BridgeProtocolError`이고 `code === "VERSION_MISMATCH"`면 `version-mismatch`, 그 외 모든 throw는 `malformed-envelope`. 기록은 요청당 1회다. `protocolVersion !== 1`을 직접 비교하던 server 안 옛 분기(도달 불가였던 코드) 2곳은 삭제한다 — parse가 이제 그 판정을 대신한다.
 
-Electron 어댑터(`electron-adapter.ts`)에서 삭제한 것: `parseHandshakeRequest`/`parseWireRpcRequest`/`parseWireCancelRequest`/`parseWireStreamCommand` import와 채널별 parse try/catch, handshake의 `identity.isMainFrame`·`options.allowedOrigins.includes` 검사, envelope 한도 상수, `recordRejection`과 `recordAdapterRejection` import(결정 3에서 그 이유를 다룬다). 남긴 것: `senderIdentity`(Electron event → `SenderIdentity` 번역), `targetFor`(attach 시점의 `isCurrentMainFrame`/`isAllowedOrigin`/`onLifecycle` 조립), 채널 등록·해제, `streamSender`. 각 handler는 `server.<method>(senderIdentity(event), value)`를 그대로 호출하고, server가 던지면(구현이 항상 응답을 반환하는 계약이므로 정상 경로에서는 도달하지 않는 방어용 fallback) invoke 채널(handshake·rpc)은 `protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.")`를 반환하고 send 채널(cancel·control)은 조용히 무시한다.
+Electron 어댑터(`electron-adapter.ts`)에서 삭제한 것: `parseHandshakeRequest`/`parseWireRpcRequest`/`parseWireCancelRequest`/`parseWireStreamCommand` import와 채널별 parse try/catch, handshake의 `identity.isMainFrame`·`options.allowedOrigins.includes` 검사, envelope 한도 상수, `recordRejection`과 `recordAdapterRejection` import(이유는 위 "상황"의 Symbol 통로 문단). 남긴 것: `senderIdentity`(Electron event → `SenderIdentity` 번역), `targetFor`(attach 시점의 `isCurrentMainFrame`/`isAllowedOrigin`/`onLifecycle` 조립), 채널 등록·해제, `streamSender`. 각 handler는 `server.<method>(senderIdentity(event), value)`를 그대로 호출하고, server가 던지면(구현이 항상 응답을 반환하는 계약이므로 정상 경로에서는 도달하지 않는 방어용 fallback) invoke 채널(handshake·rpc)은 `protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.")`를 반환하고 send 채널(cancel·control)은 조용히 무시한다.
 
 ## 결정 3: wire 응답 모양은 채널별로 고정하고, 사유는 진단에만 싣는다
 
@@ -61,7 +61,7 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 
 ## 대안과 기각 사유
 
-- **parse는 adapter에 두고 `VERSION_MISMATCH`만 server로 구분**: server의 `protocolVersion !== 1` 분기를 살리고 adapter가 version 불일치만 별도로 넘기는 안. Symbol 통로가 그대로 남고, 구조 오류(F1)와 version 오류가 다시 두 곳에서 판정돼 사유 불일치 문제의 일부만 해결한다. 기각.
+- **parse는 adapter에 두고 `VERSION_MISMATCH`만 server로 구분**: server의 `protocolVersion !== 1` 분기를 살리고 adapter가 version 불일치만 별도로 넘기는 안. Symbol 통로가 그대로 남고, 구조 오류와 version 오류가 다시 두 곳에서 판정돼 사유 불일치 문제의 일부만 해결한다. 기각.
 - **`bindElectronBridge`가 sink를 직접 받는다**: adapter가 자체 판정(`frame-not-main`/`origin-not-allowed`)을 유지한 채 sink를 직접 받아 기록하는 안. sink 설정 지점이 `createBridgeServer`와 `bindElectronBridge` 두 곳으로 늘어나고, 두 지점이 같은 요청에 각자 `rejected`를 기록하지 않도록 조율하는 부담이 남는다(ADR 0010 §15 "중복 방지"가 이미 이 문제를 다뤘다). 판정을 server 하나로 모으면 이 조율 자체가 필요 없어진다. 기각.
 - **사유 통합(`sender-unauthorized` 하나로 유지)**: 채널 무관 통일은 하되 세분화는 하지 않는 안. frame 불일치와 origin 불일치를 구분하지 못해 진단이 지금과 같은 정보 손실을 유지한다. 기각.
 - **사유 세분화(`RejectReason` enum 확장)**: `frame-not-main`/`origin-not-allowed`보다 더 세분화된 사유(예: subframe과 stale main frame을 구분)를 추가하는 안. `RejectReason`을 다루는 기존 망라 switch(sink 구현체)가 모두 새 케이스를 처리해야 하는 breaking 변경이 되고, 이번 작업의 목표(채널 무관 통일)를 넘어선다. 기각.
@@ -70,7 +70,7 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 
 ## 한계
 
-- retire된 문서가 뒤늦게 보내는 cancel·acknowledge는 `sender-unauthorized`를 계속 남긴다(결정 4) — 이 사유만으로는 "정상적인 지연 도착"과 "실제 오탐 시도"를 구분할 수 없다.
+- retire된 문서가 뒤늦게 보내는 cancel·acknowledge는 거부 진단을 남긴다(결정 4). main frame이 그대로면 `sender-unauthorized`, main frame이 교체된 뒤 도착하면(옛 frame의 `routingId`가 현재 main frame과 다르거나 `senderFrame`이 `null`) `frame-not-main`이다 — 이 사유만으로는 "정상적인 지연 도착"과 "실제 오탐 시도"를 구분할 수 없다.
 - 미attach `webContents`가 보낸 handshake는 origin을 판정하지 않는다(`#admit`이 attachment 없음에서 먼저 `sender-unauthorized`로 반환하므로 3·4번 검사에 도달하지 않는다). 관측 가능한 변화: 이전에는 미attach + disallowed origin인 handshake가 `origin-not-allowed`였지만(adapter가 attach 여부와 무관하게 origin부터 봤다), 이제는 `sender-unauthorized`다.
 - `#admit`이 판정하는 "현재 main frame"은 `AttachedTarget.isCurrentMainFrame`의 구현(adapter의 `targetFor`)에 전적으로 의존한다. 이 ADR은 판정 호출 위치만 통일했을 뿐, [ADR 0015](0015-rpc-request-lifecycle.md)가 이미 기록한 "`did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스" 가설은 그대로 남는다.
 

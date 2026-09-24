@@ -26,3 +26,8 @@ export function protocolError(
     error: { code, message },
   };
 }
+
+/** envelope parse·admission 거부 공통 응답(`INVALID_ARGUMENT "Invalid bridge request."`). */
+export function invalidRequest(value: unknown): RpcResponse {
+  return protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.");
+}

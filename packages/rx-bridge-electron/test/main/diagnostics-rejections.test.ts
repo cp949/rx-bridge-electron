@@ -368,9 +368,9 @@ describe("rejected diagnostic reasons", () => {
   });
 
   test("RPC malformed-envelope for a structural error, not payload-too-large", async () => {
-    // server가 envelope parse(input 포함)를 admission보다 먼저 하므로(결정 7),
-    // 구조 오류 input은 등록 조회 전에 malformed-envelope로 거부된다(key 없음,
-    // checklist F1).
+    // server가 envelope parse(input 포함)를 admission보다 먼저 하므로, 구조 오류
+    // input은 등록 조회 전에 malformed-envelope로 거부된다(key 없음, ADR 0016
+    // "이전").
     const { server, diagnostics } = setup({});
     await server.dispatchRpc(
       sender(),
@@ -603,8 +603,7 @@ describe.each([
 // frame 교체(같은 webContentsId, 다른 frameId — 예: 페이지 탐색)를
 // characterization으로 고정한다. 옛 clientId는 탐색으로 즉시 retire되어
 // 그 자체로 거부되므로, frame 검사만 관측하려면 새 clientId를 써야 한다.
-// DELTA-02에서 frame 불일치가 `frame-not-main`으로 분리됐다(DELTA-01
-// 시점에는 `sender-unauthorized`였다).
+// frame 불일치는 `frame-not-main`이다(ADR 0016 이전에는 `sender-unauthorized`).
 describe("frame replacement (characterization)", () => {
   test("frame 교체 뒤 옛 frameId로 새 clientId를 보내면 거부된다", async () => {
     const handler = vi.fn(async (input: { readonly id: string }) => input);

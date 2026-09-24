@@ -412,7 +412,7 @@ describe("Electron adapter rejection diagnostics", () => {
     });
   });
 
-  // DELTA-03: envelope parse(version 포함)를 server가 소유한다. IPC 경로에서
+  // envelope parse(version 포함)는 server가 소유한다(ADR 0016). IPC 경로에서
   // version-mismatch·frame-not-main이 채널과 무관하게 기록되는지 확인한다.
   test("RPC version-mismatch: wire response is VERSION_MISMATCH and the reason is recorded", async () => {
     const ipcMain = new FakeIpcMain();
@@ -522,7 +522,7 @@ describe("Electron adapter rejection diagnostics", () => {
   });
 });
 
-describe("StreamBridgeServer.handshake direct calls (DELTA-03)", () => {
+describe("StreamBridgeServer.handshake direct calls", () => {
   test("success returns a HandshakeResponse (no 'type' field)", () => {
     const server = createBridgeServer(waitImpl);
     server.attach(new FakeTarget());
@@ -552,7 +552,8 @@ describe("StreamBridgeServer.handshake direct calls (DELTA-03)", () => {
   });
 
   test("structural error input is malformed-envelope, not thrown", () => {
-    const server = createBridgeServer(waitImpl);
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const server = createBridgeServer(waitImpl, { diagnostics });
     server.attach(new FakeTarget());
     const response = server.handshake(sender(), {
       protocolVersion: 1,
@@ -562,6 +563,9 @@ describe("StreamBridgeServer.handshake direct calls (DELTA-03)", () => {
       type: "error",
       error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
     });
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "malformed-envelope" },
+    ]);
   });
 });
 

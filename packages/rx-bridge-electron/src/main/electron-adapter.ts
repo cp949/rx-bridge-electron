@@ -15,7 +15,7 @@ import * as electron from "electron";
 import { BridgeProtocolError, type StreamMessage } from "../protocol/index.js";
 import type { StreamSender } from "./subscriptions.js";
 import type { StreamBridgeServer } from "./create-bridge-server.js";
-import { protocolError } from "./protocol-error.js";
+import { invalidRequest } from "./protocol-error.js";
 import type { AttachedTarget, SenderIdentity } from "./types.js";
 
 export interface ElectronBridgeChannels {
@@ -144,22 +144,14 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
     try {
       return options.server.handshake(senderIdentity(event), value);
     } catch {
-      return protocolError(
-        value,
-        "INVALID_ARGUMENT",
-        "Invalid bridge request.",
-      );
+      return invalidRequest(value);
     }
   });
   ipcMain.handle(channels.rpc, async (event, value: unknown) => {
     try {
       return await options.server.dispatchRpc(senderIdentity(event), value);
     } catch {
-      return protocolError(
-        value,
-        "INVALID_ARGUMENT",
-        "Invalid bridge request.",
-      );
+      return invalidRequest(value);
     }
   });
   const onCancel = (event: IpcMainEvent, value: unknown) => {

@@ -18,7 +18,7 @@ import {
   type RpcResponse,
 } from "../protocol/index.js";
 import { recordDiagnostic } from "./diagnostics.js";
-import { protocolError } from "./protocol-error.js";
+import { invalidRequest, protocolError } from "./protocol-error.js";
 import { RpcRequests } from "./rpc-requests.js";
 import { DocumentSessions } from "./document-sessions.js";
 import {
@@ -49,9 +49,9 @@ const defaultLimits: PayloadLimits = {
 };
 
 /**
- * envelope parse(version 포함) 단계의 한도. 옛 adapter가 쓰던 값과 같다
- * (P4) — `options.payloadLimits`(contract 단계)와는 별개다. 여기서
- * `payload-too-large`가 나면 안 되므로 넉넉하게 둔다.
+ * envelope parse(version 포함) 단계의 한도. 옛 adapter가 쓰던 값과 같다 —
+ * `options.payloadLimits`(contract 단계)와는 별개다. 여기서
+ * `payload-too-large`가 나면 안 되므로 넉넉하게 둔다(ADR 0016 결정 2).
  */
 const envelopeLimits: PayloadLimits = {
   maxDepth: Number.MAX_SAFE_INTEGER,
@@ -62,7 +62,7 @@ const envelopeLimits: PayloadLimits = {
 /**
  * envelope parse 실패를 사유로 분류한다. `BridgeProtocolError`이고
  * `VERSION_MISMATCH`면 `version-mismatch`, 그 외 모든 throw는
- * `malformed-envelope`다(결정 6·7).
+ * `malformed-envelope`다(ADR 0016 결정 2).
  */
 function classifyParseFailure(
   error: unknown,
@@ -183,17 +183,6 @@ function buildBridgeServer(
     options.diagnostics,
     options.authorize,
   );
-  const error = (
-    envelope: { readonly clientId: string; readonly requestId: string },
-    code: string,
-    message: string,
-  ): RpcResponse => ({
-    protocolVersion: 1,
-    clientId: envelope.clientId,
-    requestId: envelope.requestId,
-    type: "error",
-    error: { code, message },
-  });
   const reject = (reason: RejectReason): void => {
     recordDiagnostic(options.diagnostics, { type: "rejected", reason });
   };
@@ -204,20 +193,12 @@ function buildBridgeServer(
         envelope = parseHandshakeRequest(value, envelopeLimits);
       } catch (cause) {
         reject(classifyParseFailure(cause));
-        return protocolError(
-          value,
-          "INVALID_ARGUMENT",
-          "Invalid bridge request.",
-        );
+        return invalidRequest(value);
       }
       const admission = sessions.establish(sender, envelope.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
-        return protocolError(
-          value,
-          "INVALID_ARGUMENT",
-          "Invalid bridge request.",
-        );
+        return invalidRequest(value);
       }
       return { protocolVersion: 1, clientId: envelope.clientId, manifest };
     },
@@ -240,12 +221,16 @@ function buildBridgeServer(
               "VERSION_MISMATCH",
               "Unsupported protocol version.",
             )
-          : protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.");
+          : invalidRequest(value);
       }
       const admission = sessions.establish(sender, envelope.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
-        return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
+        return protocolError(
+          envelope,
+          "FORBIDDEN",
+          "Bridge sender is not authorized.",
+        );
       }
       return rpcRequests.dispatch(admission.session, sender, envelope);
     },
