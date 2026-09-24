@@ -192,65 +192,32 @@ interface RendererServices {
   readonly streams: StreamMultiplexer;
 }
 
-function createProxy(
+/**
+ * manifest 노드를 null-prototype 객체로 만든다. 하위 노드는 동결하고, 루트는
+ * 호출자가 `dispose`를 붙인 뒤 동결한다. leaf(RPC 함수·
+ * `RemoteState`·Event `Observable`)는 생성 부작용이 없어 즉시 만들고, 구독은
+ * 사용자가 `subscribe`할 때 시작된다. manifest에 없는 경로는 속성이 없어
+ * `undefined`다. `then`은 예약어라 manifest에 올 수 없다 — `await api`가 안전하다.
+ */
+function buildApiNode(
   manifestNode: ManifestNode,
   services: RendererServices,
-  dispose?: () => void,
-): object {
-  const nested = new Map<string, unknown>();
-
-  return new Proxy(Object.create(null) as object, {
-    get: (_target, property) => {
-      if (
-        dispose !== undefined &&
-        (property === Symbol.dispose || property === "dispose")
-      ) {
-        return dispose;
-      }
-      if (property === "then") {
-        return undefined;
-      }
-      if (typeof property !== "string") {
-        return undefined;
-      }
-      const child = manifestNode.children.get(property);
-      if (child === undefined) {
-        return undefined;
-      }
-      const cached = nested.get(property);
-      if (cached !== undefined) {
-        return cached;
-      }
-      const value =
-        child.leaf?.category === "rpc"
+): Record<string, unknown> {
+  const node = Object.create(null) as Record<string, unknown>;
+  for (const [segment, child] of manifestNode.children) {
+    const leaf = child.leaf;
+    const value =
+      leaf === undefined
+        ? Object.freeze(buildApiNode(child, services))
+        : leaf.category === "rpc"
           ? (input: BridgeValue = undefined, options?: CallOptions) =>
-              services.rpcClient.call(child.leaf!.key, input, options)
-          : child.leaf?.category === "state"
-            ? createRemoteState(services.streams, child.leaf.key)
-            : child.leaf?.category === "event"
-              ? createRemoteEvent(services.streams, child.leaf.key)
-              : child.leaf === undefined
-                ? createProxy(child, services)
-                : undefined;
-      if (value !== undefined) {
-        nested.set(property, value);
-      }
-      return value;
-    },
-    has: (_target, property) =>
-      (dispose !== undefined && property === "dispose") ||
-      (typeof property === "string" && manifestNode.children.has(property)),
-    ownKeys: () => [...manifestNode.children.keys()],
-    getOwnPropertyDescriptor: (_target, property) =>
-      dispose !== undefined && property === "dispose"
-        ? { configurable: true, enumerable: false }
-        : typeof property === "string" && manifestNode.children.has(property)
-          ? { configurable: true, enumerable: true }
-          : undefined,
-    set: () => false,
-    defineProperty: () => false,
-    deleteProperty: () => false,
-  });
+              services.rpcClient.call(leaf.key, input, options)
+          : leaf.category === "state"
+            ? createRemoteState(services.streams, leaf.key)
+            : createRemoteEvent(services.streams, leaf.key);
+    Object.defineProperty(node, segment, { value, enumerable: true });
+  }
+  return node;
 }
 
 function isBridgeTransport(value: unknown): value is BridgeTransport {
@@ -300,8 +267,13 @@ export async function createRendererApi<B>(
   const handshake = parseHandshake(response);
   const rpcClient = new RpcClient(resolvedTransport, handshake.session);
   const streams = new StreamMultiplexer(resolvedTransport, handshake.session);
-  return createProxy(handshake.tree, { rpcClient, streams }, () => {
+  const api = buildApiNode(handshake.tree, { rpcClient, streams });
+  const dispose = (): void => {
     rpcClient.dispose();
     streams[Symbol.dispose]();
-  }) as RendererApi<B>;
+  };
+  // 루트 `dispose`는 도메인 이름으로 예약돼 manifest 경로와 겹치지 않는다.
+  Object.defineProperty(api, "dispose", { value: dispose });
+  Object.defineProperty(api, Symbol.dispose, { value: dispose });
+  return Object.freeze(api) as unknown as RendererApi<B>;
 }

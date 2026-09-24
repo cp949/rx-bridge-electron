@@ -419,3 +419,127 @@ test("public runtime export surface is sealed to createRendererApi, createOpaque
     "createRendererApi",
   ]);
 });
+
+describe("Renderer API object tree", () => {
+  interface TreeBridge {
+    readonly hardware: {
+      readonly rpc: { connect(): string };
+      readonly state: { readonly status: string };
+      readonly event: { readonly change: number };
+      readonly serial: { readonly rpc: { open(): string } };
+    };
+  }
+
+  async function treeApi(): Promise<{
+    readonly api: RendererApi<TreeBridge>;
+    readonly transport: FakeTransport;
+  }> {
+    const transport = new FakeTransport();
+    transport.handshake = Promise.resolve({
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: {
+        rpc: ["rpc:hardware/connect", "rpc:hardware/serial/open"],
+        state: ["state:hardware/status"],
+        event: ["event:hardware/change"],
+      },
+    });
+    return { api: await createRendererApi<TreeBridge>(transport), transport };
+  }
+
+  test("returns the same reference for every access to the same path", async () => {
+    const { api } = await treeApi();
+
+    expect(api.hardware).toBe(api.hardware);
+    expect(api.hardware.rpc).toBe(api.hardware.rpc);
+    expect(api.hardware.rpc.connect).toBe(api.hardware.rpc.connect);
+    expect(api.hardware.state.status).toBe(api.hardware.state.status);
+    expect(api.hardware.event.change).toBe(api.hardware.event.change);
+    expect(api.hardware.serial.rpc.open).toBe(api.hardware.serial.rpc.open);
+  });
+
+  test("is not thenable, so awaiting it resolves to the API itself", async () => {
+    const { api } = await treeApi();
+
+    expect(await Promise.resolve(api)).toBe(api);
+    expect(await Promise.resolve(api.hardware)).toBe(api.hardware);
+  });
+
+  test("rejects assignment and deletion without changing any path", async () => {
+    const { api } = await treeApi();
+    const connect = api.hardware.rpc.connect;
+    const writable = api as unknown as Record<string, unknown>;
+    const rpc = api.hardware.rpc as unknown as Record<string, unknown>;
+
+    expect(() => {
+      writable.hardware = {};
+    }).toThrow(TypeError);
+    expect(() => {
+      writable.extra = 1;
+    }).toThrow(TypeError);
+    expect(() => {
+      delete rpc.connect;
+    }).toThrow(TypeError);
+    expect(() => {
+      writable.dispose = () => {};
+    }).toThrow(TypeError);
+    expect(api.hardware.rpc.connect).toBe(connect);
+    expect(writable.extra).toBeUndefined();
+  });
+
+  test("answers undefined for undeclared paths and Object.prototype members", async () => {
+    const { api } = await treeApi();
+    const loose = api.hardware as unknown as Record<string, unknown>;
+
+    expect(loose.missing).toBeUndefined();
+    expect(loose.toString).toBeUndefined();
+    expect(loose.hasOwnProperty).toBeUndefined();
+    expect((api as unknown as Record<string, unknown>).then).toBeUndefined();
+  });
+
+  test("freezes every node on a null prototype", async () => {
+    const { api } = await treeApi();
+
+    for (const node of [
+      api,
+      api.hardware,
+      api.hardware.rpc,
+      api.hardware.state,
+      api.hardware.event,
+      api.hardware.serial,
+      api.hardware.serial.rpc,
+    ]) {
+      expect(Object.isFrozen(node)).toBe(true);
+      expect(Object.getPrototypeOf(node)).toBeNull();
+    }
+  });
+
+  test("reports Symbol.dispose through the in operator", async () => {
+    const { api } = await treeApi();
+
+    expect(Symbol.dispose in api).toBe(true);
+    expect(Symbol.dispose in api.hardware).toBe(false);
+  });
+
+  test("describes each path with a data descriptor holding its value", async () => {
+    const { api } = await treeApi();
+
+    expect(
+      Object.getOwnPropertyDescriptor(api.hardware.rpc, "connect"),
+    ).toEqual({
+      value: api.hardware.rpc.connect,
+      writable: false,
+      enumerable: true,
+      configurable: false,
+    });
+    expect(Object.getOwnPropertyDescriptor(api, "dispose")).toEqual({
+      value: api.dispose,
+      writable: false,
+      enumerable: false,
+      configurable: false,
+    });
+    expect(
+      Object.getOwnPropertyDescriptor(api.hardware, "missing"),
+    ).toBeUndefined();
+  });
+});
