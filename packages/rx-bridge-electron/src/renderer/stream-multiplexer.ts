@@ -5,6 +5,7 @@ import {
   type RpcErrorPayload,
   type StreamMessage,
 } from "../protocol/index.js";
+import type { ApiLifetime } from "./api-lifetime.js";
 import {
   recordRendererDiagnostic,
   type RendererDiagnosticsSink,
@@ -30,29 +31,27 @@ function remoteError(payload: RpcErrorPayload): RemoteError {
   return new RemoteError(payload.code, payload.message, payload.details);
 }
 
-export class StreamMultiplexer implements Disposable {
+export class StreamMultiplexer {
   readonly #transport: BridgeTransport;
   readonly #session: ProtocolEnvelope;
   readonly #diagnostics: RendererDiagnosticsSink | undefined;
+  readonly #lifetime: ApiLifetime;
   readonly #generations = new Map<string, StreamGeneration>();
   readonly #removeListener: () => void;
-  #disposed = false;
 
   public constructor(
     transport: BridgeTransport,
     session: ProtocolEnvelope,
+    lifetime: ApiLifetime,
     diagnostics?: RendererDiagnosticsSink,
   ) {
     this.#transport = transport;
     this.#session = session;
+    this.#lifetime = lifetime;
     this.#diagnostics = diagnostics;
     this.#removeListener = transport.onStreamMessage((message) => {
       this.#dispatch(message);
     });
-  }
-
-  public get disposed(): boolean {
-    return this.#disposed;
   }
 
   // 종료 여부는 호출자(`LocalGeneration.subscribe`)가 먼저 확인한다. 종료 뒤
@@ -75,8 +74,8 @@ export class StreamMultiplexer implements Disposable {
       type: "subscription-opened",
       key,
     });
-    // sink가 `dispose`를 재진입시켰으면 generation은 이미 닫혔다(unsubscribe
-    // 전송 완료). 여기서 subscribe를 보내면 Main 구독이 남는다.
+    // sink가 수명 객체 종료를 재진입시켰으면 generation은 이미 닫혔다
+    // (unsubscribe 전송 완료). 여기서 subscribe를 보내면 Main 구독이 남는다.
     if (this.#generations.get(subscriptionId) !== generation) {
       return;
     }
@@ -98,7 +97,7 @@ export class StreamMultiplexer implements Disposable {
 
   public close(subscriptionId: string): void {
     const generation = this.#generations.get(subscriptionId);
-    if (generation === undefined || this.#disposed) {
+    if (generation === undefined || this.#lifetime.disposed) {
       return;
     }
     this.#generations.delete(subscriptionId);
@@ -117,11 +116,12 @@ export class StreamMultiplexer implements Disposable {
     }
   }
 
-  public [Symbol.dispose](): void {
-    if (this.#disposed) {
-      return;
-    }
-    this.#disposed = true;
+  /**
+   * 멱등 guard 없이 listener 제거와 generation 정리(진단 기록 → unsubscribe
+   * control 전송 → `handlers.complete()`)만 수행한다. 멱등성은 `ApiLifetime`이
+   * 보장한다.
+   */
+  public closeAll(): void {
     this.#removeListener();
     const generations = [...this.#generations.entries()];
     this.#generations.clear();
@@ -144,7 +144,7 @@ export class StreamMultiplexer implements Disposable {
   }
 
   #dispatch(rawMessage: StreamMessage): void {
-    if (this.#disposed) {
+    if (this.#lifetime.disposed) {
       return;
     }
 

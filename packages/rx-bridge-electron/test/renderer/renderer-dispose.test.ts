@@ -4,6 +4,8 @@ import {
   createRendererApi,
   RemoteError,
   type RendererApi,
+  type RendererDiagnostic,
+  type RendererDiagnosticsSink,
 } from "../../src/renderer/index.js";
 import type {
   RendererStreamCommand,
@@ -34,6 +36,11 @@ type StreamMessageBody = StreamMessage extends infer Message
 type SubscribeCommand = Extract<
   RendererStreamCommand,
   { readonly type: "subscribe" }
+>;
+
+type UnsubscribeCommand = Extract<
+  RendererStreamCommand,
+  { readonly type: "unsubscribe" }
 >;
 
 function bridgeTransport(): FakeTransport {
@@ -78,6 +85,15 @@ function subscriptionIdFor(transport: FakeTransport, key: string): string {
   return command.subscriptionId;
 }
 
+function unsubscribeCommands(
+  commands: readonly RendererStreamCommand[],
+): UnsubscribeCommand[] {
+  return commands.filter(
+    (command): command is UnsubscribeCommand =>
+      command.type === "unsubscribe",
+  );
+}
+
 async function setup(): Promise<{
   readonly transport: FakeTransport;
   readonly api: RendererApi<AppBridge>;
@@ -85,6 +101,48 @@ async function setup(): Promise<{
   const transport = bridgeTransport();
   const api = await createRendererApi<AppBridge>({ transport });
   return { transport, api };
+}
+
+// DELTA-01: dispose() 도중 동기로 실행되는 사용자 코드가 재진입할 수 있는
+// 지점 3개(rpc-settled·subscription-closed·complete) × 재진입 동작 3개
+// (subscribe·rpc·dispose) 매트릭스. ADR 0006 종료 계약("종료 뒤 호출은 항상
+// 동기 CANCELLED, 전송 없음")이 세 지점 전부에서 지켜지는지 고정한다.
+type ReentryPoint = "rpc-settled" | "subscription-closed" | "complete";
+type ReentryAction = "subscribe" | "rpc" | "dispose";
+
+const REENTRY_POINTS: readonly ReentryPoint[] = [
+  "rpc-settled",
+  "subscription-closed",
+  "complete",
+];
+const REENTRY_ACTIONS: readonly ReentryAction[] = [
+  "subscribe",
+  "rpc",
+  "dispose",
+];
+
+const REENTRY_MATRIX: ReadonlyArray<readonly [ReentryPoint, ReentryAction]> =
+  REENTRY_POINTS.flatMap((point) =>
+    REENTRY_ACTIONS.map((action) => [point, action] as const),
+  );
+
+/**
+ * `needle`이 `haystack` 안에서 순서를 유지한 채(다른 원소가 끼어들어도 됨)
+ * 전부 등장하면 참이다. 진단 종류 순서 검증에 쓴다 — 재진입 `rpc` 동작이
+ * 끼워 넣는 여분의 `rpc-settled`가 정확히 어디 끼는지는 강하게 단언하지
+ * 않고, 기준 4건이 이 상대 순서로 나오는지만 본다.
+ */
+function isOrderedSubsequence(
+  needle: readonly string[],
+  haystack: readonly string[],
+): boolean {
+  let index = 0;
+  for (const item of haystack) {
+    if (index < needle.length && item === needle[index]) {
+      index += 1;
+    }
+  }
+  return index === needle.length;
 }
 
 describe("api.dispose() root shutdown", () => {
@@ -408,4 +466,218 @@ describe("api.dispose() root shutdown", () => {
     );
     expect(stateNextCalled).toBe(false);
   });
+
+  test.each(REENTRY_MATRIX)(
+    "재진입 매트릭스: %s 지점에서 %s 재진입은 ADR 0006 종료 계약을 지킨다",
+    async (point, action) => {
+      const transport = bridgeTransport();
+
+      let api!: RendererApi<AppBridge>;
+      let hookFired = false;
+
+      let reentrantSubscribeError: unknown;
+      let reentrantSubscribeControlsDelta = 0;
+      let reentrantSubscribeOpenedDelta = 0;
+      let reentrantSubscribeSnapshotBefore: unknown;
+      let reentrantSubscribeSnapshotAfter: unknown;
+      let reentrantRpcPromise: Promise<unknown> | undefined;
+      let reentrantRpcInvocationsDelta = 0;
+      let reentrantDisposeThrew = false;
+      let reentrantDisposeControlsDelta = 0;
+      let reentrantDisposeCancellationsDelta = 0;
+
+      const sinkEvents: RendererDiagnostic[] = [];
+
+      const countOpened = (key: string): number =>
+        sinkEvents.filter(
+          (event) =>
+            event.type === "subscription-opened" && event.key === key,
+        ).length;
+
+      // 재진입 지점에서 정확히 1회 실행되는 hook 본체. 재진입 동작 축에
+      // 따라 subscribe·rpc·dispose 중 하나를 호출하고 전후 델타를 잰다.
+      const runHook = (): void => {
+        if (action === "subscribe") {
+          const controlsBefore = transport.controls.length;
+          const openedBefore = countOpened("state:hardware/status$");
+          reentrantSubscribeSnapshotBefore =
+            api.hardware.state.status$.snapshot;
+          let error: unknown;
+          api.hardware.state.status$.subscribe({
+            error: (caught) => {
+              error = caught;
+            },
+          });
+          reentrantSubscribeError = error;
+          reentrantSubscribeControlsDelta =
+            transport.controls.length - controlsBefore;
+          reentrantSubscribeOpenedDelta =
+            countOpened("state:hardware/status$") - openedBefore;
+          reentrantSubscribeSnapshotAfter =
+            api.hardware.state.status$.snapshot;
+        } else if (action === "rpc") {
+          const invocationsBefore = transport.invocations.length;
+          reentrantRpcPromise = api.hardware.rpc.connect();
+          reentrantRpcInvocationsDelta =
+            transport.invocations.length - invocationsBefore;
+        } else {
+          const controlsBefore = transport.controls.length;
+          const cancellationsBefore = transport.cancellations.length;
+          try {
+            api.dispose();
+          } catch {
+            reentrantDisposeThrew = true;
+          }
+          reentrantDisposeControlsDelta =
+            transport.controls.length - controlsBefore;
+          reentrantDisposeCancellationsDelta =
+            transport.cancellations.length - cancellationsBefore;
+        }
+      };
+
+      // hook 자신이 만드는 새 진단(예: 재진입 rpc의 rpc-settled)이 hook을
+      // 다시 부르지 않도록 guard flag로 1회만 실행한다.
+      const fireHookOnce = (): void => {
+        if (hookFired) {
+          return;
+        }
+        hookFired = true;
+        runHook();
+      };
+
+      const sink: RendererDiagnosticsSink = {
+        record(event: RendererDiagnostic): void {
+          sinkEvents.push(event);
+          if (
+            point === "rpc-settled" &&
+            event.type === "rpc-settled" &&
+            event.cause === "disposed"
+          ) {
+            fireHookOnce();
+          } else if (
+            point === "subscription-closed" &&
+            event.type === "subscription-closed" &&
+            event.cause === "disposed"
+          ) {
+            fireHookOnce();
+          }
+        },
+      };
+
+      api = await createRendererApi<AppBridge>({
+        transport,
+        diagnostics: sink,
+      });
+
+      const rpcPromise1 = api.hardware.rpc.connect();
+      const invocation1 = transport.invocations[0]!;
+      const rpcPromise2 = api.hardware.rpc.connect();
+      const invocation2 = transport.invocations[1]!;
+
+      let stateCompleted = 0;
+      api.hardware.state.status$.subscribe({
+        error: () => {},
+        complete: () => {
+          stateCompleted += 1;
+          if (point === "complete") {
+            fireHookOnce();
+          }
+        },
+      });
+      const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+      transport.emitStream(
+        message(stateId, { type: "subscribed", sequence: 0 }),
+      );
+
+      let eventCompleted = 0;
+      api.hardware.event.log$.subscribe({
+        error: () => {},
+        complete: () => {
+          eventCompleted += 1;
+        },
+      });
+      const eventId = subscriptionIdFor(transport, "event:hardware/log$");
+      transport.emitStream(
+        message(eventId, { type: "subscribed", sequence: 0 }),
+      );
+
+      const controlsBeforeDispose = transport.controls.length;
+      api.dispose();
+
+      // 이후 동기 assertion이 먼저 throw해도 rpcPromise1·rpcPromise2·
+      // reentrantRpcPromise가 unhandled rejection으로 새지 않도록, 두
+      // pending RPC와 재진입 rpc의 reject 확인을 가장 먼저 await한다.
+      await expect(rpcPromise1).rejects.toMatchObject({ code: "CANCELLED" });
+      await expect(rpcPromise2).rejects.toMatchObject({ code: "CANCELLED" });
+      if (action === "rpc") {
+        await expect(reentrantRpcPromise).rejects.toMatchObject({
+          code: "CANCELLED",
+        });
+      }
+
+      // --- 재진입 동작별 개별 기대 ---
+      if (action === "subscribe") {
+        expect(reentrantSubscribeError).toMatchObject({
+          code: "CANCELLED",
+          message: "Renderer API is disposed.",
+        });
+        expect(reentrantSubscribeControlsDelta).toBe(0);
+        expect(reentrantSubscribeOpenedDelta).toBe(0);
+        expect(reentrantSubscribeSnapshotAfter).toEqual(
+          reentrantSubscribeSnapshotBefore,
+        );
+      } else if (action === "rpc") {
+        expect(reentrantRpcInvocationsDelta).toBe(0);
+      } else {
+        expect(reentrantDisposeThrew).toBe(false);
+        expect(reentrantDisposeControlsDelta).toBe(0);
+        expect(reentrantDisposeCancellationsDelta).toBe(0);
+      }
+
+      // --- 모든 행 공통 기대(바깥 dispose() 완료 뒤) ---
+      expect(transport.cancellations).toHaveLength(2);
+      expect(new Set(transport.cancellations)).toEqual(
+        new Set([invocation1.requestId, invocation2.requestId]),
+      );
+
+      expect(stateCompleted).toBe(1);
+      expect(eventCompleted).toBe(1);
+
+      const controlsSinceDispose = transport.controls.slice(
+        controlsBeforeDispose,
+      );
+      const unsubscribesSinceDispose = unsubscribeCommands(
+        controlsSinceDispose,
+      );
+      expect(controlsSinceDispose).toHaveLength(2);
+      expect(unsubscribesSinceDispose).toHaveLength(2);
+      expect(
+        new Set(
+          unsubscribesSinceDispose.map((command) => command.subscriptionId),
+        ),
+      ).toEqual(new Set([stateId, eventId]));
+
+      const relevantKinds = sinkEvents
+        .filter(
+          (event) =>
+            (event.type === "rpc-settled" && event.cause === "disposed") ||
+            (event.type === "subscription-closed" &&
+              event.cause === "disposed"),
+        )
+        .map((event) => event.type);
+      const expectedExtra = action === "rpc" ? 1 : 0;
+      expect(relevantKinds).toHaveLength(4 + expectedExtra);
+      expect(
+        isOrderedSubsequence(
+          [
+            "rpc-settled",
+            "rpc-settled",
+            "subscription-closed",
+            "subscription-closed",
+          ],
+          relevantKinds,
+        ),
+      ).toBe(true);
+    },
+  );
 });

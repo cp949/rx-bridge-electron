@@ -15,6 +15,7 @@ import {
   type OperationCategory,
   type OperationKeyReject,
 } from "../protocol/operation-key.js";
+import { ApiLifetime } from "./api-lifetime.js";
 import {
   recordRendererDiagnostic,
   type HandshakeFailureReason,
@@ -208,6 +209,7 @@ function parseHandshake(
 interface RendererServices {
   readonly rpcClient: RpcClient;
   readonly streams: StreamMultiplexer;
+  readonly lifetime: ApiLifetime;
 }
 
 /**
@@ -231,8 +233,8 @@ function buildApiNode(
           ? (input: BridgeValue = undefined, options?: CallOptions) =>
               services.rpcClient.call(leaf.key, input, options)
           : leaf.category === "state"
-            ? createRemoteState(services.streams, leaf.key)
-            : createRemoteEvent(services.streams, leaf.key);
+            ? createRemoteState(services.streams, services.lifetime, leaf.key)
+            : createRemoteEvent(services.streams, services.lifetime, leaf.key);
     Object.defineProperty(node, segment, { value, enumerable: true });
   }
   return node;
@@ -304,20 +306,27 @@ export async function createRendererApi<B>(
       reason,
     });
   });
+  // 슬롯 closure는 `lifetime.dispose()` 시점에만 실행되므로, 아래에서 선언되는
+  // `rpcClient`·`streams`를 앞서 참조해도 TDZ 문제가 없다.
+  const lifetime = new ApiLifetime({
+    settleRpcs: () => rpcClient.settleAllAsDisposed(),
+    closeStreams: () => streams.closeAll(),
+  });
   const rpcClient = new RpcClient(
     resolvedTransport,
     handshake.session,
+    lifetime,
     diagnosticsSink,
   );
   const streams = new StreamMultiplexer(
     resolvedTransport,
     handshake.session,
+    lifetime,
     diagnosticsSink,
   );
-  const api = buildApiNode(handshake.tree, { rpcClient, streams });
+  const api = buildApiNode(handshake.tree, { rpcClient, streams, lifetime });
   const dispose = (): void => {
-    rpcClient.dispose();
-    streams[Symbol.dispose]();
+    lifetime.dispose();
   };
   // 루트 `dispose`는 도메인 이름으로 예약돼 manifest 경로와 겹치지 않는다.
   Object.defineProperty(api, "dispose", { value: dispose });

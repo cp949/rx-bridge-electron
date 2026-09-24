@@ -1,6 +1,7 @@
 import { Observable, Subject, type Subscriber, type TeardownLogic } from "rxjs";
 
 import type { RemoteState, RemoteStateSnapshot } from "../contract/index.js";
+import type { ApiLifetime } from "./api-lifetime.js";
 import { createDisposedError, type RemoteError } from "./remote-error.js";
 import type { StreamMultiplexer } from "./stream-multiplexer.js";
 
@@ -23,6 +24,7 @@ type LocalGenerationKind = "state" | "event";
  */
 class LocalGeneration<T> {
   readonly #multiplexer: StreamMultiplexer;
+  readonly #lifetime: ApiLifetime;
   readonly #key: string;
   readonly #kind: LocalGenerationKind;
   #generation: Generation<T> | undefined;
@@ -33,10 +35,12 @@ class LocalGeneration<T> {
 
   public constructor(
     multiplexer: StreamMultiplexer,
+    lifetime: ApiLifetime,
     key: string,
     kind: LocalGenerationKind,
   ) {
     this.#multiplexer = multiplexer;
+    this.#lifetime = lifetime;
     this.#key = key;
     this.#kind = kind;
   }
@@ -51,7 +55,7 @@ class LocalGeneration<T> {
     // 합류하지 않는다. 합류하면 현재값 재생과 늦은 complete를 받게 된다.
     // generation을 건드리지 않으므로 snapshot도 바뀌지 않는다.
     // 이 검사가 종료 뒤 subscribe의 유일한 차단 지점이다.
-    if (this.#multiplexer.disposed) {
+    if (this.#lifetime.disposed) {
       subscriber.error(createDisposedError());
       return;
     }
@@ -174,8 +178,12 @@ class LocalGeneration<T> {
 class RemoteStateClient<T> extends Observable<T> implements RemoteState<T> {
   readonly #local: LocalGeneration<T>;
 
-  public constructor(multiplexer: StreamMultiplexer, key: string) {
-    const local = new LocalGeneration<T>(multiplexer, key, "state");
+  public constructor(
+    multiplexer: StreamMultiplexer,
+    lifetime: ApiLifetime,
+    key: string,
+  ) {
+    const local = new LocalGeneration<T>(multiplexer, lifetime, key, "state");
     super((subscriber) => local.subscribe(subscriber));
     this.#local = local;
   }
@@ -187,15 +195,17 @@ class RemoteStateClient<T> extends Observable<T> implements RemoteState<T> {
 
 export function createRemoteState<T>(
   multiplexer: StreamMultiplexer,
+  lifetime: ApiLifetime,
   key: string,
 ): RemoteState<T> {
-  return new RemoteStateClient<T>(multiplexer, key);
+  return new RemoteStateClient<T>(multiplexer, lifetime, key);
 }
 
 export function createRemoteEvent<T>(
   multiplexer: StreamMultiplexer,
+  lifetime: ApiLifetime,
   key: string,
 ): Observable<T> {
-  const local = new LocalGeneration<T>(multiplexer, key, "event");
+  const local = new LocalGeneration<T>(multiplexer, lifetime, key, "event");
   return new Observable<T>((subscriber) => local.subscribe(subscriber));
 }

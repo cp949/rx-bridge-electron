@@ -9,6 +9,7 @@ import {
   type RpcSettleCause,
 } from "./diagnostics.js";
 import { createOpaqueId } from "./ids.js";
+import type { ApiLifetime } from "./api-lifetime.js";
 import {
   createDisposedError,
   localError,
@@ -36,16 +37,18 @@ export class RpcClient {
   readonly #transport: BridgeTransport;
   readonly #session: ProtocolEnvelope;
   readonly #diagnostics: RendererDiagnosticsSink | undefined;
-  #disposed = false;
+  readonly #lifetime: ApiLifetime;
   readonly #pending = new Set<() => void>();
 
   public constructor(
     transport: BridgeTransport,
     session: ProtocolEnvelope,
+    lifetime: ApiLifetime,
     diagnostics?: RendererDiagnosticsSink,
   ) {
     this.#transport = transport;
     this.#session = session;
+    this.#lifetime = lifetime;
     this.#diagnostics = diagnostics;
   }
 
@@ -65,7 +68,7 @@ export class RpcClient {
       });
     };
 
-    if (this.#disposed) {
+    if (this.#lifetime.disposed) {
       settleRpc("disposed");
       return Promise.reject(createDisposedError());
     }
@@ -234,15 +237,13 @@ export class RpcClient {
   }
 
   /**
-   * Settles every RPC that is still pending as CANCELLED and marks this
-   * client as disposed so future calls are rejected without being sent.
-   * Idempotent: a second call is a no-op.
+   * Settles every RPC that is still pending as CANCELLED. Not idempotent by
+   * itself — the caller (`ApiLifetime`) guards against a second call, and
+   * already marks itself disposed before invoking this, so `call()` (via
+   * `#lifetime.disposed`) rejects new RPCs without being sent even while
+   * this pending sweep is still running.
    */
-  public dispose(): void {
-    if (this.#disposed) {
-      return;
-    }
-    this.#disposed = true;
+  public settleAllAsDisposed(): void {
     const listeners = [...this.#pending];
     this.#pending.clear();
     for (const listener of listeners) {
