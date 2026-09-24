@@ -46,10 +46,4 @@ export class BoundedQueue<T> {
     this.#length -= 1;
     return value;
   }
-
-  public drain(): T[] {
-    const values: T[] = [];
-    while (this.#length > 0) values.push(this.shift() as T);
-    return values;
-  }
 }

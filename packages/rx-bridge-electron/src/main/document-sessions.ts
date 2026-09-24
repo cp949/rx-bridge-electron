@@ -128,10 +128,6 @@ export class DocumentSessions {
     return count;
   }
 
-  public retiredClientCount(webContentsId: number): number {
-    return this.#retiredClients.get(webContentsId)?.size ?? 0;
-  }
-
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;

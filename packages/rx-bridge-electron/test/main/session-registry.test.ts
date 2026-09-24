@@ -401,6 +401,8 @@ describe("Main retired client retention", () => {
   const limits = resolveResourceLimits({
     maxRetiredClientsPerWebContents: 3,
   });
+  // retired id의 재사용은 `establish`가 이 사유로 거부한다. 거부는 상태를 바꾸지 않는다.
+  const retired = { reason: "sender-unauthorized" };
 
   test("eviction keeps only the most recent N retired client ids", () => {
     const sessions = new DocumentSessions(limits);
@@ -409,16 +411,11 @@ describe("Main retired client retention", () => {
     for (const clientId of ["c1", "c2", "c3", "c4", "c5"])
       expect(sessions.establish(sender(), clientId)).toHaveProperty("session");
 
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
-    expect(sessions.establish(sender(), "c2")).toEqual({
-      reason: "sender-unauthorized",
-    });
-    expect(sessions.establish(sender(), "c3")).toEqual({
-      reason: "sender-unauthorized",
-    });
-    expect(sessions.establish(sender(), "c4")).toEqual({
-      reason: "sender-unauthorized",
-    });
+    expect(sessions.establish(sender(), "c2")).toEqual(retired);
+    expect(sessions.establish(sender(), "c3")).toEqual(retired);
+    expect(sessions.establish(sender(), "c4")).toEqual(retired);
+    // 가장 오래된 c1은 밀려나 더는 거부 대상이 아니다.
+    expect(sessions.establish(sender(), "c1")).toHaveProperty("session");
   });
 
   test("an evicted retired id still fails the frame check for a non-current sender", () => {
@@ -428,7 +425,6 @@ describe("Main retired client retention", () => {
     for (const clientId of ["c1", "c2", "c3", "c4", "c5"])
       sessions.establish(sender(), clientId);
 
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
     expect(sessions.establish(sender({ isMainFrame: false }), "c1")).toEqual({
       reason: "frame-not-main",
     });
@@ -440,10 +436,10 @@ describe("Main retired client retention", () => {
     sessions.attach(target);
     sessions.establish(sender(), "c1");
     sessions.establish(sender(), "c2");
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(1);
+    expect(sessions.establish(sender(), "c1")).toEqual(retired);
 
     target.fireLifecycle("destroyed");
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(0);
+    expect(sessions.establish(sender(), "c1")).toHaveProperty("session");
   });
 
   test("main-frame-navigation and render-process-gone never clear retired ids", () => {
@@ -452,12 +448,13 @@ describe("Main retired client retention", () => {
     sessions.attach(target);
     sessions.establish(sender(), "c1");
     sessions.establish(sender(), "c2");
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(1);
 
     target.fireLifecycle("main-frame-navigation");
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(2);
+    expect(sessions.establish(sender(), "c1")).toEqual(retired);
+    expect(sessions.establish(sender(), "c2")).toEqual(retired);
     target.fireLifecycle("render-process-gone");
-    expect(sessions.retiredClientCount(target.webContentsId)).toBe(2);
+    expect(sessions.establish(sender(), "c1")).toEqual(retired);
+    expect(sessions.establish(sender(), "c2")).toEqual(retired);
   });
 
   test("eviction and destroyed events only affect their own webContents", () => {
@@ -466,15 +463,19 @@ describe("Main retired client retention", () => {
     const targetB = new FakeTarget(2, "b");
     sessions.attach(targetA);
     sessions.attach(targetB);
+    const senderA = sender({ webContentsId: 1 });
+    const senderB = sender({ webContentsId: 2 });
     for (const clientId of ["c1", "c2", "c3", "c4"])
-      sessions.establish(sender({ webContentsId: 1 }), clientId);
-    sessions.establish(sender({ webContentsId: 2 }), "d1");
+      sessions.establish(senderA, clientId);
+    sessions.establish(senderB, "d1");
+    sessions.establish(senderB, "d2");
 
-    expect(sessions.retiredClientCount(targetA.webContentsId)).toBe(3);
-    expect(sessions.retiredClientCount(targetB.webContentsId)).toBe(0);
+    expect(sessions.establish(senderA, "c3")).toEqual(retired);
+    expect(sessions.establish(senderB, "d1")).toEqual(retired);
 
+    // destroyed는 현재 c4를 retire하며 c1을 밀어내므로, 비워졌는지는 c3로 본다.
     targetA.fireLifecycle("destroyed");
-    expect(sessions.retiredClientCount(targetA.webContentsId)).toBe(0);
-    expect(sessions.retiredClientCount(targetB.webContentsId)).toBe(0);
+    expect(sessions.establish(senderA, "c3")).toHaveProperty("session");
+    expect(sessions.establish(senderB, "d1")).toEqual(retired);
   });
 });
