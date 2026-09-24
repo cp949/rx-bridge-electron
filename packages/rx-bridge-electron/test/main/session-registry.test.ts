@@ -543,7 +543,7 @@ describe("Main retire reason drives stream terminal notify", () => {
     ]);
   }
 
-  test("lifecycle retire carries the lifecycle reason and never notifies", async () => {
+  test("a main-frame navigation retire closes the subscription without notifying", async () => {
     const { server, messages, send } = harness();
     const target = new FakeTarget();
     server.attach(target);
@@ -553,6 +553,7 @@ describe("Main retire reason drives stream terminal notify", () => {
       "subscribed",
       "batch",
     ]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("a destroyed lifecycle retire never notifies", async () => {
@@ -565,6 +566,7 @@ describe("Main retire reason drives stream terminal notify", () => {
       "subscribed",
       "batch",
     ]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("a replacing clientId retires the previous session with 'replaced' and never notifies", async () => {
@@ -585,6 +587,7 @@ describe("Main retire reason drives stream terminal notify", () => {
       "subscribed",
       "batch",
     ]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
   });
 
   test("the detach function retires the session with 'detach' and notifies", async () => {

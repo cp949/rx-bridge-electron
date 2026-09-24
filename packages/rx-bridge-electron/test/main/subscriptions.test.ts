@@ -1282,4 +1282,31 @@ describe("Main stream terminal notify on retire", () => {
     expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
+
+  test("detach from the diagnostics sink before a rejection is sent answers with CANCELLED", async () => {
+    const { server, diagnostics, messages, send } = harness();
+    const detach = server.attach(new FakeTarget());
+    diagnostics.record.mockImplementation((event: { type: string }) => {
+      if (event.type === "rejected") detach();
+    });
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/missing$",
+      ),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      sequence: 1,
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });
