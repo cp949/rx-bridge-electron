@@ -516,6 +516,62 @@ describe("api.dispose() root shutdown", () => {
     expect(stateCompleted).toBe(false);
   });
 
+  test("재진입: batch 전달 중 next 콜백에서 dispose하면 그 batch의 acknowledge를 보내지 않는다", async () => {
+    const transport = bridgeTransport();
+    const sinkEvents: RendererDiagnostic[] = [];
+    const api = await createRendererApi<AppBridge>({
+      transport,
+      diagnostics: {
+        record(event: RendererDiagnostic): void {
+          sinkEvents.push(event);
+        },
+      },
+    });
+
+    const values: string[] = [];
+    let completed = 0;
+    api.hardware.event.log$.subscribe({
+      next: (value) => {
+        values.push(value);
+        if (values.length === 1) {
+          api.dispose();
+        }
+      },
+      error: () => {},
+      complete: () => {
+        completed += 1;
+      },
+    });
+    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
+    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      message(eventId, {
+        type: "batch",
+        sequence: 1,
+        values: ["first", "second"],
+      }),
+    );
+
+    expect(transport.controls.map((command) => command.type)).toEqual([
+      "subscribe",
+      "unsubscribe",
+    ]);
+    expect(values).toEqual(["first"]);
+    expect(completed).toBe(1);
+    expect(
+      sinkEvents.filter((event) => event.type === "subscription-closed"),
+    ).toEqual([
+      {
+        type: "subscription-closed",
+        key: "event:hardware/log$",
+        cause: "disposed",
+      },
+    ]);
+    expect(
+      sinkEvents.filter((event) => event.type === "transport-failed"),
+    ).toHaveLength(0);
+  });
+
   test.each(REENTRY_MATRIX)(
     "재진입 매트릭스: %s 지점에서 %s 재진입은 ADR 0006 종료 계약을 지킨다",
     async (point, action) => {

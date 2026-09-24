@@ -204,6 +204,11 @@ export class StreamMultiplexer {
         }
         generation.handlers.next(value);
       }
+      // dispose 뒤에는 ack를 포함한 어떤 control도 보내지 않는다(ADR 0006).
+      // 로컬 마지막 구독자 해제로 인한 ack는 받아들인 batch의 확인이므로 이 조건과 무관하다.
+      if (this.#lifetime.disposed) {
+        return;
+      }
       try {
         this.#transport.control({
           type: "acknowledge",
