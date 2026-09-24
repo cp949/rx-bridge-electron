@@ -57,11 +57,24 @@ preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBr
 
 ## 문서 세션과 정리
 
-Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. sender admission(`DocumentSessions`의 private `#admit`)이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하며, handshake·RPC·subscribe(`establish`)와 cancel·unsubscribe/acknowledge(`current`)가 채널과 무관하게 같은 판정을 공유한다. main-frame navigation(main frame이 실제로 새 문서로 commit되는 시점 — navigation이 시작만 되고 같은 문서가 유지되는 이동은 retire하지 않는다, [ADR 0019](adr/0019-navigation-retire-on-commit.md)), renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
+Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. sender admission(`DocumentSessions`의 private `#admit`)이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하며, handshake·RPC·subscribe(`establish`)와 cancel·unsubscribe/acknowledge(`current`)가 채널과 무관하게 같은 판정을 공유한다. 이 세 사유로 subscribe가 거부되면 `subscribed` 확인 뒤 RPC와 같은 `error FORBIDDEN "Bridge sender is not authorized."`를 보낸다 — cancel·unsubscribe/acknowledge 거부는 여전히 응답하지 않는다(호출 자체가 fire-and-forget이다). main-frame navigation(main frame이 실제로 새 문서로 commit되는 시점 — navigation이 시작만 되고 같은 문서가 유지되는 이동은 retire하지 않는다, [ADR 0019](adr/0019-navigation-retire-on-commit.md)), renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
+
+문서가 살아있는 채로 세션이 끝나면(detach 또는 서버 dispose) 그 세션의 활성 State/Event 구독과 `authorize` 대기 중이던 구독에 `error CANCELLED "Bridge session ended."`를 즉시 보낸다 — 쌓인 값(ACK 대기 포함)은 버린다. navigation(commit 시점)·renderer process 종료·`webContents` 파괴·새 `clientId`로 인한 retire(`replaced`)는 통지하지 않는다: 옛 문서 자신이 이미 없거나(navigation·process 종료·파괴) 재연결 흐름의 일부(새 clientId)이기 때문이다. 전송 실패는 삼킨다(best-effort) — 전송 실패가 세션·구독 정리를 막지 않는다.
+
+| retire 원인                           | 활성·`authorize` 대기 구독 통지 |
+| ------------------------------------- | ------------------------------- |
+| detach                                | `error CANCELLED`               |
+| `server.dispose()` / bind `dispose()` | `error CANCELLED`               |
+| navigation(commit)                    | 없음                            |
+| `render-process-gone`                 | 없음                            |
+| `destroyed`                           | 없음                            |
+| 새 `clientId`(`replaced`)             | 없음                            |
+
+근거는 [ADR 0020](adr/0020-stream-terminal-on-retire.md)에 있다.
 
 이 소유 단위는 창이 아니라 렌더러 문서다. 한 창에서 reload/navigation이 발생하면 이전 문서에서 시작한 비동기 작업이 새 문서로 넘어가지 않아야 한다.
 
-`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `INVALID_ARGUMENT "Invalid bridge request."` 응답, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `destroyed` 수명 사건이 오면 해당 `webContentsId`의 retired 기록 전체를 지운다(그 `webContents`는 다시 살아나지 않는다). 살아 있는 `webContents`의 retired 기록은 최근 `maxRetiredClientsPerWebContents`개(기본 32)만 보관하고, 그보다 오래된 clientId는 기록에서 빠진다 — 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다. 근거는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
+`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `INVALID_ARGUMENT "Invalid bridge request."` 응답, RPC `FORBIDDEN`, subscribe `subscribed` 뒤 `error FORBIDDEN`)로 응답한다. 반복 dispose는 no-op이다. dispose 시점에 살아있던 활성·`authorize` 대기 구독은 위 "문서 세션과 정리"의 통지 규칙대로 `error CANCELLED`를 받는다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `destroyed` 수명 사건이 오면 해당 `webContentsId`의 retired 기록 전체를 지운다(그 `webContents`는 다시 살아나지 않는다). 살아 있는 `webContents`의 retired 기록은 최근 `maxRetiredClientsPerWebContents`개(기본 32)만 보관하고, 그보다 오래된 clientId는 기록에서 빠진다 — 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다. 근거는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
 
 ## RPC와 스트림 계약
 

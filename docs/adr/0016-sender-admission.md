@@ -39,6 +39,8 @@ test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `w
 | subframe 또는 현재 main frame 아님                                                        | `frame-not-main`      | `FORBIDDEN "Bridge sender is not authorized."`     | `INVALID_ARGUMENT "Invalid bridge request."`         | 없음(무시)          |
 | 허용 목록 밖 origin                                                                       | `origin-not-allowed`  | `FORBIDDEN "Bridge sender is not authorized."`     | `INVALID_ARGUMENT "Invalid bridge request."`         | 없음(무시)          |
 
+_(개정: ADR 0020 — 위 표의 "cancel/control 응답" 열은 cancel·unsubscribe/acknowledge에만 유효하다. subscribe는 더 이상 "없음(무시)"이 아니다: `sender-unauthorized`·`frame-not-main`·`origin-not-allowed`로 거부되면 `subscribed` 뒤 `error FORBIDDEN "Bridge sender is not authorized."`를 보낸다(RPC와 같은 코드·문구). `malformed-envelope`·`version-mismatch` subscribe는 여전히 응답하지 않는다 — `subscriptionId`를 신뢰할 수 없다.)_
+
 판정 순서는 parse(version 포함) → admission이다(결정 2). `AttachedTarget`의 `isCurrentMainFrame`·`isAllowedOrigin` port는 그대로 두고, 실제 값은 여전히 adapter의 `targetFor`(`electron-adapter.ts`)가 `attach` 시점에 채운다 — 판정 호출 위치만 `#admit` 하나로 모았다.
 
 ## 결정 2: envelope parse(version 포함)를 server로 옮기고 adapter는 번역만 한다

@@ -1,6 +1,6 @@
 # Main이 스트림을 닫을 때 Renderer에 종료 통지
 
-- Status: 승격 (ROADMAP.md#RD-026)
+- Status: closed (RD-026)
 - 출처: `_works/20260923-03-shutdown-contract/pending-issues/01.md`(RD-003 작업 중 발견, 범위 밖으로
   분리).
 
@@ -30,3 +30,4 @@ Renderer 쪽 `RemoteState`/`RemoteEvent`가 `complete()`(또는 별도 신호)�
 ## Comments
 
 - 2026-09-25: 설계 인터뷰에서 결정하고 ROADMAP.md#RD-026으로 승격. 배경의 `StreamHub.#close`는 현재 `Subscriptions.#close`다. `monitor` 예시는 성립하지 않는다 — 세션은 문서별이라 다른 창의 retire가 monitor 구독에 닿지 않는다. 통지가 관찰되는 경우는 살아 있는 창의 detach·`server.dispose()`·bind `dispose()`다. 새 메시지 종류는 필요 없다(`error`·`complete`가 이미 있다). 결정: RPC와 같은 코드(`CANCELLED`·`FORBIDDEN`), 활성·`authorize` 대기·admission 거부 구독 모두 통지, 쌓인 값 폐기, 전송 실패 무시, API 전체 신호는 범위 밖. 조사 중 main-frame `did-start-navigation`이 살아 있는 문서도 retire하는 결함을 확인해 ROADMAP.md#RD-025로 분리했다(RD-026보다 먼저).
+- 2026-09-25: RD-026 구현 완료. `_works/20260925-03-stream-terminal-notify/`에서 DELTA 단위로 진행했고 결정은 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 기록했다. `session.signal.reason`(`document-sessions.ts`)에 lifecycle 3종 외 `detach`·`dispose`·`replaced`를 실어 `notifiesRenderer` 헬퍼로 판정한다. `Subscriptions`가 활성·`authorize` 대기 구독에 `error CANCELLED "Bridge session ended."`를, `create-bridge-server.ts`의 `controlStream`이 admission 거부 subscribe에 `error FORBIDDEN`을 보낸다.

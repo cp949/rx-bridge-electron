@@ -44,6 +44,8 @@ bind `dispose()`(`electron-adapter.ts`의 `bindElectronBridge` 반환값)는 자
 
 Main이 스트림을 닫을 때 Renderer에 terminal 메시지를 통지하는 프로토콜 확장은 이 문서의 범위 밖이다. 현재 Main 쪽 종료·retire는 Renderer에 능동적으로 알리지 않으며, 이는 별도 후속 과제로 남긴다. 이 문서는 새 오류 코드를 도입하지 않는다 — Renderer는 `CANCELLED`, Main은 `FORBIDDEN`/`INVALID_ARGUMENT` 기존 코드만 쓴다.
 
+_(개정: ADR 0020 — 문서가 살아있는 채로 세션이 끝나는 경우(detach·`server.dispose()`·bind `dispose()`)에 한해 이 과제를 처리했다. 활성·`authorize` 대기 구독은 `error CANCELLED`, retire 뒤 새 subscribe는 `error FORBIDDEN`을 받는다 — 새 오류 코드는 추가하지 않았다. navigation·`render-process-gone`·`destroyed`처럼 문서 자신이 함께 사라지는 retire와 API 전체 차원의 끊김 신호는 여전히 범위 밖이다.)_
+
 ## 이전(migration)
 
 - `dispose()` 호출 뒤에도 진행 중이던 RPC의 결과를 기다리던 코드는, `dispose()` 전에 해당 RPC를 `await`하도록 순서를 바꾼다. `dispose()` 이후에는 그 RPC가 `CANCELLED`로 확정된다.

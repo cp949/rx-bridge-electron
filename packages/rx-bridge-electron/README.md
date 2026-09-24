@@ -306,6 +306,8 @@ const scopedDataEvent = scopedEvent(
 
 하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다(위 "Event buffer 옵션" 참고, 생략 시 기본값).
 
+문서가 살아있는 채로 Main 쪽 세션이 끝나면(detach 또는 `server.dispose()`/bind `dispose()`), 활성 State/Event 구독과 `authorize` 대기 중이던 구독은 `RemoteError("CANCELLED", "Bridge session ended.")`를 받습니다 — `RemoteState`는 값이 있었으면 `stale`, 없었으면 `uninitialized`로 전이하고, 쌓여 있던 값은 전달하지 않습니다. 세션이 끝난 뒤의 새 구독은 `subscribed` 확인 직후 같은 `RemoteError("FORBIDDEN", "Bridge sender is not authorized.")`로 끝납니다(RPC 거부와 같은 코드·문구). navigation(문서 commit 시점, [ADR 0019](../../docs/adr/0019-navigation-retire-on-commit.md))·renderer process 종료·문서 파괴·같은 문서의 새 클라이언트 등록으로 인한 retire는 통지하지 않습니다 — 옛 문서 자신이 이미 없거나 재연결 흐름의 일부이기 때문입니다. 전송 실패는 삼킵니다(best-effort). 근거는 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
+
 ## 검증, 한도, 범위 밖 기능
 
 Main은 핸들러를 호출하기 전에 RPC 입력을, 전송하기 전에 출력을, 전달하기 전에 스트림 값을 검증합니다. v1 payload는 `undefined`, `null`, 원시 값, 배열, 일반 객체 트리만 허용합니다. 순환 참조, 함수, symbol, 사용자 정의 prototype, typed array, transferable을 거부합니다. 기본 한도는 깊이 32, 항목 10,000개, 문자열당 UTF-8 1,000,000 byte, 전체 크기 16 MiB(`maxTotalBytes`)입니다. 전체 크기는 노드·문자열 byte·bigint 자릿수를 순회하며 근사 계산한 값이라 실제 V8 structured clone 크기와 다를 수 있습니다. `createBridgeServer`의 `payloadLimits` 서버 옵션으로 필드별 상향·하향이 가능하며, 이 한도는 서버가 강제합니다(Electron 어댑터·preload는 envelope 구조만 검사합니다). 이 구조·크기 검사는 도메인 스키마(`options.schemas`) 유무와 무관하게 모든 operation에 항상 적용됩니다 — 줄어드는 것은 사용자가 손으로 쓰는 코드량이지 이 검사가 아닙니다.
