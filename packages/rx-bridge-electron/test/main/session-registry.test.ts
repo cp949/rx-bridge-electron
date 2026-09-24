@@ -2,7 +2,10 @@ import { describe, expect, test, vi } from "vitest";
 import type { BridgeImpl } from "../../src/contract/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
 import { createBridgeServer } from "../../src/main/index.js";
-import { DocumentSessions } from "../../src/main/document-sessions.js";
+import {
+  DocumentSessions,
+  notifiesRenderer,
+} from "../../src/main/document-sessions.js";
 import { resolveResourceLimits } from "../../src/main/resource-limits.js";
 import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 
@@ -477,5 +480,79 @@ describe("Main retired client retention", () => {
     targetA.fireLifecycle("destroyed");
     expect(sessions.establish(senderA, "c3")).toHaveProperty("session");
     expect(sessions.establish(senderB, "d1")).toEqual(retired);
+  });
+});
+
+describe("Main retire reason on session.signal", () => {
+  const limits = resolveResourceLimits({});
+
+  const establishedSignal = (
+    sessions: DocumentSessions,
+    from = sender(),
+    clientId = "c1",
+  ): AbortSignal => {
+    const admitted = sessions.establish(from, clientId);
+    if (!("session" in admitted)) throw new Error("expected a session");
+    return admitted.session.signal;
+  };
+
+  test("lifecycle retire carries the lifecycle reason and never notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    const signal = establishedSignal(sessions, sender());
+    target.fireLifecycle("main-frame-navigation");
+    expect(signal.reason).toBe("main-frame-navigation");
+    expect(notifiesRenderer(signal)).toBe(false);
+  });
+
+  test("a destroyed lifecycle retire never notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    const signal = establishedSignal(sessions, sender());
+    target.fireLifecycle("destroyed");
+    expect(signal.reason).toBe("destroyed");
+    expect(notifiesRenderer(signal)).toBe(false);
+  });
+
+  test("a replacing clientId retires the previous session with 'replaced' and never notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    const signal = establishedSignal(sessions, sender(), "c1");
+    sessions.establish(sender(), "c2");
+    expect(signal.reason).toBe("replaced");
+    expect(notifiesRenderer(signal)).toBe(false);
+  });
+
+  test("the detach function retires the session with 'detach' and notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    const detach = sessions.attach(target);
+    const signal = establishedSignal(sessions, sender());
+    detach();
+    expect(signal.reason).toBe("detach");
+    expect(notifiesRenderer(signal)).toBe(true);
+  });
+
+  test("a reentrant attach() on the same webContents retires with 'detach' and notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    const signal = establishedSignal(sessions, sender());
+    sessions.attach(new FakeTarget());
+    expect(signal.reason).toBe("detach");
+    expect(notifiesRenderer(signal)).toBe(true);
+  });
+
+  test("dispose() retires every live session with 'dispose' and notifies", () => {
+    const sessions = new DocumentSessions(limits);
+    const target = new FakeTarget();
+    sessions.attach(target);
+    const signal = establishedSignal(sessions, sender());
+    sessions.dispose();
+    expect(signal.reason).toBe("dispose");
+    expect(notifiesRenderer(signal)).toBe(true);
   });
 });

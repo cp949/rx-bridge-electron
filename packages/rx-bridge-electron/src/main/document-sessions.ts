@@ -28,6 +28,14 @@ export type Admission =
 type LifecycleReason =
   "main-frame-navigation" | "render-process-gone" | "destroyed";
 
+/** `session.signal`에 실리는 retire 사유. lifecycle 3종에 detach·dispose·새 clientId를 더한다. */
+export type RetireReason = LifecycleReason | "detach" | "dispose" | "replaced";
+
+/** detach·dispose retire만 Renderer에 스트림 종료를 통지한다(navigation·crash·destroyed·replaced는 제외). */
+export function notifiesRenderer(signal: AbortSignal): boolean {
+  return signal.reason === "detach" || signal.reason === "dispose";
+}
+
 interface Attachment {
   readonly target: AttachedTarget;
   readonly removeLifecycle: () => void;
@@ -53,7 +61,7 @@ export class DocumentSessions {
   public attach(target: AttachedTarget): () => void {
     if (this.#disposed)
       throw new BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.");
-    this.#detach(target.webContentsId);
+    this.#detach(target.webContentsId, "detach");
     if (this.#attachments.has(target.webContentsId)) return () => {};
     const attachment: Attachment = {
       target,
@@ -65,7 +73,7 @@ export class DocumentSessions {
     this.#attachments.set(target.webContentsId, attachment);
     return () => {
       if (this.#attachments.get(target.webContentsId) === attachment)
-        this.#detach(target.webContentsId);
+        this.#detach(target.webContentsId, "detach");
     };
   }
 
@@ -94,7 +102,7 @@ export class DocumentSessions {
     if (current?.clientId === clientId) return { session: current };
     if (this.#retiredClients.get(sender.webContentsId)?.has(clientId))
       return { reason: "sender-unauthorized" };
-    this.#retire(attachment);
+    this.#retire(attachment, "replaced");
     if (
       this.#attachments.get(sender.webContentsId) !== attachment ||
       attachment.current !== undefined
@@ -131,18 +139,18 @@ export class DocumentSessions {
   public dispose(): void {
     if (this.#disposed) return;
     this.#disposed = true;
-    for (const id of [...this.#attachments.keys()]) this.#detach(id);
+    for (const id of [...this.#attachments.keys()]) this.#detach(id, "dispose");
   }
 
-  #detach(id: number): void {
+  #detach(id: number, reason: RetireReason): void {
     const attachment = this.#attachments.get(id);
     if (attachment === undefined) return;
     this.#attachments.delete(id);
     attachment.removeLifecycle();
-    this.#retire(attachment);
+    this.#retire(attachment, reason);
   }
 
-  #retire(attachment: Attachment, reason?: LifecycleReason): void {
+  #retire(attachment: Attachment, reason: RetireReason): void {
     const webContentsId = attachment.target.webContentsId;
     const session = attachment.current;
     if (session !== undefined) {
@@ -161,7 +169,7 @@ export class DocumentSessions {
         if (oldest === undefined) break;
         retired.delete(oldest);
       }
-      this.#controllers.get(session)?.abort();
+      this.#controllers.get(session)?.abort(reason);
     }
     if (reason === "destroyed") this.#retiredClients.delete(webContentsId);
   }
