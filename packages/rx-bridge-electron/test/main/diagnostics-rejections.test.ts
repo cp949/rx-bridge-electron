@@ -1,7 +1,11 @@
 import { BehaviorSubject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
-import type { BridgeImpl, Schema, SchemasFor } from "../../src/contract/index.js";
+import type {
+  BridgeImpl,
+  Schema,
+  SchemasFor,
+} from "../../src/contract/index.js";
 import {
   createBridgeServer,
   type Authorize,
@@ -64,7 +68,9 @@ function setup(options: {
     ...(options.payloadLimits === undefined
       ? {}
       : { payloadLimits: options.payloadLimits }),
-    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    ...(options.authorize === undefined
+      ? {}
+      : { authorize: options.authorize }),
     diagnostics,
     ...(options.resourceLimits === undefined
       ? {}
@@ -165,6 +171,26 @@ describe("rejected diagnostic reasons", () => {
     );
     expect(rejections(diagnostics)).toEqual([
       { type: "rejected", reason: "authorize-denied" },
+    ]);
+  });
+
+  test("stream authorize() exception is not recorded and returns INTERNAL", async () => {
+    const { server, diagnostics } = setup({
+      authorize: () => {
+        throw new Error("authorize boom");
+      },
+    });
+    const messages: unknown[] = [];
+    await server.controlStream(sender(), subscribeCommand(), (message) =>
+      messages.push(message),
+    );
+    expect(rejections(diagnostics)).toEqual([]);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed" }),
+      expect.objectContaining({
+        type: "error",
+        error: { code: "INTERNAL", message: "Internal bridge error." },
+      }),
     ]);
   });
 

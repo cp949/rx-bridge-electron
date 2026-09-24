@@ -181,7 +181,11 @@ describe("Electron adapter payload limits", () => {
     };
     const server = createBridgeServer(echoImpl, {
       payloadLimits: { maxDepth: 4, maxEntries: 10, maxStringBytes: 2_000_000 },
-      schemas: { hardware: { rpc: { echo: { input: stringSchema, output: stringSchema } } } },
+      schemas: {
+        hardware: {
+          rpc: { echo: { input: stringSchema, output: stringSchema } },
+        },
+      },
     });
     const ipcMain = new FakeIpcMain();
     const bridge = bindElectronBridge({
@@ -295,7 +299,7 @@ describe("Electron adapter rejection diagnostics", () => {
     expect(response).toMatchObject({ type: "error" });
   });
 
-  test("malformed-envelope: rpc parse failure (authorize exception path stays unrecorded)", async () => {
+  test("malformed-envelope: rpc parse failure", async () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
     const contents = new UrlWebContents("app://local");
