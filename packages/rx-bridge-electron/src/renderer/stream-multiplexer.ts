@@ -95,6 +95,8 @@ export class StreamMultiplexer {
     }
   }
 
+  // 종료 절차의 RPC 확정 단계에서 sink가 구독 해제를 재진입시키면 generation은
+  // 아직 남아 있다. 여기서 닫지 않고 `closeAll()`이 `disposed`로 한 번 닫게 둔다.
   public close(subscriptionId: string): void {
     const generation = this.#generations.get(subscriptionId);
     if (generation === undefined || this.#lifetime.disposed) {

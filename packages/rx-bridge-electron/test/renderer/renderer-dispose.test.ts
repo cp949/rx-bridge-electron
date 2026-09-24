@@ -102,7 +102,7 @@ async function setup(): Promise<{
   return { transport, api };
 }
 
-// DELTA-01: dispose() 도중 동기로 실행되는 사용자 코드가 재진입할 수 있는
+// RD-030: dispose() 도중 동기로 실행되는 사용자 코드가 재진입할 수 있는
 // 지점 3개(rpc-settled·subscription-closed·complete) × 재진입 동작 3개
 // (subscribe·rpc·dispose) 매트릭스. ADR 0006 종료 계약("종료 뒤 호출은 항상
 // 동기 CANCELLED, 전송 없음")이 세 지점 전부에서 지켜지는지 고정한다.
@@ -464,6 +464,56 @@ describe("api.dispose() root shutdown", () => {
       message(stateId, { type: "batch", sequence: 1, values: ["late"] }),
     );
     expect(stateNextCalled).toBe(false);
+  });
+
+  test("RPC 확정 중 rpc-settled sink에서 마지막 구독을 해제하면 종료 정리가 한 번만 닫는다", async () => {
+    const transport = bridgeTransport();
+    const sinkEvents: RendererDiagnostic[] = [];
+    let unsubscribeState: (() => void) | undefined;
+    const api = await createRendererApi<AppBridge>({
+      transport,
+      diagnostics: {
+        record(event: RendererDiagnostic): void {
+          sinkEvents.push(event);
+          if (event.type === "rpc-settled" && event.cause === "disposed") {
+            unsubscribeState?.();
+            unsubscribeState = undefined;
+          }
+        },
+      },
+    });
+
+    const rpcPromise = api.hardware.rpc.connect();
+    let stateCompleted = false;
+    const subscription = api.hardware.state.status$.subscribe({
+      error: () => {},
+      complete: () => {
+        stateCompleted = true;
+      },
+    });
+    unsubscribeState = () => subscription.unsubscribe();
+    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+
+    const controlsBeforeDispose = transport.controls.length;
+    api.dispose();
+    await expect(rpcPromise).rejects.toMatchObject({ code: "CANCELLED" });
+
+    // 종료 플래그가 이미 확정됐으므로 구독 해제는 종료 뒤 규칙을 따른다 —
+    // 개별 close는 no-op이고, stream 정리 단계가 unsubscribe 1회를 보낸다.
+    expect(transport.controls.slice(controlsBeforeDispose)).toEqual([
+      { type: "unsubscribe", subscriptionId: stateId },
+    ]);
+    expect(
+      sinkEvents.filter((event) => event.type === "subscription-closed"),
+    ).toEqual([
+      {
+        type: "subscription-closed",
+        key: "state:hardware/status$",
+        cause: "disposed",
+      },
+    ]);
+    expect(stateCompleted).toBe(false);
   });
 
   test.each(REENTRY_MATRIX)(
