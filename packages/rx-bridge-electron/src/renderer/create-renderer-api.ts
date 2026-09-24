@@ -15,6 +15,11 @@ import {
   type OperationCategory,
   type OperationKeyReject,
 } from "../protocol/operation-key.js";
+import {
+  recordRendererDiagnostic,
+  type HandshakeFailureReason,
+  type RendererDiagnosticsSink,
+} from "./diagnostics.js";
 import { createRemoteEvent, createRemoteState } from "./local-generation.js";
 import { localError } from "./remote-error.js";
 import type { RemoteError } from "./remote-error.js";
@@ -153,7 +158,12 @@ function addManifestPath(
   });
 }
 
-function parseHandshake(value: unknown): {
+// `onFailure`는 reject 직전(throw 지점)에 정확히 1회 호출된다(ADR 0022
+// 결정 9). reject 값 자체는 바꾸지 않는다 — 분류만 곁가지로 보고한다.
+function parseHandshake(
+  value: unknown,
+  onFailure: (reason: HandshakeFailureReason) => void,
+): {
   readonly session: ProtocolEnvelope;
   readonly tree: ManifestNode;
 } {
@@ -163,9 +173,12 @@ function parseHandshake(value: unknown): {
   try {
     response = parseHandshakeResponse(value);
   } catch (cause) {
+    const versionMismatch =
+      cause instanceof BridgeProtocolError && cause.code === "VERSION_MISMATCH";
+    onFailure(versionMismatch ? "version-mismatch" : "malformed");
     throw localError(
       "INTERNAL",
-      cause instanceof BridgeProtocolError && cause.code === "VERSION_MISMATCH"
+      versionMismatch
         ? "Unsupported bridge handshake."
         : "Malformed bridge handshake.",
     );
@@ -180,7 +193,12 @@ function parseHandshake(value: unknown): {
 
   for (const category of OPERATION_CATEGORIES) {
     for (const entry of response.manifest[category]) {
-      addManifestPath(paths, tree, category, entry);
+      try {
+        addManifestPath(paths, tree, category, entry);
+      } catch (error) {
+        onFailure("invalid-manifest");
+        throw error;
+      }
     }
   }
 
@@ -255,25 +273,47 @@ function resolveGlobalTransport(): BridgeTransport {
 
 /**
  * {@link createRendererApi} 옵션. `transport`를 생략하면 preload가 채운
- * `globalThis.rxBridge`를 사용한다.
+ * `globalThis.rxBridge`를 사용한다. `diagnostics`는 반환하는 API 인스턴스
+ * 하나에 묶인다(ADR 0022 결정 1).
  */
 export interface CreateRendererApiOptions {
   readonly transport?: BridgeTransport;
+  readonly diagnostics?: RendererDiagnosticsSink;
 }
 
 export async function createRendererApi<B>(
   options?: CreateRendererApiOptions,
 ): Promise<RendererApi<B>> {
+  // `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 배선
+  // 오류라 기록하지 않는다(ADR 0022 결정 9) — sink 조회보다 먼저 던진다.
   const resolvedTransport = options?.transport ?? resolveGlobalTransport();
+  const diagnosticsSink = options?.diagnostics;
   let response: unknown;
   try {
     response = await resolvedTransport.connect();
   } catch {
+    recordRendererDiagnostic(diagnosticsSink, {
+      type: "handshake-failed",
+      reason: "transport",
+    });
     throw localError("INTERNAL", "Bridge handshake failed.");
   }
-  const handshake = parseHandshake(response);
-  const rpcClient = new RpcClient(resolvedTransport, handshake.session);
-  const streams = new StreamMultiplexer(resolvedTransport, handshake.session);
+  const handshake = parseHandshake(response, (reason) => {
+    recordRendererDiagnostic(diagnosticsSink, {
+      type: "handshake-failed",
+      reason,
+    });
+  });
+  const rpcClient = new RpcClient(
+    resolvedTransport,
+    handshake.session,
+    diagnosticsSink,
+  );
+  const streams = new StreamMultiplexer(
+    resolvedTransport,
+    handshake.session,
+    diagnosticsSink,
+  );
   const api = buildApiNode(handshake.tree, { rpcClient, streams });
   const dispose = (): void => {
     rpcClient.dispose();

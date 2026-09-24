@@ -3,6 +3,11 @@ import {
   type BridgeValue,
   type ProtocolEnvelope,
 } from "../protocol/index.js";
+import {
+  recordRendererDiagnostic,
+  type RendererDiagnosticsSink,
+  type RpcSettleCause,
+} from "./diagnostics.js";
 import { createOpaqueId } from "./ids.js";
 import {
   createDisposedError,
@@ -30,12 +35,18 @@ function readTimeout(timeoutMs: number | undefined): number {
 export class RpcClient {
   readonly #transport: BridgeTransport;
   readonly #session: ProtocolEnvelope;
+  readonly #diagnostics: RendererDiagnosticsSink | undefined;
   #disposed = false;
   readonly #pending = new Set<() => void>();
 
-  public constructor(transport: BridgeTransport, session: ProtocolEnvelope) {
+  public constructor(
+    transport: BridgeTransport,
+    session: ProtocolEnvelope,
+    diagnostics?: RendererDiagnosticsSink,
+  ) {
     this.#transport = transport;
     this.#session = session;
+    this.#diagnostics = diagnostics;
   }
 
   public call(
@@ -43,11 +54,24 @@ export class RpcClient {
     input: BridgeValue,
     options: CallOptions = {},
   ): Promise<BridgeValue> {
+    const startedAt = performance.now();
+    const settleRpc = (cause: RpcSettleCause, code?: string): void => {
+      recordRendererDiagnostic(this.#diagnostics, {
+        type: "rpc-settled",
+        key,
+        durationMs: performance.now() - startedAt,
+        cause,
+        ...(code === undefined ? {} : { code }),
+      });
+    };
+
     if (this.#disposed) {
+      settleRpc("disposed");
       return Promise.reject(createDisposedError());
     }
 
     if (options.signal?.aborted === true) {
+      settleRpc("aborted");
       return Promise.reject(localError("CANCELLED", "RPC call was cancelled."));
     }
 
@@ -55,6 +79,7 @@ export class RpcClient {
     try {
       timeoutMs = readTimeout(options.timeoutMs);
     } catch (error) {
+      settleRpc("invalid-options");
       return Promise.reject(error);
     }
 
@@ -74,14 +99,16 @@ export class RpcClient {
         return true;
       };
 
-      const rejectOnce = (error: RemoteError): void => {
+      const rejectOnce = (error: RemoteError, cause: RpcSettleCause): void => {
         if (beginSettlement()) {
+          settleRpc(cause, cause === "remote-error" ? error.code : undefined);
           reject(error);
         }
       };
 
       const resolveOnce = (value: BridgeValue): void => {
         if (beginSettlement()) {
+          settleRpc("ok");
           resolve(value);
         }
       };
@@ -89,27 +116,34 @@ export class RpcClient {
       // 확정을 cancel 전송보다 먼저 선점한다. `transport.cancel`이 이 호출의
       // abort·dispose를 동기로 재진입시켜도 먼저 발생한 원인이 이기고 cancel은
       // 한 번만 나간다.
-      const cancelOnce = (error: RemoteError): void => {
+      const cancelOnce = (error: RemoteError, cause: RpcSettleCause): void => {
         if (!beginSettlement()) {
           return;
         }
+        settleRpc(cause);
         if (sent) {
           try {
             this.#transport.cancel(requestId);
           } catch {
-            // Local settlement must not depend on cancellation delivery.
+            recordRendererDiagnostic(this.#diagnostics, {
+              type: "transport-failed",
+              channel: "cancel",
+            });
           }
         }
         reject(error);
       };
 
       disposeListener = () => {
-        cancelOnce(createDisposedError());
+        cancelOnce(createDisposedError(), "disposed");
       };
       this.#pending.add(disposeListener);
 
       abortListener = () => {
-        cancelOnce(localError("CANCELLED", "RPC call was cancelled."));
+        cancelOnce(
+          localError("CANCELLED", "RPC call was cancelled."),
+          "aborted",
+        );
       };
       options.signal?.addEventListener("abort", abortListener, { once: true });
       if (options.signal?.aborted === true) {
@@ -121,6 +155,7 @@ export class RpcClient {
         timer = setTimeout(() => {
           cancelOnce(
             localError("DEADLINE_EXCEEDED", "RPC call exceeded its deadline."),
+            "deadline",
           );
         }, timeoutMs);
       }
@@ -130,7 +165,10 @@ export class RpcClient {
         sent = true;
         invocation = this.#transport.invoke({ requestId, key, input });
       } catch {
-        rejectOnce(localError("INTERNAL", "RPC transport failed."));
+        rejectOnce(
+          localError("INTERNAL", "RPC transport failed."),
+          "transport-failed",
+        );
         return;
       }
 
@@ -157,20 +195,27 @@ export class RpcClient {
                   response.error.message,
                   response.error.details,
                 ),
+                "remote-error",
               );
               return;
             }
             resolveOnce(response.result);
           } catch (error) {
             if (error instanceof RemoteError) {
-              rejectOnce(error);
+              rejectOnce(error, "remote-error");
               return;
             }
-            rejectOnce(localError("INTERNAL", "Malformed RPC response."));
+            rejectOnce(
+              localError("INTERNAL", "Malformed RPC response."),
+              "malformed-response",
+            );
           }
         },
         () => {
-          rejectOnce(localError("INTERNAL", "RPC transport failed."));
+          rejectOnce(
+            localError("INTERNAL", "RPC transport failed."),
+            "transport-failed",
+          );
         },
       );
     });
