@@ -4,7 +4,7 @@ import type { ContextBridge, IpcRenderer } from "electron";
 import {
   DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
-} from "../../src/main/electron-adapter.js";
+} from "../../src/protocol/electron-channels.js";
 import { exposeBridgeInMainWorld } from "../../src/preload/expose-bridge.js";
 
 /** Minimal fake standing in for Electron's `contextBridge`: records the exposed global name/api. */

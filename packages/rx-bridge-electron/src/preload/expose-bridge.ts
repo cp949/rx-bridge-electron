@@ -21,7 +21,7 @@ import {
 import {
   DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
-} from "../main/electron-adapter.js";
+} from "../protocol/electron-channels.js";
 import {
   DEFAULT_BRIDGE_GLOBAL_NAME,
   type BridgeTransport,
