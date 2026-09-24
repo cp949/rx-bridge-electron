@@ -1,7 +1,7 @@
 import { Observable } from "rxjs";
 
-import type { PublicManifest, Schema } from "../contract/index.js";
-import type { BridgeValue } from "../protocol/index.js";
+import type { Schema } from "../contract/index.js";
+import type { BridgeValue, HandshakeManifest } from "../protocol/index.js";
 import {
   checkDomainSegments,
   checkOperationName,
@@ -187,7 +187,7 @@ function manifestCategoryList(
 }
 
 /** 등록 테이블로부터 공개 manifest를 만든다. */
-export function manifestFromTable(table: RegistrationTable): PublicManifest {
+export function manifestFromTable(table: RegistrationTable): HandshakeManifest {
   return Object.freeze({
     rpc: Object.freeze(manifestCategoryList("rpc", table.rpc)),
     state: Object.freeze(manifestCategoryList("state", table.state)),

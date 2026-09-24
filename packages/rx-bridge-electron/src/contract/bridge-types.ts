@@ -3,7 +3,7 @@ import type { Observable } from "rxjs";
 import type { CurrentValueSource, EventSource } from "../main/sources.js";
 import type { BridgeContext } from "../main/types.js";
 import type { BridgeValue } from "../protocol/index.js";
-import type { RemoteState } from "./infer.js";
+import type { RemoteState } from "./remote-state.js";
 import type { Schema } from "./schema.js";
 
 /**
