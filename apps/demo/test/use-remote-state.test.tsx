@@ -1,15 +1,17 @@
+import { BehaviorSubject, Observable } from "rxjs";
 import { renderHook, waitFor } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
 
 import {
   createRendererApi,
-  type BridgeTransport,
   type RemoteState,
 } from "@cp949/rx-bridge-electron/renderer";
-import type {
-  RendererStreamCommand,
-  StreamMessage,
-} from "@cp949/rx-bridge-electron/protocol";
+import {
+  createBridgeServer,
+  currentValueSource,
+} from "@cp949/rx-bridge-electron/main";
+import { createLoopbackTransport } from "@cp949/rx-bridge-electron/testing";
+import type { BridgeImpl } from "@cp949/rx-bridge-electron/contract";
 
 import { useRemoteState } from "../src/renderer/use-remote-state.js";
 
@@ -19,105 +21,95 @@ interface StateBridge {
   };
 }
 
-async function stateHarness(): Promise<{
-  readonly state: RemoteState<number>;
-  readonly controls: RendererStreamCommand[];
-  emit(message: StreamMessage): void;
-}> {
-  const controls: RendererStreamCommand[] = [];
-  const listeners = new Set<(message: StreamMessage) => void>();
-  const transport: BridgeTransport = {
-    connect: async () => ({
-      protocolVersion: 1,
-      clientId: "client-1",
-      manifest: { rpc: [], state: ["state:hardware/sensor"], event: [] },
+/**
+ * `hardware.state.sensor`의 실제 upstream(`BehaviorSubject`) 구독 횟수를
+ * 센다. server가 같은 key의 wire 구독을 shared upstream 하나로 묶으므로
+ * (`Subscriptions#startShared`), React rerender가 실수로
+ * unsubscribe→resubscribe 쌍을 만들면 이 카운트가 1을 넘어 늘어난다 —
+ * 수기 `RendererStreamCommand` 기록 대신 이 카운트로 "세대 1개"를 확인한다.
+ */
+function countingSensorSource(initial: number) {
+  const subject = new BehaviorSubject(initial);
+  let subscribeCount = 0;
+  const counted = Object.assign(
+    new Observable<number>((subscriber) => {
+      subscribeCount++;
+      return subject.subscribe(subscriber);
     }),
-    invoke: async () => {
-      throw new Error("No RPC is used by this State test.");
-    },
-    cancel: () => {},
-    control(command) {
-      controls.push(command);
-    },
-    onStreamMessage(listener) {
-      listeners.add(listener);
-      return () => listeners.delete(listener);
-    },
-  };
-  const api = await createRendererApi<StateBridge>(transport);
+    { getValue: () => subject.getValue() },
+  );
   return {
-    state: api.hardware.state.sensor,
-    controls,
-    emit(message) {
-      for (const listener of listeners) listener(message);
-    },
+    source: currentValueSource(counted),
+    subject,
+    subscribeCount: () => subscribeCount,
   };
 }
 
-function subscriptionId(controls: readonly RendererStreamCommand[]): string {
-  const command = controls.find((item) => item.type === "subscribe");
-  if (command?.type !== "subscribe")
-    throw new Error("State subscription missing.");
-  return command.subscriptionId;
+async function stateHarness(): Promise<{
+  readonly state: RemoteState<number>;
+  readonly subject: BehaviorSubject<number>;
+  readonly subscribeCount: () => number;
+  dispose(): void;
+}> {
+  const sensor = countingSensorSource(23.5);
+  const impl: BridgeImpl<StateBridge> = {
+    hardware: { state: { sensor: sensor.source } },
+  };
+  const server = createBridgeServer(impl);
+  const transport = createLoopbackTransport(server);
+  const api = await createRendererApi<StateBridge>(transport);
+  return {
+    state: api.hardware.state.sensor,
+    subject: sensor.subject,
+    subscribeCount: sensor.subscribeCount,
+    dispose() {
+      api.dispose();
+      transport.dispose();
+      server.dispose();
+    },
+  };
 }
 
 describe("useRemoteState", () => {
   test("keeps one actual remote State generation across a React rerender", async () => {
-    const { state, controls } = await stateHarness();
-    const { rerender } = renderHook(() => useRemoteState(state));
+    const { state, subscribeCount, dispose } = await stateHarness();
+    try {
+      const { result, rerender } = renderHook(() => useRemoteState(state));
+      await waitFor(() => expect(result.current.status).toBe("current"));
 
-    rerender();
+      rerender();
 
-    expect(
-      controls.filter((command) => command.type === "subscribe"),
-    ).toHaveLength(1);
-    expect(
-      controls.filter((command) => command.type === "unsubscribe"),
-    ).toHaveLength(0);
+      expect(subscribeCount()).toBe(1);
+      expect(result.current.status).toBe("current");
+    } finally {
+      dispose();
+    }
   });
 
   test("renders current and stale snapshots from an actual terminal remote State", async () => {
-    const { state, controls, emit } = await stateHarness();
-    const { result } = renderHook(() => useRemoteState(state));
-    const id = subscriptionId(controls);
+    const { state, subject, dispose } = await stateHarness();
+    try {
+      const { result } = renderHook(() => useRemoteState(state));
 
-    emit({
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "subscribed",
-      subscriptionId: id,
-      sequence: 0,
-    });
-    emit({
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "batch",
-      subscriptionId: id,
-      sequence: 1,
-      values: [23.5],
-    });
+      await waitFor(() =>
+        expect(result.current).toEqual({
+          status: "current",
+          active: true,
+          value: 23.5,
+        }),
+      );
 
-    await waitFor(() =>
-      expect(result.current).toEqual({
-        status: "current",
-        active: true,
-        value: 23.5,
-      }),
-    );
+      subject.complete();
 
-    emit({
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "complete",
-      subscriptionId: id,
-      sequence: 2,
-    });
-    await waitFor(() =>
-      expect(result.current).toEqual({
-        status: "stale",
-        active: false,
-        value: 23.5,
-      }),
-    );
+      await waitFor(() =>
+        expect(result.current).toEqual({
+          status: "stale",
+          active: false,
+          value: 23.5,
+        }),
+      );
+    } finally {
+      dispose();
+    }
   });
 });
