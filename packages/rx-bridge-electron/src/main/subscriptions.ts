@@ -253,12 +253,7 @@ export class Subscriptions {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
         controller.abort();
-        this.#endUnstarted(
-          command,
-          send,
-          { kind: "retired" },
-          session.signal,
-        );
+        this.#endUnstarted(command, send, { kind: "retired" }, session.signal);
       },
     };
     state.pending.set(command.subscriptionId, entry);

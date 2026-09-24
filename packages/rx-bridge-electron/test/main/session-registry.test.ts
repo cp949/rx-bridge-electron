@@ -516,7 +516,9 @@ describe("Main retire reason drives stream terminal notify", () => {
 
   function harness() {
     const server = createBridgeServer({
-      hardware: { state: { current$: currentValueSource(new BehaviorSubject(1)) } },
+      hardware: {
+        state: { current$: currentValueSource(new BehaviorSubject(1)) },
+      },
     });
     const messages: StreamMessage[] = [];
     const send = (message: StreamMessage) => messages.push(message);

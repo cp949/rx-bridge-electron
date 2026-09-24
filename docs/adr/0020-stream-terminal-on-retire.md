@@ -8,6 +8,9 @@
 
 - **활성 구독**: `session.signal` abort → `consumer.onSessionAbort` → `#close`. 전송 없음.
 - **`authorize` 대기 구독**: 대기 entry의 `onAbort`가 `controller.abort()`만 하고 끝난다. 기존 `#reject`는 `sessionSignal.aborted`면 아무것도 보내지 않는다 — retire 통지에 그대로 쓸 수 없다.
+
+  _(개정: RD-032 — 시작 전 거부·admission 거부·대기 중 retire·활성 retire의 통지 판정이 `Subscriptions`의 원인 표 한 곳으로 합쳐졌다. `#reject`는 삭제됐다.)_
+
 - **subscribe admission 거부**(`sender-unauthorized`·`frame-not-main`·`origin-not-allowed`): `controlStream`의 `sessions.establish` 실패는 진단만 남기고 응답이 없다([ADR 0016](0016-sender-admission.md) 결정 3의 "cancel/control 응답: 없음(무시)").
 
 문서가 살아있는 채로 세션이 끝나는 경우(detach, `server.dispose()`, bind `dispose()`)는 Renderer 구독자가 자신의 구독이 끊겼다는 사실을 알 방법이 없다. `RemoteState`는 `stale`로 전이하지 않고 마지막 값을 계속 "현재값"처럼 보여주고, `RemoteEvent` 구독은 그냥 멈춘다.
@@ -33,6 +36,8 @@
 ### 2. 통지 대상 3종
 
 활성 구독, `authorize` 대기 구독, admission 거부 구독(`sender-unauthorized`·`frame-not-main`·`origin-not-allowed`).
+
+_(개정: RD-032 — 시작 전 거부 응답(`subscribed`) 전송 도중 retire된 구독도 통지 대상이다. `subscribed`를 이미 보냈다면 retire 사유가 `detach`·`dispose`일 때 원래 거부 대신 `CANCELLED "Bridge session ended."`로 마감한다(결정 3의 "이미 기록된 terminal을 대체한다"와 같은 규칙). 실제 adapter(`webContents.send`)와 loopback 전달은 비동기라 이 창이 생기지 않는다 — 동기 `send`를 쓰는 embedder나 test에서만 관찰된다.)_
 
 ### 3. 쌓인 값은 버리고 종료 메시지를 바로 보낸다
 
