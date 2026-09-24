@@ -335,6 +335,38 @@ const { sessions, rpcInFlight, subscriptions, queuedEvents } =
 
 대용량 바이너리 전송과 지속적인 고속 스트림은 현재 범위에 포함되지 않습니다. 향후 이 기능이 필요하면 이 API에서 원시 IPC를 노출하지 말고 별도의 MessagePort 어댑터 뒤에 구현합니다. 이벤트 종류 전체와 각 `RejectReason`의 판정 지점은 [ADR 0010](../../docs/adr/0010-operational-diagnostics.md)에 있습니다.
 
+## Testing
+
+라이브러리 사용자의 test에서 preload/IPC 대신 실제 `server` + 실제 `createRendererApi`를 함께 쓰고 싶다면 `@cp949/rx-bridge-electron/testing`의 `createLoopbackTransport`를 씁니다. wire 형식(envelope·opaque ID·manifest)을 손으로 만들 필요가 없습니다 — 실제 server를 거치므로 wire 형식이 바뀌어도 이 방식으로 작성한 test는 바뀌지 않습니다.
+
+```ts
+import { createBridgeServer } from "@cp949/rx-bridge-electron/main";
+import { createLoopbackTransport } from "@cp949/rx-bridge-electron/testing";
+import { createRendererApi } from "@cp949/rx-bridge-electron/renderer";
+import type { AppBridge } from "./bridge/contract.js";
+
+const server = createBridgeServer(impl, options);
+const transport = createLoopbackTransport(server, { role: "main" });
+const api = await createRendererApi<AppBridge>(transport);
+
+await api.device.rpc.connect();
+
+transport.dispose(); // detach만 한다 — server는 여전히 살아 있다
+server.dispose();
+```
+
+`createLoopbackTransport(server, options?)`는 `BridgeTransport & { dispose(): void }`를 반환합니다. `server: StreamBridgeServer`는 `createBridgeServer`가 만든 것을 그대로 넘기며, `createLoopbackTransport`가 내부에서 server를 만들지는 않습니다. `options`:
+
+| 옵션       | 기본값                                                                           | 설명                                                                                                                                           |
+| ---------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `sender`   | `{ webContentsId: 1, frameId: 1, isMainFrame: true, origin: "loopback://test" }` | `Partial<SenderIdentity>`, 지정한 필드만 덮어씁니다. 다중 창은 `webContentsId`(필요하면 `frameId`도)를 다르게 준 transport를 여러 개 만듭니다. |
+| `clientId` | `"loopback-client"`                                                              | 같은 `server`에 여러 transport를 붙일 때는 서로 다른 값을 주세요 — 같은 `webContentsId`에서 한 번 retire된 `clientId`는 재사용할 수 없습니다.  |
+| `role`     | `"default"`                                                                      | `server.attach`에 넘기는 target의 role — `authorize`의 `context.windowRole`로 전달됩니다.                                                      |
+
+요청·응답과 stream 메시지 모두 `structuredClone`을 거치고(preload와 같은 protocol 함수 `withEnvelope`·`parseStreamMessage`로 envelope를 조립·검사) 참조를 공유하지 않습니다. `cancel`·`control` 호출과 stream 메시지 전달은 microtask로 미뤄집니다(`control()`이 반환되기 전에 `onStreamMessage` listener가 불리지 않습니다). `server`가 던지는 예외는 폴백 없이 그대로 드러납니다(운영 adapter의 try/catch 폴백을 공유하지 않습니다). `dispose()`는 detach와 listener 해제만 합니다 — `server`는 dispose하지 않으므로 같은 `server`에 새 loopback transport를 계속 만들 수 있습니다.
+
+운영(production) 코드에서는 쓰지 않습니다 — Renderer는 여전히 고정 preload transport만 받아야 합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)). 근거는 [ADR 0017](../../docs/adr/0017-loopback-test-transport.md)에 있습니다.
+
 ## 호환성 변경
 
 이전 버전에서 올라오는 경우 다음을 확인하세요.

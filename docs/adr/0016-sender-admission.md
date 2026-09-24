@@ -69,7 +69,7 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 - **`bindElectronBridge`가 sink를 직접 받는다**: adapter가 자체 판정(`frame-not-main`/`origin-not-allowed`)을 유지한 채 sink를 직접 받아 기록하는 안. sink 설정 지점이 `createBridgeServer`와 `bindElectronBridge` 두 곳으로 늘어나고, 두 지점이 같은 요청에 각자 `rejected`를 기록하지 않도록 조율하는 부담이 남는다(ADR 0010 §15 "중복 방지"가 이미 이 문제를 다뤘다). 판정을 server 하나로 모으면 이 조율 자체가 필요 없어진다. 기각.
 - **사유 통합(`sender-unauthorized` 하나로 유지)**: 채널 무관 통일은 하되 세분화는 하지 않는 안. frame 불일치와 origin 불일치를 구분하지 못해 진단이 지금과 같은 정보 손실을 유지한다. 기각.
 - **사유 세분화(`RejectReason` enum 확장)**: `frame-not-main`/`origin-not-allowed`보다 더 세분화된 사유(예: subframe과 stale main frame을 구분)를 추가하는 안. `RejectReason`을 다루는 기존 망라 switch(sink 구현체)가 모두 새 케이스를 처리해야 하는 breaking 변경이 되고, 이번 작업의 목표(채널 무관 통일)를 넘어선다. 기각.
-- **`AttachedTarget`에 `admit(sender)` port를 추가**: frame·origin·client 판정 자체를 adapter가 구현하는 port로 내리는 안. `FakeTarget` 같은 test 구현이 순서·사유 매핑까지 재구현해야 하고, adapter마다(향후 loopback adapter 포함, 후보 06) 판정 순서가 어긋날 위험이 생긴다. 판정을 `DocumentSessions` 안에 두고 `isCurrentMainFrame`/`isAllowedOrigin`만 port로 남기는 편이 순서를 한 곳에 고정한다. 기각.
+- **`AttachedTarget`에 `admit(sender)` port를 추가**: frame·origin·client 판정 자체를 adapter가 구현하는 port로 내리는 안. `FakeTarget` 같은 test 구현이 순서·사유 매핑까지 재구현해야 하고, adapter마다(향후 loopback adapter 포함, [ADR 0017](0017-loopback-test-transport.md)) 판정 순서가 어긋날 위험이 생긴다. 판정을 `DocumentSessions` 안에 두고 `isCurrentMainFrame`/`isAllowedOrigin`만 port로 남기는 편이 순서를 한 곳에 고정한다. 기각.
 - **wire 응답에 거부 사유를 싣는다**: RPC·handshake 거부 응답에 `RejectReason`을 포함해 Renderer가 원인을 알 수 있게 하는 안. Renderer는 신뢰 경계 밖이라 판정 근거(frame·origin·client 상태)를 제공하면 공격자가 admission 로직을 탐색하는 데 쓸 수 있다. 사유는 서버 운영자만 보는 진단 채널에만 싣는다(기존 결정 유지). 기각.
 
 ## 한계
@@ -81,7 +81,7 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 ## 범위 밖
 
 - 후보 05: 채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것(TRP-002). preload는 계속 `electron-adapter.ts`에서 `ELECTRON_BRIDGE_CHANNELS`를 import한다. — RD-019에서 처리(위 개정 표시, [ADR 0013](0013-wiring-defaults.md)).
-- 후보 06: loopback adapter. 이 ADR의 새 시그니처(`unknown` 인자, server가 판정 전부 소유)는 그 adapter를 만들 수 있는 전제만 마련한다 — adapter 자체는 이 작업의 범위가 아니다.
+- 후보 06: loopback adapter. 이 ADR의 새 시그니처(`unknown` 인자, server가 판정 전부 소유)는 그 adapter를 만들 수 있는 전제만 마련한다 — adapter 자체는 이 작업의 범위가 아니다. — RD-020에서 처리([ADR 0017](0017-loopback-test-transport.md)).
 - `DocumentSessions.retiredClientCount`(test 전용 인터페이스), `RejectReason` enum 값 추가·삭제, wire 응답에 거부 사유 싣기.
 
 ## 이전(migration)

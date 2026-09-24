@@ -3,3 +3,5 @@
 Renderer는 contract에 선언된 작업을 고정된 `BridgeTransport`로 요청한다. raw `ipcRenderer`, 임의 채널, Electron event를 Renderer API로 제공하지 않는다. Main/preload/renderer 진입점을 분리하고 payload와 권한을 Main에서 다시 확인해 Renderer의 IPC 권한을 계약 범위로 제한한다. 이 기록은 현재 코드와 공개 README에서 확인한 운영상 근거이며, 과거 논의의 세부 내용은 재구성하지 않는다.
 
 이 고정된 채널·전역 이름의 기본값(`namespace` 기본 `"default"`, preload `globalName` 기본 `"rxBridge"`)은 [ADR 0013](0013-wiring-defaults.md)에 있다.
+
+`./testing`이 공개하는 `createLoopbackTransport`는 이 원칙의 예외가 아니다 — Renderer 프로덕션 진입점(`./renderer`)은 여전히 고정 preload transport만 받고, loopback은 test 코드가 명시적으로 import하는 별도 subpath다. 근거는 [ADR 0017](0017-loopback-test-transport.md)에 있다.

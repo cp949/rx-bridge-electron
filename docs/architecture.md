@@ -14,8 +14,11 @@
 | `@cp949/rx-bridge-electron/main`     | Electron Main | 서버 생성, 핸들러 등록, 권한 확인, 검증, 세션 및 스트림 관리                   |
 | `@cp949/rx-bridge-electron/preload`  | preload       | 고정 IPC 채널 어댑터와 `contextBridge` 노출                                    |
 | `@cp949/rx-bridge-electron/renderer` | Renderer      | 비동기 API, RPC 클라이언트, `RemoteState`, RxJS Event                          |
+| `@cp949/rx-bridge-electron/testing`  | test 전용     | `createLoopbackTransport` — in-process `BridgeTransport` 두 번째 adapter       |
 
 계약은 런타임 값이 아니라 순수 TS 타입 `B`다. handler, Electron 객체, 자격증명, Node API, 함수, Observable/Subject는 preload 경계를 건너지 않는다. Renderer에는 고정된 `BridgeTransport`만 노출하며 `ipcRenderer`, 임의 채널, raw Electron event를 공개하지 않는다.
+
+`BridgeTransport`(`connect`·`invoke`·`cancel`·`control`·`onStreamMessage`)의 실제 adapter는 preload 하나다. `./testing`이 공개하는 `createLoopbackTransport(server, options?)`는 두 번째 adapter로, 호출자가 만든 `server`에 고정 `SenderIdentity`로 `attach`해 실제 server를 거치는 요청·응답·stream을 만든다 — preload와 같은 protocol 함수(`withEnvelope`·`parseStreamMessage`)로 envelope를 조립하고 양방향 `structuredClone`을 거친다. 라이브러리 사용자의 test 전용이며 운영 export가 아니다 — `./main`을 타입으로만 참조하고 `electron`을 런타임에 불러오지 않는다. [ADR 0001](adr/0001-fixed-preload-capability.md)이 정한 "Renderer는 고정 preload transport만 노출한다" 원칙에 예외를 만들지 않는다. 근거는 [ADR 0017](adr/0017-loopback-test-transport.md)에 있다.
 
 ## 계약 형태와 등록
 
