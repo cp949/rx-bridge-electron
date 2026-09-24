@@ -1,4 +1,3 @@
-import type { PublicManifest } from "../contract/index.js";
 // bridge-types.ts에서 직접 import한다(barrel `../contract/index.js`를 거치면
 // tsup의 dts 번들러가 `contract`/`renderer` 두 entry가 같은 파일을 서로 다른
 // chunk에서 참조한다고 보고 순환 chunk 경고를 낸다 — `main/create-bridge-server.ts`와
@@ -103,6 +102,8 @@ function rejectManifestEntry(
   }
 }
 
+// 삽입 전제: `OperationPathTrie`(addManifestPath 호출부)가 leaf/namespace
+// 충돌과 중복 경로를 이미 거부했다 — 여기서는 삽입만 한다.
 function addPath<Leaf>(
   root: PathNode<Leaf>,
   segments: readonly string[],
@@ -110,18 +111,12 @@ function addPath<Leaf>(
 ): void {
   let node = root;
   for (const segment of segments) {
-    if (node.leaf !== undefined) {
-      throw internal("Manifest contains a leaf/namespace collision.");
-    }
     let child = node.children.get(segment);
     if (child === undefined) {
       child = { children: new Map() };
       node.children.set(segment, child);
     }
     node = child;
-  }
-  if (node.leaf !== undefined || node.children.size > 0) {
-    throw internal("Manifest contains duplicate or colliding paths.");
   }
   node.leaf = leaf;
 }
@@ -155,7 +150,6 @@ function addManifestPath(
 
 function parseHandshake(value: unknown): {
   readonly session: ProtocolEnvelope;
-  readonly manifest: PublicManifest;
   readonly tree: ManifestNode;
 } {
   // 버전 불일치만 별도 문구로 구분한다(Main·preload 버전이 어긋난 배포를
@@ -175,24 +169,16 @@ function parseHandshake(value: unknown): {
     clientId: response.clientId,
   };
 
-  const manifest = {} as Record<OperationCategory, readonly string[]>;
   const tree: ManifestNode = { children: new Map() };
   const paths = new OperationPathTrie();
 
   for (const category of OPERATION_CATEGORIES) {
-    const copied: string[] = [];
     for (const entry of response.manifest[category]) {
       addManifestPath(paths, tree, category, entry);
-      copied.push(entry);
     }
-    manifest[category] = Object.freeze(copied);
   }
 
-  return {
-    session,
-    manifest: Object.freeze(manifest) as unknown as PublicManifest,
-    tree,
-  };
+  return { session, tree };
 }
 
 interface RendererServices {
