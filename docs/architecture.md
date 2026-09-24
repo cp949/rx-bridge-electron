@@ -124,6 +124,8 @@ Main은 `createBridgeServer(impl, { diagnostics })`로 넘긴 `DiagnosticsSink`�
 
 근거와 판정 지점 전체 목록, `RejectReason` 11개 각각의 판정 위치는 [ADR 0010](adr/0010-operational-diagnostics.md)에 있다.
 
+Renderer(`src/renderer`)는 별도 진단 통로를 갖는다. `createRendererApi<B>(options)`의 `diagnostics` 옵션으로 넘긴 `RendererDiagnosticsSink`에 RPC 확정 원인(`rpc-settled`), 원격 구독의 시작·종료(`subscription-opened`/`subscription-closed`), 스트림 메시지 폐기(`message-dropped`), handshake 실패(`handshake-failed`), `transport.cancel`·`transport.control` 전송 실패 삼킴(`transport-failed`)을 동기로 기록한다. `rpc-settled`는 호출 하나당, `subscription-opened`/`closed`는 원격 구독(generation) 단위로 정확히 1회·1쌍 기록되며 로컬 구독자 수와 무관하다. 기록 금지 항목과 sink 예외 격리·기본 무출력 규칙은 Main의 `DiagnosticsSink`(위 문단)와 같다 — 예외는 `code`이며 `cause: "remote-error"`일 때만 싣는다. `RpcClient`·`StreamMultiplexer`는 Renderer main world에서 실행되므로 sink 콜백은 `contextBridge`를 건너지 않는다. Main `DiagnosticsSink`·`BridgeDiagnostic`과는 별개 타입이다 — 관측 지점과 식별자 규칙이 다르다(Renderer에는 `RejectReason`이 없고 로컬 확정 원인이 있다). 근거와 이벤트 타입 전체 목록은 [ADR 0022](adr/0022-renderer-diagnostics.md)에 있다.
+
 ## 데모와 증거 범위
 
 `apps/demo`는 실제 장치 드라이버가 아니라 가상 장치와 relay를 통해 라이브러리의 계약, 역할 권한, State/Event, 다중 창 동작을 보여준다. 장치 연결 지원으로 해석하지 않는다.

@@ -27,16 +27,11 @@ export type SubscriptionCloseCause =
 
 /** `handshake-failed` 이벤트의 실패 원인. */
 export type HandshakeFailureReason =
-  | "transport"
-  | "malformed"
-  | "version-mismatch"
-  | "invalid-manifest";
+  "transport" | "malformed" | "version-mismatch" | "invalid-manifest";
 
 /** `message-dropped` 이벤트의 폐기 원인. */
 export type DroppedMessageReason =
-  | "malformed"
-  | "envelope-mismatch"
-  | "out-of-order";
+  "malformed" | "envelope-mismatch" | "out-of-order";
 
 /**
  * Renderer 진단 이벤트. 닫힌 판별 유니온이다. 식별자(`requestId`·
@@ -59,9 +54,15 @@ export type RendererDiagnostic =
       readonly cause: SubscriptionCloseCause;
       readonly code?: string;
     }
-  | { readonly type: "handshake-failed"; readonly reason: HandshakeFailureReason }
+  | {
+      readonly type: "handshake-failed";
+      readonly reason: HandshakeFailureReason;
+    }
   | { readonly type: "message-dropped"; readonly reason: DroppedMessageReason }
-  | { readonly type: "transport-failed"; readonly channel: "cancel" | "control" };
+  | {
+      readonly type: "transport-failed";
+      readonly channel: "cancel" | "control";
+    };
 
 /** Renderer가 진단 이벤트를 관측하기 위해 구현하는 sink. */
 export interface RendererDiagnosticsSink {

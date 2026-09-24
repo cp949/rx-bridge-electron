@@ -9,7 +9,7 @@
 | `@cp949/rx-bridge-electron/contract` | 모든 프로세스 | 계약 타입에서 파생하는 타입(`BridgeApi`/`BridgeImpl`/`SchemasFor`/`ErrorsFor`) |
 | `@cp949/rx-bridge-electron/main`     | Main          | 서버 생성, 핸들러 연결, 권한 확인, 검증, 세션, 진단 정보                       |
 | `@cp949/rx-bridge-electron/preload`  | preload       | `contextBridge`로 노출하는 고정 Electron 채널 어댑터                           |
-| `@cp949/rx-bridge-electron/renderer` | renderer      | 동결 API 객체, RPC 클라이언트, `RemoteState`, RxJS Event                       |
+| `@cp949/rx-bridge-electron/renderer` | renderer      | 동결 API 객체, RPC 클라이언트, `RemoteState`, RxJS Event, 진단 sink            |
 
 계약은 런타임 값이 아니라 순수 TS 타입입니다. 핸들러, Electron 객체, 자격 증명, Node API, 함수, `Observable`, `Subject`는 preload 경계를 넘지 않습니다. Renderer 애플리케이션 코드는 동결된 `BridgeTransport`만 받으며 `ipcRenderer`, `send`, `invoke`, 채널 이름 또는 원시 Electron 이벤트에는 접근할 수 없습니다.
 
@@ -307,6 +307,23 @@ const scopedDataEvent = scopedEvent(
 하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다(위 "Event buffer 옵션" 참고, 생략 시 기본값).
 
 문서가 살아있는 채로 Main 쪽 세션이 끝나면(detach 또는 `server.dispose()`/bind `dispose()`), 활성 State/Event 구독과 `authorize` 대기 중이던 구독은 `RemoteError("CANCELLED", "Bridge session ended.")`를 받습니다 — `RemoteState`는 값이 있었으면 `stale`, 없었으면 `uninitialized`로 전이하고, 쌓여 있던 값은 전달하지 않습니다. 세션이 끝난 뒤의 새 구독은 `subscribed` 확인 직후 같은 `RemoteError("FORBIDDEN", "Bridge sender is not authorized.")`로 끝납니다(RPC 거부와 같은 코드·문구). navigation(문서 commit 시점, [ADR 0019](../../docs/adr/0019-navigation-retire-on-commit.md))·renderer process 종료·문서 파괴·같은 문서의 새 클라이언트 등록으로 인한 retire는 통지하지 않습니다 — 옛 문서 자신이 이미 없거나 재연결 흐름의 일부이기 때문입니다. 전송 실패는 삼킵니다(best-effort). 근거는 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
+
+### Renderer 진단
+
+`createRendererApi<B>(options)`의 `diagnostics` 옵션으로 `RendererDiagnosticsSink`를 연결하면 RPC 확정 원인, 원격 구독의 시작·종료 원인, 스트림 메시지 폐기, handshake 실패, `transport.cancel`·`transport.control`(unsubscribe·acknowledge) 전송 실패 삼킴을 이벤트 6종(`rpc-settled`·`subscription-opened`·`subscription-closed`·`handshake-failed`·`message-dropped`·`transport-failed`)으로 관측할 수 있습니다. `rpc-settled`는 호출 하나당 정확히 1회, `subscription-opened`/`subscription-closed`는 원격 구독(generation) 단위로 1쌍씩 기록됩니다. 식별자는 등록된 와이어 key만 실리며(`RemoteError.code`는 `cause: "remote-error"`일 때만 예외로 포함), `Error` 객체·`message`·`stack`·`details`·원문 payload·`requestId`·`subscriptionId`·`clientId`는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 API 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다. 스냅샷 조회는 없습니다 — 활성 구독 수는 `subscription-opened`/`closed` 쌍으로 셀 수 있습니다.
+
+```ts
+const api = await createRendererApi<AppBridge>({
+  diagnostics: {
+    record: (event) => {
+      if (event.type === "rpc-settled" && event.cause !== "ok")
+        metrics.increment(`renderer.rpc-settled.${event.cause}`);
+    },
+  },
+});
+```
+
+`RpcClient`·`StreamMultiplexer`는 Renderer main world에서 실행되므로 sink 콜백은 `contextBridge`를 건너지 않습니다. 이벤트 타입·원인 판정 전체 목록은 [ADR 0022](../../docs/adr/0022-renderer-diagnostics.md)에 있습니다.
 
 ## 검증, 한도, 범위 밖 기능
 

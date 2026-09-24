@@ -1,12 +1,12 @@
 # Renderer 진단 훅 추가
 
-- Status: 승격 (ROADMAP.md#RD-028)
+- Status: closed — RD-028 구현 완료([ADR 0022](../../../docs/adr/0022-renderer-diagnostics.md))
 - 출처: `_works/20260924-05-operational-diagnostics/`(RD-007 운영 진단 작업, checklist.md "범위(제외)" 및
   "확정된 설계 결정" 2, 17).
 
 ## 배경
 
-RD-007([ADR 0010](../../docs/adr/0010-operational-diagnostics.md))은 Main 프로세스의 `DiagnosticsSink`
+RD-007([ADR 0010](../../../docs/adr/0010-operational-diagnostics.md))은 Main 프로세스의 `DiagnosticsSink`
 확장만 다뤘다. `RejectReason`, 수명주기 이벤트(`session-opened`/`closed`, `subscription-opened`/`closed`),
 `getDiagnosticsSnapshot()`은 모두 Main 쪽 `createBridgeServer`에만 있다.
 
