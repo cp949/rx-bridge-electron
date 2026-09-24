@@ -293,19 +293,24 @@ function normalizeEventBuffer(
   path: string,
 ): { readonly capacity: number; readonly overflow: OverflowPolicy } {
   if (buffer === undefined) return DEFAULT_EVENT_BUFFER;
-  if (!Number.isSafeInteger(buffer.capacity) || buffer.capacity < 1) {
+  // 타입을 우회한 `null`·원시값도 경로 포함 메시지로 거부하고, getter가
+  // 검사와 복사 사이에 다른 값을 돌려주지 못하게 각 필드를 한 번만 읽는다.
+  const { capacity, overflow } = (
+    typeof buffer === "object" && buffer !== null ? buffer : {}
+  ) as Partial<EventSourceBuffer>;
+  if (!Number.isSafeInteger(capacity) || (capacity as number) < 1) {
     throw new TypeError(
       `Event source '${path}' buffer capacity must be a positive safe integer.`,
     );
   }
-  if (!VALID_OVERFLOW_POLICIES.has(buffer.overflow)) {
+  if (!VALID_OVERFLOW_POLICIES.has(overflow as OverflowPolicy)) {
     throw new TypeError(
       `Event source '${path}' buffer overflow must be "error", "drop-oldest", or "drop-newest".`,
     );
   }
   return Object.freeze({
-    capacity: buffer.capacity,
-    overflow: buffer.overflow,
+    capacity: capacity as number,
+    overflow: overflow as OverflowPolicy,
   });
 }
 
@@ -432,15 +437,17 @@ function walkImplNode(
             `Event source '${path}' must be an Observable or source adapter.`,
           );
         }
+        let delivery: EventDelivery;
         let rawBuffer: EventSourceBuffer | undefined;
         if (source instanceof Observable) {
-          rawBuffer = undefined;
+          delivery = { mode: "broadcast", source };
         } else if (isBroadcastSource(source)) {
           if (!(source.source instanceof Observable)) {
             throw new TypeError(
               `Event source '${path}' source must be an Observable.`,
             );
           }
+          delivery = { mode: "broadcast", source: source.source };
           rawBuffer = source.buffer;
         } else {
           if (typeof source.factory !== "function") {
@@ -448,15 +455,10 @@ function walkImplNode(
               `Event source '${path}' factory must be a function.`,
             );
           }
+          delivery = { mode: "scoped", factory: source.factory };
           rawBuffer = source.buffer;
         }
         const buffer = normalizeEventBuffer(rawBuffer, path);
-        const delivery: EventDelivery =
-          source instanceof Observable
-            ? { mode: "broadcast", source }
-            : isBroadcastSource(source)
-              ? { mode: "broadcast", source: source.source }
-              : { mode: "scoped", factory: source.factory };
         const eventOutput = categorySchemas?.[operation] as
           Schema<BridgeValue> | undefined;
         eventTable.set(key, {

@@ -194,6 +194,24 @@ describe("createBridgeServer(impl, options): registration이 event source의 buf
     );
   });
 
+  test("buffer가 null이면 경로를 포함한 capacity 메시지로 실패한다", () => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: {
+              mode: "broadcast",
+              source: new Subject<SerialLine>(),
+              buffer: null,
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      /Event source 'device\/data' buffer capacity must be a positive safe integer\./,
+    );
+  });
+
   test("overflow 값이 오타면 실패한다", () => {
     expect(() =>
       createBridgeServer({
