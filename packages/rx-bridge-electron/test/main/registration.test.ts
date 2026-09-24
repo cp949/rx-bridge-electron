@@ -141,15 +141,9 @@ describe("createBridgeServer(impl): manifest과 실제 dispatch/subscribe의 일
   });
 });
 
-// RD-017 DELTA-01: manifest 순서는 handshake로 그대로 관측되는 값이라
-// wire key 조립 방식을 바꾸는 이후 DELTA(코어 `formatWireKey` 도입)에서도
-// 지금과 같은 값이어야 한다. `manifestCategoryList`(registration.ts)는
-// "도메인명 정렬 → 도메인 안 operation명 정렬" 순서다 — wire key 문자열
-// 전체를 정렬한 순서와는 다르다(도메인 "a-x"와 "a/b"를 비교하면 도메인명
-// 정렬은 "a" < "a-x"로 "a"·"a/b" 계열이 "a-x"보다 앞이어야 할 것 같지만,
-// 실제로는 도메인 "a"와 "a-x"만 비교되고 "a/b"는 별도 도메인명 "a/b"
-// 자체로 정렬되므로 실행 결과로 확인해야 한다. 이 test는 그 실행 결과를
-// 고정한다).
+// manifest 순서는 handshake로 관측된다. 도메인명 정렬 → operation명 정렬이며
+// wire key 문자열 전체 정렬과 다르다(문자열 정렬이면 `-`(0x2D) < `/`(0x2F)라
+// `rpc:a-x/op`, `rpc:a/b/op`, `rpc:a/op` 순서가 된다).
 describe("createBridgeServer(impl): manifest 순서 characterization", () => {
   test("도메인 'a'·'a-x'·'a/b'가 섞이면 도메인명 정렬 → operation명 정렬 순서로 manifest에 실린다", () => {
     const server = createBridgeServer({

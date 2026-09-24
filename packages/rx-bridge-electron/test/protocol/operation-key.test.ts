@@ -1,26 +1,18 @@
-// RD-017: `operation-key-cases.ts`의 공유 case table을 코어
-// `src/protocol/operation-key.ts`에 직접 돌린다. 이 파일은 코어
-// 함수(`parseWireKey`·`checkDomainSegments`·`checkOperationName`·
-// `OperationPathTrie`)를 직접 호출해 판정을 낸다는 것과, 각 reject
-// case의 verdict `reason`이 case table에 적어 둔 값과 같다는 것을 고정한다.
-// DELTA-01에서는 Main·Renderer "seam"(impl 등록, handshake 파싱)을 통해
-// 간접으로 이 table을 검증하는 harness(`operation-key-parity.test.ts`)가
-// 함께 있었지만, DELTA-05에서 그 harness를 제거하고 규칙 검증은 이 파일
-// 하나로 모았다 — Main·Renderer는 이제 대표 seam test 몇 건으로만 "코어를
-// 실제로 호출한다"는 사실을 확인한다(`test/main/create-bridge-server-impl.test.ts`,
-// `test/renderer/rpc-client.test.ts`).
-//
-// manifest 한 건을 판정하는 절차는 `rpc`→`state`→`event` 순서, 각 배열은
-// 선언 순서로 모든 key를 훑으며: `parseWireKey` → (파싱된 category가 그
-// key가 속한 배열의 category와 같은지 대조 — 다르면 `"category-mismatch"`,
-// Renderer 전용 검사) → `OperationPathTrie.add`. 이 절차에서 첫 실패가
-// 나오면 그 reason을 기록하고 멈춘다(같은 manifest에 실패가 여럿이어도
-// 첫 번째만 본다 — case table도 그렇게 설계돼 있다).
+/**
+ * operation key 코어(`src/protocol/operation-key.ts`)의 규칙 test.
+ * `operation-key-cases.ts`의 case table을 코어 함수로 직접 판정하고, reject
+ * case는 첫 실패 `reason`까지 대조한다. Main·Renderer seam test는 호출자가
+ * 이 코어를 실제로 쓰는지만 대표 건으로 확인한다.
+ *
+ * `evaluateManifest`는 Renderer manifest 파서와 같은 절차(parse → 배열
+ * category 대조 → trie)를 코어 함수만으로 재구성한다.
+ */
 import { describe, expect, test } from "vitest";
 
 import {
   checkDomainSegments,
   checkOperationName,
+  checkSegment,
   formatWireKey,
   OperationPathTrie,
   parseWireKey,
@@ -78,10 +70,7 @@ describe("operation-key 코어: case table 판정", () => {
         expect(failures).toEqual([]);
         return;
       }
-      expect(failures.length).toBeGreaterThan(0);
-      if (caseEntry.reason !== undefined) {
-        expect(failures[0]?.reason).toBe(caseEntry.reason);
-      }
+      expect(failures[0]?.reason).toBe(caseEntry.reason);
     });
   }
 });
@@ -136,6 +125,16 @@ describe("operation-key 코어: checkDomainSegments·checkOperationName 직접 �
 
   test("허용 operation 이름은 ok:true", () => {
     expect(checkOperationName("connect")).toEqual({ ok: true });
+  });
+
+  test("checkSegment는 위치 무관 규칙만 본다(root dispose·카테고리 이름 허용)", () => {
+    expect(checkSegment("dispose")).toEqual({ ok: true });
+    expect(checkSegment("rpc")).toEqual({ ok: true });
+    expect(checkSegment("then")).toEqual({
+      ok: false,
+      reason: "reserved-segment",
+      segment: "then",
+    });
   });
 });
 

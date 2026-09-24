@@ -1,14 +1,11 @@
-// RD-017 DELTA-02: operation key(wire key `category:domain/op`) 문법의 단일
-// 정의. Main(`src/main/registration.ts`)과 Renderer(`src/renderer/create-renderer-api.ts`)가
-// 각자 복제해 온 이름 규칙·경로 충돌 검사를 이 모듈 하나로 모은다. 이
-// DELTA에서는 호출자를 바꾸지 않는다 — 두 구현은 여전히 자체 로직을 쓴다
-// (DELTA-03·04에서 이 모듈로 교체된다). 코어는 throw하지 않는다 — 모든
-// 함수가 verdict(`{ ok: true, … } | { ok: false, reason, … }`)를 반환하고,
-// 상세 에러 메시지 조립(Main `TypeError` 문구, Renderer `RemoteError`
-// 문구)은 호출자 책임이다(checklist 결정 6).
+// operation key(wire key `category:domain/op`) 문법의 단일 정의. Main 등록
+// (`buildRegistrationTableFromImpl`)과 Renderer manifest 파서
+// (`createRendererApi`)가 모두 이 모듈을 호출한다 — 코드는 공유하고 신뢰는
+// 공유하지 않는다(ADR 0007 개정 절). 코어는 throw하지 않고 verdict를
+// 반환하며, 에러 타입·메시지 조립(Main `TypeError`, Renderer `RemoteError`)은
+// 호출자 책임이다.
 //
-// `./index.ts`는 이 모듈을 re-export하지 않는다 — 공개 API를 늘리지 않고
-// Main·Renderer가 파일 경로로 직접 import한다(checklist 결정 2).
+// `./index.ts`는 이 모듈을 re-export하지 않는다 — 공개 API가 아니다.
 
 /** wire key의 3가지 카테고리 prefix. */
 export const OPERATION_CATEGORIES = ["rpc", "state", "event"] as const;
@@ -55,20 +52,26 @@ export interface OperationKeyReject {
 
 export type OperationKeyVerdict = OperationKeyOk | OperationKeyReject;
 
-/** segment 하나의 기본 검사(빈 문자열·dotted·예약어). 실패 이유만 돌려준다. */
-function checkBasicSegment(
-  segment: string,
-): "empty-segment" | "dotted-segment" | "reserved-segment" | undefined {
-  if (segment.length === 0) return "empty-segment";
-  if (segment.includes(".")) return "dotted-segment";
-  if (RESERVED_WORD_SEGMENTS.has(segment)) return "reserved-segment";
-  return undefined;
+/**
+ * segment 하나의 위치 무관 검사(빈 문자열·dotted·JS 예약어). 도메인 전체
+ * 경로 기준 규칙(root `dispose`, 카테고리 이름)은 적용하지 않는다 — Main이
+ * impl namespace key(`"a/b"`)를 조각별로 검사할 때 이 함수를 쓴다.
+ */
+export function checkSegment(segment: string): OperationKeyVerdict {
+  if (segment.length === 0) {
+    return { ok: false, reason: "empty-segment", segment };
+  }
+  if (segment.includes(".")) {
+    return { ok: false, reason: "dotted-segment", segment };
+  }
+  if (RESERVED_WORD_SEGMENTS.has(segment)) {
+    return { ok: false, reason: "reserved-segment", segment };
+  }
+  return { ok: true };
 }
 
 /**
- * 도메인 segment 배열을 검증한다. Main `assertDomainName`(`registration.ts:76-88`)·
- * Renderer `parseSegments`의 도메인 부분(`create-renderer-api.ts:113-127`)과
- * 같은 규칙을 같은 순서로 적용한다: (1) 각 segment의 빈 문자열·dotted·예약어를
+ * 도메인 segment 배열을 검증한다. 규칙을 이 순서로 적용한다: (1) 각 segment의 빈 문자열·dotted·예약어를
  * segment 순서대로 검사해 처음 걸린 곳에서 멈춘다 (2) 첫 segment가
  * `dispose`면 거부한다(중첩 위치의 `dispose`는 허용) (3) 어느 위치든
  * 카테고리 이름(`rpc`/`state`/`event`) segment는 거부한다. 도메인 자체가
@@ -79,8 +82,8 @@ export function checkDomainSegments(
 ): OperationKeyVerdict {
   const segments = domain.length === 0 ? [""] : domain;
   for (const segment of segments) {
-    const reason = checkBasicSegment(segment);
-    if (reason !== undefined) return { ok: false, reason, segment };
+    const verdict = checkSegment(segment);
+    if (!verdict.ok) return verdict;
   }
   if (segments[0] === ROOT_RESERVED_SEGMENT) {
     return { ok: false, reason: "reserved-segment", segment: segments[0] };
@@ -94,18 +97,16 @@ export function checkDomainSegments(
 }
 
 /**
- * operation 이름을 검증한다. Main `assertOperationName`(`registration.ts:91-95`)과
- * 같은 규칙: `/`로 나눈 각 조각에 도메인과 같은 기본 검사를 적용한 뒤, 조각이
- * 둘 이상이면(중첩 경로) 거부한다. wire key 파싱(`parseWireKey`)은 이미
- * `/`로 나눈 마지막 조각 하나만 넘기므로 `nested-operation`에 보통 도달하지
- * 않지만, 이 함수는 아직 나누지 않은 원시 이름(Main의 impl namespace key
- * 등)을 직접 받는 호출에도 안전하도록 그 검사를 유지한다.
+ * operation 이름을 검증한다. `/`로 나눈 각 조각에 `checkSegment`를 적용한 뒤,
+ * 조각이 둘 이상이면(중첩 경로) 거부한다. `parseWireKey`는 이미 나눈 마지막
+ * 조각만 넘기므로 `nested-operation`은 Main이 impl의 operation key(원시
+ * 문자열)를 넘길 때만 나온다.
  */
 export function checkOperationName(operation: string): OperationKeyVerdict {
   const segments = operation.split("/");
   for (const segment of segments) {
-    const reason = checkBasicSegment(segment);
-    if (reason !== undefined) return { ok: false, reason, segment };
+    const verdict = checkSegment(segment);
+    if (!verdict.ok) return verdict;
   }
   if (segments.length !== 1) {
     return { ok: false, reason: "nested-operation" };
@@ -177,18 +178,14 @@ interface TrieNode {
 
 /**
  * 도메인+operation 전체 경로(카테고리 제외)를 누적하며 leaf/namespace 충돌과
- * 중복 경로를 검출한다. Main `addPath`(`registration.ts:111-131`)·Renderer
- * `addPath`(`create-renderer-api.ts:131-152`)와 같은 알고리즘이다 — 두
- * 구현 모두 카테고리 전체에 걸쳐 trie 하나를 공유하므로(`walkImplNode`의
- * `pathTree`, `parseHandshake`의 `paths`), 카테고리가 달라도 경로가 겹치면
- * 충돌로 본다. `add`를 호출하는 쪽이 인스턴스를 만들어 매니페스트/impl 전체에
- * 걸쳐 재사용한다.
+ * 중복 경로를 검출한다. 호출자는 인스턴스 하나를 impl·manifest의 세 카테고리
+ * 전체에 걸쳐 쓴다 — 카테고리가 달라도 경로가 겹치면 충돌이다(ADR 0007).
  */
 export class OperationPathTrie {
-  private readonly root: TrieNode = { leaf: false, children: new Map() };
+  readonly #root: TrieNode = { leaf: false, children: new Map() };
 
-  add(segments: readonly string[]): OperationPathVerdict {
-    let node = this.root;
+  public add(segments: readonly string[]): OperationPathVerdict {
+    let node = this.#root;
     for (const segment of segments) {
       if (node.leaf) {
         return { ok: false, reason: "leaf-namespace-collision" };

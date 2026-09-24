@@ -5,11 +5,13 @@ import type { BridgeValue } from "../protocol/index.js";
 import {
   checkDomainSegments,
   checkOperationName,
+  checkSegment,
   formatWireKey,
   isOperationCategory,
   OPERATION_CATEGORIES,
   OperationPathTrie,
   type OperationCategory,
+  type OperationKeyReject,
 } from "../protocol/operation-key.js";
 import type {
   BroadcastEventSource,
@@ -55,60 +57,12 @@ function assertOwnDataRecord(
   }
 }
 
-/**
- * "domain/operation" 경로를 `/`로 나누고 예약어·빈 segment·dotted segment를
- * 거부한다. 코어 `checkOperationName`(단일 segment 기본 검사)을 조각별로
- * 돌린다 — `checkDomainSegments`를 쓰지 않는 이유: 이 함수는 impl namespace
- * key(`walkImplNode`의 `"a/b"` 형태 key, 결정 8) 하나만 검사하는 자리라
- * "루트 `dispose` 금지"·"카테고리 이름 금지"를 적용하면 안 된다(그 두 규칙은
- * 도메인 전체 경로 기준이며 `assertDomainName`이 전체 이름에 따로 적용한다).
- */
-function assertPathSegments(path: string, label: string): readonly string[] {
-  const segments = path.split("/");
-  for (const segment of segments) {
-    const verdict = checkOperationName(segment);
-    if (verdict.ok) continue;
-    switch (verdict.reason) {
-      case "empty-segment":
-        throw new TypeError(`${label} cannot contain an empty segment.`);
-      case "dotted-segment":
-        throw new TypeError(`${label} cannot contain dotted segments.`);
-      case "reserved-segment":
-        throw new TypeError(
-          `${label} contains reserved segment '${verdict.segment}'.`,
-        );
-      default:
-        // segment는 이미 "/" 없이 쪼갠 조각이라 nested-operation·
-        // unknown-category는 checkOperationName에서 나올 수 없다.
-        throw new TypeError(`${label} is invalid.`);
-    }
-  }
-  return segments;
-}
-
-/** 도메인 이름의 segment 규칙(예약어 금지)에 더해 루트 `dispose`·`rpc`/`state`/`event`를 거부한다. */
-function assertDomainName(name: string): void {
-  const verdict = checkDomainSegments(name.split("/"));
-  if (verdict.ok) return;
-  switch (verdict.reason) {
-    case "empty-segment":
-      throw new TypeError("Domain name cannot contain an empty segment.");
-    case "dotted-segment":
-      throw new TypeError("Domain name cannot contain dotted segments.");
-    case "reserved-segment":
-      throw new TypeError(
-        `Domain name contains reserved segment '${verdict.segment}'.`,
-      );
-    default:
-      // checkDomainSegments는 nested-operation·unknown-category를 반환하지 않는다.
-      throw new TypeError("Domain name is invalid.");
-  }
-}
-
-/** operation 이름은 단일 segment여야 한다(중첩 경로 금지). */
-function assertOperationName(name: string, label: string): void {
-  const verdict = checkOperationName(name);
-  if (verdict.ok) return;
+/** 코어 verdict를 Main의 `TypeError` 메시지로 번역한다. `name`은 nested 메시지에만 쓴다. */
+function throwNameError(
+  label: string,
+  name: string,
+  verdict: OperationKeyReject,
+): never {
   switch (verdict.reason) {
     case "empty-segment":
       throw new TypeError(`${label} cannot contain an empty segment.`);
@@ -120,17 +74,36 @@ function assertOperationName(name: string, label: string): void {
       );
     case "nested-operation":
       throw new TypeError(`${label} '${name}' cannot be a nested path.`);
-    default:
-      // checkOperationName은 unknown-category를 반환하지 않는다.
-      throw new TypeError(`${label} is invalid.`);
+    case "unknown-category":
+      throw new TypeError(`${label} '${name}' has an unknown category.`);
   }
 }
 
 /**
- * trie 실패 reason을 Main의 현재 두 메시지로 번역한다. 코어
- * `OperationPathTrie.add`(`src/protocol/operation-key.ts`)가 실제 충돌 검출
- * 알고리즘을 소유하고, 이 함수는 메시지 조립만 한다.
+ * impl namespace key(`"a/b"` 형태 가능)를 `/`로 나눠 조각마다 위치 무관
+ * 규칙만 검사한다. root `dispose`·카테고리 이름 규칙은 도메인 전체 경로
+ * 기준이라 `assertDomainName`이 따로 적용한다.
  */
+function assertPathSegments(path: string, label: string): void {
+  for (const segment of path.split("/")) {
+    const verdict = checkSegment(segment);
+    if (!verdict.ok) throwNameError(label, path, verdict);
+  }
+}
+
+/** 도메인 이름의 segment 규칙(예약어 금지)에 더해 루트 `dispose`·`rpc`/`state`/`event`를 거부한다. */
+function assertDomainName(name: string): void {
+  const verdict = checkDomainSegments(name.split("/"));
+  if (!verdict.ok) throwNameError("Domain name", name, verdict);
+}
+
+/** operation 이름은 단일 segment여야 한다(중첩 경로 금지). */
+function assertOperationName(name: string, label: string): void {
+  const verdict = checkOperationName(name);
+  if (!verdict.ok) throwNameError(label, name, verdict);
+}
+
+/** 경로를 trie에 추가하고, 충돌 reason을 Main의 `TypeError` 메시지로 번역한다. */
 function assertNoPathCollision(
   trie: OperationPathTrie,
   segments: readonly string[],
@@ -451,9 +424,8 @@ function walkImplNode(
  * `options.schemas`/`options.errors`에 impl에 없는 경로가 있으면 생성 시
  * `TypeError`로 거부한다(계획 항목 4의 마지막 요구사항). impl 트리 순회
  * (`walkImplNode`)는 impl에 실제로 있는 경로만 옵션에서 읽으므로, 옵션 쪽에만
- * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다. `hasPath`는 wire
- * key(`formatWireKey` 결과) 기준으로 조회한다(DELTA-03: table이 wire key로
- * keyed).
+ * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다. table이 wire
+ * key로 keyed되어 있으므로 `hasPath`도 wire key로 조회한다.
  */
 function assertNoExtraOptionPaths(
   node: unknown,

@@ -92,16 +92,9 @@ describe("renderer handshake and API proxy", () => {
     await expect(apiPromise).resolves.toHaveProperty("hardware.rpc.connect");
   });
 
-  // RD-017 DELTA-05: 이름 규칙(segment·예약어 검증) 자체는
-  // `src/protocol/operation-key.ts` 코어 하나가 소유하고
-  // `test/protocol/operation-key.test.ts`가 case table로 전 규칙을 직접
-  // 검증한다(대응 case는 `operation-key-cases.ts`). 여기 남긴 이름 관련
-  // 2행(non-canonical entry, leaf namespace collision)은 "Renderer가 실제로
-  // 그 코어를 호출해 거부한다"는 seam만 본다. 삭제한 4행(reserved dispose
-  // root segment, reserved category root/nested/deep segment)은 코어
-  // table에 같은 wire key의 대응 case가 있다("## 결과" 대조표 참고). 이름과
-  // 무관한 3행(missing manifest, unsupported protocol, unknown manifest
-  // field)은 그대로 유지한다.
+  // 이름 규칙 자체는 `test/protocol/operation-key.test.ts`가 검증한다. 이름
+  // 관련 2행(non-canonical entry, leaf namespace collision)은 Renderer가 코어를
+  // 호출해 `INTERNAL`로 거부하는지만 본다.
   test.each([
     ["missing manifest", { protocolVersion: 1, clientId: "client-1" }],
     [

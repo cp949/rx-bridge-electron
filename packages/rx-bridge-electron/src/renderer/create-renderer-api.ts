@@ -12,8 +12,7 @@ import {
   type PayloadLimits,
   type ProtocolEnvelope,
 } from "../protocol/index.js";
-// `./index.ts`는 이 모듈을 re-export하지 않는다(checklist 결정 2) — 파일
-// 경로로 직접 import한다.
+// 비공개 모듈이라 `../protocol/index.js`가 아니라 파일 경로로 import한다.
 import {
   OPERATION_CATEGORIES,
   OperationPathTrie,
@@ -102,13 +101,9 @@ function assertExactKeys(
 }
 
 /**
- * wire key 파싱 실패 verdict를 `RemoteError`로 번역한다. Main
- * `assertDomainName`/`assertOperationName`(`registration.ts:90-127`)과 같은
- * reason→문구 매핑을 쓰되, Renderer는 `parseWireKey`로 도메인·operation을
- * 한 번에 검사하므로(호출자가 어느 쪽 segment가 실패했는지 구분해 받지
- * 않는다) label 없이 manifest entry 전체를 가리키는 문구 하나로 통일한다.
- * Renderer 메시지 문구는 계약이 아니다(checklist 결정 6, test는 `code`만
- * 본다).
+ * wire key 파싱 실패 verdict를 `RemoteError("INTERNAL")`로 번역한다. 문구는
+ * Main `TypeError`와 같은 표현이고 대상은 manifest entry 전체다. 문구는
+ * 계약이 아니다 — 계약은 code `INTERNAL`이다.
  */
 function rejectManifestEntry(
   key: string,

@@ -170,15 +170,8 @@ describe("createBridgeServer(impl, options): impl 형태 오류는 생성 시점
 });
 
 describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시점에 실패한다", () => {
-  // RD-017 DELTA-05: 이름 규칙(segment·예약어 검증) 자체는
-  // `src/protocol/operation-key.ts` 코어 하나가 소유하고
-  // `test/protocol/operation-key.test.ts`가 case table로 전 규칙을 직접
-  // 검증한다(대응 case는 `operation-key-cases.ts`). 여기 남긴 대표 건은
-  // "Main이 실제로 그 코어를 호출해 거부한다"는 seam만 본다 — 규칙의 모든
-  // 갈래를 다시 열거하지 않는다. 구성: 예약 segment 1(도메인 이름 전체
-  // 검증), impl namespace key(`"a/b"` 형태) split 1(Main `walkImplNode`
-  // 고유 관심사라 코어 test가 덮지 못함, checklist 사실 정정), 경로 충돌
-  // 1(leaf/namespace), 카테고리 간 중복 1, 허용 2.
+  // 규칙 자체는 `test/protocol/operation-key.test.ts`가 case table로 검증한다.
+  // 여기는 Main이 코어를 호출해 `TypeError`로 거부하는지만 대표 건으로 본다.
   test("leaf(operation)와 namespace(중첩 도메인)가 충돌하면 실패한다", () => {
     expect(() =>
       createBridgeServer({
@@ -202,13 +195,8 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).toThrow(TypeError);
   });
 
-  // RD-017 DELTA-05: 나머지 8행(빈 segment·dotted segment·"__proto__"·
-  // "prototype"·root "dispose"·nested "dispose"·nested "state"·deep
-  // "event")은 코어 table(`operation-key-cases.ts`)에 대응 case가 있어
-  // 삭제했다("## 결과" 대조표 참고). 여기 남긴 2행만 seam 대표다: 도메인
-  // 이름 전체가 예약어인 경우(atomic segment 검증)와, impl namespace key에
-  // "/"가 들어 그 key 자체가 여러 segment로 쪼개지는 경우(Main
-  // `walkImplNode`의 `"a/b"` split, 코어가 덮지 못하는 Main 고유 관심사).
+  // namespace key split(`"sub/rpc"`)은 코어가 아니라 Main impl 순회의 책임이라
+  // seam에서만 검증된다.
   test.each([
     [
       "reserved 'then' segment",

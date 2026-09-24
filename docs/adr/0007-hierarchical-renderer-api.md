@@ -18,4 +18,4 @@ ADR 0005의 나머지 결정은 유효하다: 루트 `api.dispose()`와 `api[Sym
 
 본문의 거부 주체 "계약 단계(`defineDomain`, `composeContracts`)"는 [ADR 0012](0012-lightweight-type-contract.md)/RD-013에서 `defineDomain`·`composeContracts`가 제거되며 대체됐다. 지금 거부 주체는 Main 쪽 `buildRegistrationTableFromImpl`이다 — impl 트리를 순회하며 코어 verdict를 `TypeError`로 번역한다. Renderer manifest 파서는 본문 그대로 `createRendererApi`다.
 
-도메인·operation의 모든 segment에서 예약하는 이름은 본문의 `rpc`·`state`·`event` 외에 JS 예약어 4개 — `__proto__`·`prototype`·`constructor`·`then` — 가 있다. `__proto__`는 object literal 대입 시 prototype setter로 취급되고, `prototype`·`constructor`는 함수/클래스 내장 속성과 충돌하며, `then`은 Promise 판별(thenable 검사)과 충돌한다. 넷 다 지금까지 구현 코드와 `docs/architecture.md`에만 있던 결정이며, 이 개정에서 처음 ADR에 남긴다.
+JS 예약어 4개 — `__proto__`·`prototype`·`constructor`·`then` — 는 도메인과 operation의 모든 segment에서 예약한다. 도메인 경로에서만 예약하는 본문의 `rpc`·`state`·`event`와 달리 operation 이름으로도 쓸 수 없다. `__proto__`는 object literal 대입 시 prototype setter로 취급되고, `prototype`·`constructor`는 함수/클래스 내장 속성과 충돌하며, `then`은 Promise 판별(thenable 검사)과 충돌한다. 넷 다 지금까지 구현 코드와 `docs/architecture.md`에만 있던 결정이며, 이 개정에서 처음 ADR에 남긴다.
