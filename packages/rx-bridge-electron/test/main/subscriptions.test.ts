@@ -1228,4 +1228,58 @@ describe("Main stream terminal notify on retire", () => {
     await pending;
     expect(messages).toEqual([]);
   });
+
+  test("detach while sending a rejection's subscribed replaces the rejection with CANCELLED", async () => {
+    const { server } = harness();
+    const target = new FakeTarget();
+    const detach = server.attach(target);
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+      if (message.type === "subscribed") detach();
+    };
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/missing$",
+      ),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[0]).toMatchObject({ sequence: 0 });
+    expect(messages[1]).toMatchObject({
+      sequence: 1,
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("a non-notifying retire while sending a rejection's subscribed sends nothing more", async () => {
+    const { server } = harness();
+    const target = new FakeTarget();
+    server.attach(target);
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+      if (message.type === "subscribed") target.fireLifecycle("destroyed");
+    };
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/missing$",
+      ),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });

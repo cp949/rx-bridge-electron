@@ -11,7 +11,8 @@ import {
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { recordDiagnostic } from "./diagnostics.js";
-import { notifiesRenderer, type DocumentSession } from "./document-sessions.js";
+import { SENDER_UNAUTHORIZED_MESSAGE } from "./document-sessions.js";
+import type { DocumentSession } from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
@@ -91,34 +92,29 @@ const sessionEndedError: RpcErrorPayload = {
   message: "Bridge session ended.",
 };
 
+/** 구독 종료 통지 판정의 입력. `admission`(sender admission 거부)·`rejected`(시작 전 거부)·`retired`(대기·활성 구독 retire) 중 하나다. */
+type EndCause =
+  | { readonly kind: "admission" }
+  | { readonly kind: "rejected"; readonly error: RpcErrorPayload }
+  | { readonly kind: "retired" };
+
 /**
- * 시작하지 못한 구독(admission 거부, `authorize` 대기 중 retire)에 `subscribed`(0) 뒤
- * `error`(1)를 보낸다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+ * cause → 통지 표(ADR 0020). `admission`은 `FORBIDDEN`을 항상 보낸다. 그 외는
+ * session이 없거나 살아 있으면 `rejected.error`(`retired`는 항상 aborted라 이
+ * 분기에 오지 않는다), aborted고 사유가 `detach`·`dispose`면 `CANCELLED`, 그 외
+ * aborted 사유는 침묵한다. `undefined`면 아무것도 보내지 않는다.
  */
-export function sendSubscribeFailure(
-  command: SubscribeCommand,
-  send: StreamSender,
-  error: RpcErrorPayload,
-): void {
-  try {
-    send(
-      withEnvelope(command.clientId, {
-        subscriptionId: command.subscriptionId,
-        type: "subscribed" as const,
-        sequence: 0,
-      }),
-    );
-    send(
-      withEnvelope(command.clientId, {
-        subscriptionId: command.subscriptionId,
-        type: "error" as const,
-        sequence: 1,
-        error,
-      }),
-    );
-  } catch {
-    // A closed renderer route has no subscriber to notify.
-  }
+function endNotice(
+  cause: EndCause,
+  sessionSignal?: AbortSignal,
+): RpcErrorPayload | undefined {
+  if (cause.kind === "admission")
+    return { code: "FORBIDDEN", message: SENDER_UNAUTHORIZED_MESSAGE };
+  if (sessionSignal === undefined || !sessionSignal.aborted)
+    return cause.kind === "rejected" ? cause.error : undefined;
+  return sessionSignal.reason === "detach" || sessionSignal.reason === "dispose"
+    ? sessionEndedError
+    : undefined;
 }
 
 /**
@@ -172,6 +168,11 @@ export class Subscriptions {
     return count;
   }
 
+  /** sender admission 거부(server가 판정)의 wire 응답: `subscribed`(0)+`FORBIDDEN error`(1). */
+  public rejectAdmission(command: SubscribeCommand, send: StreamSender): void {
+    this.#endUnstarted(command, send, { kind: "admission" });
+  }
+
   public async subscribe(
     session: DocumentSession,
     sender: SenderIdentity,
@@ -184,12 +185,15 @@ export class Subscriptions {
         type: "rejected",
         reason: "invalid-input",
       });
-      this.#reject(
+      this.#endUnstarted(
         command,
         send,
         {
-          code: "INVALID_ARGUMENT",
-          message: "Invalid bridge subscription ID.",
+          kind: "rejected",
+          error: {
+            code: "INVALID_ARGUMENT",
+            message: "Invalid bridge subscription ID.",
+          },
         },
         session.signal,
       );
@@ -206,10 +210,13 @@ export class Subscriptions {
         type: "rejected",
         reason: "unknown-operation",
       });
-      this.#reject(
+      this.#endUnstarted(
         command,
         send,
-        { code: "NOT_FOUND", message: "Unknown bridge stream." },
+        {
+          kind: "rejected",
+          error: { code: "NOT_FOUND", message: "Unknown bridge stream." },
+        },
         session.signal,
       );
       return;
@@ -224,12 +231,15 @@ export class Subscriptions {
         reason: "subscription-limit",
         key: command.key,
       });
-      this.#reject(
+      this.#endUnstarted(
         command,
         send,
         {
-          code: "RESOURCE_EXHAUSTED",
-          message: "Too many bridge subscriptions.",
+          kind: "rejected",
+          error: {
+            code: "RESOURCE_EXHAUSTED",
+            message: "Too many bridge subscriptions.",
+          },
         },
         session.signal,
       );
@@ -243,8 +253,12 @@ export class Subscriptions {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
         controller.abort();
-        if (notifiesRenderer(session.signal))
-          sendSubscribeFailure(command, send, sessionEndedError);
+        this.#endUnstarted(
+          command,
+          send,
+          { kind: "retired" },
+          session.signal,
+        );
       },
     };
     state.pending.set(command.subscriptionId, entry);
@@ -272,10 +286,10 @@ export class Subscriptions {
           : await this.#authorize(context, registration.bridgeOperation);
     } catch {
       if (this.#finishPending(session, state, command.subscriptionId, entry))
-        this.#reject(
+        this.#endUnstarted(
           command,
           send,
-          { code: "INTERNAL", message: "Internal bridge error." },
+          { kind: "rejected", error: internalError },
           session.signal,
         );
       return;
@@ -288,10 +302,16 @@ export class Subscriptions {
         reason: "authorize-denied",
         key: command.key,
       });
-      this.#reject(
+      this.#endUnstarted(
         command,
         send,
-        { code: "FORBIDDEN", message: "Bridge operation is forbidden." },
+        {
+          kind: "rejected",
+          error: {
+            code: "FORBIDDEN",
+            message: "Bridge operation is forbidden.",
+          },
+        },
         session.signal,
       );
       return;
@@ -385,11 +405,12 @@ export class Subscriptions {
       registration,
       controller,
       onSessionAbort: () => {
-        if (notifiesRenderer(session.signal))
+        const error = endNotice({ kind: "retired" }, session.signal);
+        if (error !== undefined)
           this.#send(consumer, {
             type: "error",
             sequence: ++consumer.sequence,
-            error: sessionEndedError,
+            error,
           });
         this.#close(consumer);
       },
@@ -448,13 +469,18 @@ export class Subscriptions {
     }
   }
 
-  #reject(
+  /**
+   * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire)의 통지:
+   * `subscribed`(0) 뒤 `endNotice`를 다시 평가해(전송 중 동기 retire 반영)
+   * `error`(1)를 보낸다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+   */
+  #endUnstarted(
     command: SubscribeCommand,
     send: StreamSender,
-    error: RpcErrorPayload,
-    sessionSignal: AbortSignal,
+    cause: EndCause,
+    sessionSignal?: AbortSignal,
   ): void {
-    if (sessionSignal.aborted) return;
+    if (endNotice(cause, sessionSignal) === undefined) return;
     try {
       send(
         withEnvelope(command.clientId, {
@@ -463,7 +489,8 @@ export class Subscriptions {
           sequence: 0,
         }),
       );
-      if (sessionSignal.aborted) return;
+      const error = endNotice(cause, sessionSignal);
+      if (error === undefined) return;
       send(
         withEnvelope(command.clientId, {
           subscriptionId: command.subscriptionId,

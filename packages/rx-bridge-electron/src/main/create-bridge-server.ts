@@ -13,7 +13,10 @@ import {
 import { recordDiagnostic } from "./diagnostics.js";
 import { invalidRequest, protocolError } from "./protocol-error.js";
 import { RpcRequests } from "./rpc-requests.js";
-import { DocumentSessions } from "./document-sessions.js";
+import {
+  DocumentSessions,
+  SENDER_UNAUTHORIZED_MESSAGE,
+} from "./document-sessions.js";
 import {
   buildRegistrationTableFromImpl,
   manifestFromTable,
@@ -23,11 +26,7 @@ import {
   resolveResourceLimits,
   type ResourceLimits,
 } from "./resource-limits.js";
-import {
-  sendSubscribeFailure,
-  Subscriptions,
-  type StreamSender,
-} from "./subscriptions.js";
+import { Subscriptions, type StreamSender } from "./subscriptions.js";
 import type {
   AttachedTarget,
   Authorize,
@@ -37,9 +36,6 @@ import type {
   RejectReason,
   SenderIdentity,
 } from "./types.js";
-
-/** RPC·stream subscribe admission 거부가 함께 쓰는 `FORBIDDEN` 문구. */
-const SENDER_UNAUTHORIZED_MESSAGE = "Bridge sender is not authorized.";
 
 const defaultLimits: PayloadLimits = {
   maxDepth: 32,
@@ -269,10 +265,7 @@ function buildBridgeServer(
         const admission = sessions.establish(sender, command.clientId);
         if ("reason" in admission) {
           reject(admission.reason);
-          sendSubscribeFailure(command, send, {
-            code: "FORBIDDEN",
-            message: SENDER_UNAUTHORIZED_MESSAGE,
-          });
+          subscriptions.rejectAdmission(command, send);
           return;
         }
         await subscriptions.subscribe(admission.session, sender, command, send);

@@ -1,13 +1,17 @@
+import { BehaviorSubject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 import type { BridgeImpl } from "../../src/contract/index.js";
-import type { BridgeValue } from "../../src/protocol/index.js";
+import type {
+  BridgeValue,
+  StreamMessage,
+  WireStreamCommand,
+} from "../../src/protocol/index.js";
 import { createBridgeServer } from "../../src/main/index.js";
-import {
-  DocumentSessions,
-  notifiesRenderer,
-} from "../../src/main/document-sessions.js";
+import { DocumentSessions } from "../../src/main/document-sessions.js";
 import { resolveResourceLimits } from "../../src/main/resource-limits.js";
+import { currentValueSource } from "../../src/main/sources.js";
 import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
+import { testSubscriptionId } from "./subscription-ids.js";
 
 type HardwareBridge = { hardware: { rpc: { wait(): undefined } } };
 
@@ -498,76 +502,132 @@ describe("Main retired client retention", () => {
   });
 });
 
-describe("Main retire reason on session.signal", () => {
-  const limits = resolveResourceLimits({});
-
-  const establishedSignal = (
-    sessions: DocumentSessions,
-    from = sender(),
+describe("Main retire reason drives stream terminal notify", () => {
+  const subscribeCommand = (
+    subscriptionId: string,
     clientId = "c1",
-  ): AbortSignal => {
-    const admitted = sessions.establish(from, clientId);
-    if (!("session" in admitted)) throw new Error("expected a session");
-    return admitted.session.signal;
-  };
+  ): Extract<WireStreamCommand, { type: "subscribe" }> => ({
+    protocolVersion: 1,
+    clientId,
+    type: "subscribe",
+    subscriptionId,
+    key: "state:hardware/current$",
+  });
 
-  test("lifecycle retire carries the lifecycle reason and never notifies", () => {
-    const sessions = new DocumentSessions(limits);
+  function harness() {
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(new BehaviorSubject(1)) } },
+    });
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => messages.push(message);
+    return { server, messages, send };
+  }
+
+  /** 활성 구독 하나를 세운다. `subscribed`+초기값 `batch` 프레임까지 확인한다. */
+  async function subscribeActive(
+    server: ReturnType<typeof harness>["server"],
+    messages: StreamMessage[],
+    send: (message: StreamMessage) => void,
+    clientId = "c1",
+  ): Promise<void> {
+    await server.controlStream(
+      sender(),
+      subscribeCommand(testSubscriptionId(1), clientId),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+  }
+
+  test("lifecycle retire carries the lifecycle reason and never notifies", async () => {
+    const { server, messages, send } = harness();
     const target = new FakeTarget();
-    sessions.attach(target);
-    const signal = establishedSignal(sessions, sender());
+    server.attach(target);
+    await subscribeActive(server, messages, send);
     target.fireLifecycle("main-frame-navigation");
-    expect(signal.reason).toBe("main-frame-navigation");
-    expect(notifiesRenderer(signal)).toBe(false);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
   });
 
-  test("a destroyed lifecycle retire never notifies", () => {
-    const sessions = new DocumentSessions(limits);
+  test("a destroyed lifecycle retire never notifies", async () => {
+    const { server, messages, send } = harness();
     const target = new FakeTarget();
-    sessions.attach(target);
-    const signal = establishedSignal(sessions, sender());
+    server.attach(target);
+    await subscribeActive(server, messages, send);
     target.fireLifecycle("destroyed");
-    expect(signal.reason).toBe("destroyed");
-    expect(notifiesRenderer(signal)).toBe(false);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
   });
 
-  test("a replacing clientId retires the previous session with 'replaced' and never notifies", () => {
-    const sessions = new DocumentSessions(limits);
-    const target = new FakeTarget();
-    sessions.attach(target);
-    const signal = establishedSignal(sessions, sender(), "c1");
-    sessions.establish(sender(), "c2");
-    expect(signal.reason).toBe("replaced");
-    expect(notifiesRenderer(signal)).toBe(false);
+  test("a replacing clientId retires the previous session with 'replaced' and never notifies", async () => {
+    const { server, messages, send } = harness();
+    server.attach(new FakeTarget());
+    await subscribeActive(server, messages, send, "c1");
+    const replacement: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      subscribeCommand(testSubscriptionId(1), "c2"),
+      (message) => replacement.push(message),
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    expect(replacement.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
   });
 
-  test("the detach function retires the session with 'detach' and notifies", () => {
-    const sessions = new DocumentSessions(limits);
+  test("the detach function retires the session with 'detach' and notifies", async () => {
+    const { server, messages, send } = harness();
     const target = new FakeTarget();
-    const detach = sessions.attach(target);
-    const signal = establishedSignal(sessions, sender());
+    const detach = server.attach(target);
+    await subscribeActive(server, messages, send);
     detach();
-    expect(signal.reason).toBe("detach");
-    expect(notifiesRenderer(signal)).toBe(true);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
   });
 
-  test("a reentrant attach() on the same webContents retires with 'detach' and notifies", () => {
-    const sessions = new DocumentSessions(limits);
-    const target = new FakeTarget();
-    sessions.attach(target);
-    const signal = establishedSignal(sessions, sender());
-    sessions.attach(new FakeTarget());
-    expect(signal.reason).toBe("detach");
-    expect(notifiesRenderer(signal)).toBe(true);
+  test("a reentrant attach() on the same webContents retires with 'detach' and notifies", async () => {
+    const { server, messages, send } = harness();
+    server.attach(new FakeTarget());
+    await subscribeActive(server, messages, send);
+    server.attach(new FakeTarget());
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
   });
 
-  test("dispose() retires every live session with 'dispose' and notifies", () => {
-    const sessions = new DocumentSessions(limits);
-    const target = new FakeTarget();
-    sessions.attach(target);
-    const signal = establishedSignal(sessions, sender());
-    sessions.dispose();
-    expect(signal.reason).toBe("dispose");
-    expect(notifiesRenderer(signal)).toBe(true);
+  test("dispose() retires every live session with 'dispose' and notifies", async () => {
+    const { server, messages, send } = harness();
+    server.attach(new FakeTarget());
+    await subscribeActive(server, messages, send);
+    server.dispose();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
   });
 });

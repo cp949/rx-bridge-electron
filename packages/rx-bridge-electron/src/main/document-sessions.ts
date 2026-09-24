@@ -20,6 +20,9 @@ export type SenderRejectReason = Extract<
   "frame-not-main" | "origin-not-allowed" | "sender-unauthorized"
 >;
 
+/** RPC·stream subscribe admission 거부가 함께 쓰는 `FORBIDDEN` 문구. */
+export const SENDER_UNAUTHORIZED_MESSAGE = "Bridge sender is not authorized.";
+
 /** `establish`·`current`의 판정 결과. 세션 아니면 사유, 둘 중 하나다. */
 export type Admission =
   | { readonly session: DocumentSession }
@@ -30,11 +33,6 @@ type LifecycleReason =
 
 /** `session.signal`에 실리는 retire 사유. lifecycle 3종에 detach·dispose·새 clientId를 더한다. */
 export type RetireReason = LifecycleReason | "detach" | "dispose" | "replaced";
-
-/** detach·dispose retire만 Renderer에 스트림 종료를 통지한다(navigation·crash·destroyed·replaced는 제외). */
-export function notifiesRenderer(signal: AbortSignal): boolean {
-  return signal.reason === "detach" || signal.reason === "dispose";
-}
 
 interface Attachment {
   readonly target: AttachedTarget;
