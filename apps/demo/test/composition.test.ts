@@ -21,7 +21,7 @@ async function connectWindow(
     clientId: `client-${webContentsId}`,
     role,
   });
-  const api = await createRendererApi<AppBridge>(transport);
+  const api = await createRendererApi<AppBridge>({ transport });
   return {
     api,
     dispose() {

@@ -119,7 +119,7 @@ api.device.state.connection.subscribe(console.log);
 | `role`                                      | `attach(contents, role?)`                                       | `"default"`. `authorize`의 `context.windowRole`로 전달되므로 역할로 인가를 나누는 앱은 명시합니다.                                                                  |
 | `globalName`                                | `exposeBridgeInMainWorld`, `createRendererApi`가 읽는 전역 이름 | `"rxBridge"`(`window.rxBridge`)                                                                                                                                     |
 | `ipcMain` / `contextBridge` / `ipcRenderer` | `bindElectronBridge` / `exposeBridgeInMainWorld`                | 생략 시 호출 시점에 `import * as electron from "electron"`으로 해석(`electron.ipcMain` 등). 둘 다 없으면(비-Electron 런타임) `TypeError`. 주입값이 항상 우선합니다. |
-| `transport`                                 | `createRendererApi<B>(transport?)`                              | `globalThis.rxBridge`를 읽습니다. 없거나 transport 형태가 아니면 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 `TypeError`.                                       |
+| `transport`                                 | `createRendererApi<B>(options?)`                                | `globalThis.rxBridge`를 읽습니다. 없거나 transport 형태가 아니면 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 `TypeError`.                                       |
 
 기본값과 해석 순서의 근거는 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.
 
@@ -175,7 +175,7 @@ declare global {
   }
 }
 
-const api = await createRendererApi<AppBridge>(window.appBridge);
+const api = await createRendererApi<AppBridge>({ transport: window.appBridge });
 ```
 
 **테스트에서 electron/transport를 주입하는 경우** — 유닛 테스트는 Electron 프로세스 밖에서 실행되므로 `electron.ipcMain`/`electron.contextBridge`/`electron.ipcRenderer`를 얻을 수 없습니다. Main·preload 테스트는 이 값들을 직접 주입하고, Renderer 테스트는 mock `BridgeTransport`를 만들어 `createRendererApi`에 넘깁니다(패키지 테스트의 `FakeIpcMain`/`FakeContextBridge`/`FakeIpcRenderer`/`FakeTransport`와 같은 형태).
@@ -199,7 +199,7 @@ exposeBridgeInMainWorld({
 
 ```ts
 // Renderer 테스트
-const api = await createRendererApi<AppBridge>(fakeTransport);
+const api = await createRendererApi<AppBridge>({ transport: fakeTransport });
 ```
 
 ## 스키마 점진 도입
@@ -360,7 +360,7 @@ import type { AppBridge } from "./bridge/contract.js";
 
 const server = createBridgeServer(impl, options);
 const transport = createLoopbackTransport(server, { role: "main" });
-const api = await createRendererApi<AppBridge>(transport);
+const api = await createRendererApi<AppBridge>({ transport });
 
 await api.device.rpc.connect();
 

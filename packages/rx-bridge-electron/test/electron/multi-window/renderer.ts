@@ -17,7 +17,7 @@ export type CallResult =
   | { readonly ok: true; readonly value: string }
   | { readonly ok: false; readonly code: string };
 
-const api = createRendererApi<LabBridge>(window.rxBridge);
+const api = createRendererApi<LabBridge>({ transport: window.rxBridge });
 
 function settle(promise: Promise<string>): Promise<CallResult> {
   return promise.then(

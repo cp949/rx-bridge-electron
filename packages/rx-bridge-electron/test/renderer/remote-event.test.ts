@@ -62,7 +62,7 @@ function subscriptions(transport: FakeTransport) {
 describe("renderer remote Event", () => {
   test("shares a generation, gates values on subscribed, and never replays", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     const first = api.hardware.event.fault$.subscribe((value) =>
       firstValues.push(value),
@@ -103,7 +103,7 @@ describe("renderer remote Event", () => {
 
   test("delivers a batch synchronously in order before ACK and ignores non-increasing sequences", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
       if (command.type === "acknowledge") {
@@ -134,7 +134,7 @@ describe("renderer remote Event", () => {
 
   test("acknowledges an accepted batch after a synchronous last-subscriber unsubscribe", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
       if (command.type === "unsubscribe") {
@@ -160,7 +160,7 @@ describe("renderer remote Event", () => {
 
   test("closes only the current generation and discards wrong-session and closed-ID messages", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     let completed = 0;
     api.hardware.event.fault$.subscribe({
@@ -211,7 +211,7 @@ describe("renderer remote Event", () => {
 
   test("opens a fresh generation when an error callback subscribes again", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
     api.hardware.event.fault$.subscribe({
@@ -246,7 +246,7 @@ describe("renderer remote Event", () => {
 
   test("opens a fresh generation when a complete callback subscribes again", async () => {
     const transport = eventTransport();
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
     api.hardware.event.fault$.subscribe({
@@ -294,7 +294,7 @@ describe("renderer remote Event", () => {
         wireOrder.push("acknowledge");
       }
     };
-    const api = await createRendererApi<EventBridge>(transport);
+    const api = await createRendererApi<EventBridge>({ transport });
 
     const subscription = api.hardware.event.fault$.subscribe((value) =>
       wireOrder.push(value),

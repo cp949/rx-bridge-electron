@@ -16,7 +16,7 @@ async function monitorHarness() {
     role: "main",
   });
   const invoke = vi.spyOn(transport, "invoke");
-  const api = await createRendererApi<AppBridge>(transport);
+  const api = await createRendererApi<AppBridge>({ transport });
   return {
     api,
     invoke,

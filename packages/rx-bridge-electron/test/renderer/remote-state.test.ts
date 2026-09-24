@@ -61,7 +61,7 @@ function firstSubscriptionId(transport: FakeTransport): string {
 describe("renderer RemoteState", () => {
   test("shares one remote generation and updates the snapshot before delivering legitimate undefined", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const observed: Array<{
       readonly value: string | undefined;
@@ -118,7 +118,7 @@ describe("renderer RemoteState", () => {
 
   test("delivers the current value synchronously to a late subscriber joining an active generation", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
     const subscriptionId = firstSubscriptionId(transport);
@@ -147,7 +147,7 @@ describe("renderer RemoteState", () => {
 
   test("delivers a legitimate undefined current value synchronously to a late subscriber", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
     const subscriptionId = firstSubscriptionId(transport);
@@ -173,7 +173,7 @@ describe("renderer RemoteState", () => {
 
   test("does not open an additional remote subscription for a late subscriber", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
     const subscriptionId = firstSubscriptionId(transport);
@@ -201,7 +201,7 @@ describe("renderer RemoteState", () => {
 
   test("does not deliver to a late subscriber joining before subscribed", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
@@ -227,7 +227,7 @@ describe("renderer RemoteState", () => {
 
   test("does not deliver to a late subscriber joining after subscribed but before the first batch", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
@@ -253,7 +253,7 @@ describe("renderer RemoteState", () => {
 
   test("replays the in-flight value once to a subscriber that joins reentrantly from another subscriber's callback", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const secondValues: Array<string | undefined> = [];
@@ -286,7 +286,7 @@ describe("renderer RemoteState", () => {
 
   test("delivers the current value synchronously to firstValueFrom and does not disturb existing subscribers", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
@@ -321,7 +321,7 @@ describe("renderer RemoteState", () => {
 
   test("does not replay a value after a remote complete and before a fresh subscribed", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     let completed = 0;
@@ -363,7 +363,7 @@ describe("renderer RemoteState", () => {
 
   test("does not replay a value after a remote error and before a fresh subscribed", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const errors: unknown[] = [];
@@ -409,7 +409,7 @@ describe("renderer RemoteState", () => {
 
   test("opens a new ID without replaying stale data and discards the closed generation", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
@@ -450,7 +450,7 @@ describe("renderer RemoteState", () => {
 
   test("opens a fresh generation when a terminal callback subscribes again", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const snapshots: unknown[] = [];
     const nextValues: Array<string | undefined> = [];
@@ -508,7 +508,7 @@ describe("renderer RemoteState", () => {
         }),
       );
     };
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     const snapshots: unknown[] = [];
 
     const subscription = api.hardware.state.connection$.subscribe(() => {
@@ -527,7 +527,7 @@ describe("renderer RemoteState", () => {
 
   test("exposes dispose() as the same function reference as Symbol.dispose", async () => {
     const transport = stateTransport();
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
 
     expect(typeof api.dispose).toBe("function");
     expect(api.dispose).toBe(api[Symbol.dispose]);
@@ -543,7 +543,7 @@ describe("renderer RemoteState", () => {
         message(command.subscriptionId, { type: "subscribed", sequence: 0 }),
       );
     };
-    const api = await createRendererApi<StateBridge>(transport);
+    const api = await createRendererApi<StateBridge>({ transport });
     api.hardware.state.connection$.subscribe(() => {});
 
     expect(transport.streamListeners.size).toBe(1);

@@ -142,7 +142,7 @@ describe("createLoopbackTransport: createRendererApi 결합", () => {
     const { impl, tickEvents } = buildImpl();
     const server = createBridgeServer(impl);
     const transport = createLoopbackTransport(server);
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     await expect(api.device.rpc.echo({ text: "hi" })).resolves.toEqual({
       text: "hi",
@@ -174,7 +174,7 @@ describe("createLoopbackTransport: createRendererApi 결합", () => {
     const { impl } = buildImpl();
     const server = createBridgeServer(impl);
     const transport = createLoopbackTransport(server);
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     await expect(firstValueFrom(api.device.state.count)).resolves.toEqual({
       value: 0,
@@ -228,7 +228,9 @@ describe("createLoopbackTransport: parse·clone 경계", () => {
     // 같은 webContentsId·clientId는 retire됐다(TRP-006) — server가 거부 응답을 낸다.
     const second = createLoopbackTransport(server);
     await expect(second.connect()).rejects.toBeInstanceOf(BridgeProtocolError);
-    await expect(createRendererApi<AppBridge>(second)).rejects.toMatchObject({
+    await expect(
+      createRendererApi<AppBridge>({ transport: second }),
+    ).rejects.toMatchObject({
       code: "INTERNAL",
       message: "Bridge handshake failed.",
     });
@@ -283,7 +285,7 @@ describe("createLoopbackTransport: cancel", () => {
     const { impl, waitAborted } = buildImpl();
     const server = createBridgeServer(impl);
     const transport = createLoopbackTransport(server);
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const controller = new AbortController();
     const pending = api.device.rpc.wait(undefined, {

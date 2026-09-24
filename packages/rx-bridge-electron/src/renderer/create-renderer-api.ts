@@ -234,7 +234,7 @@ function isBridgeTransport(value: unknown): value is BridgeTransport {
   );
 }
 
-// `transport` 생략(또는 명시 `undefined`) 시 preload가 `exposeBridgeInMainWorld`로 채운
+// `options.transport` 생략 시 preload가 `exposeBridgeInMainWorld`로 채운
 // `globalThis.rxBridge`를 읽는다. 없거나 transport 모양이 아니면 preload 설정 누락을
 // 바로 알아차릴 수 있게 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 에러를 던진다.
 function resolveGlobalTransport(): BridgeTransport {
@@ -243,21 +243,28 @@ function resolveGlobalTransport(): BridgeTransport {
   ];
   if (!isBridgeTransport(candidate)) {
     throw new TypeError(
-      "createRendererApi requires a transport: no 'transport' argument was " +
+      "createRendererApi requires a transport: no 'transport' option was " +
         `given and 'globalThis.${DEFAULT_BRIDGE_GLOBAL_NAME}' is not a bridge ` +
         "transport. Call exposeBridgeInMainWorld() in your preload script " +
-        `(it exposes 'window.${DEFAULT_BRIDGE_GLOBAL_NAME}'), or pass a transport ` +
-        "explicitly.",
+        `(it exposes 'window.${DEFAULT_BRIDGE_GLOBAL_NAME}'), or pass ` +
+        "{ transport } explicitly.",
     );
   }
   return candidate;
 }
 
+/**
+ * {@link createRendererApi} 옵션. `transport`를 생략하면 preload가 채운
+ * `globalThis.rxBridge`를 사용한다.
+ */
+export interface CreateRendererApiOptions {
+  readonly transport?: BridgeTransport;
+}
+
 export async function createRendererApi<B>(
-  transport?: BridgeTransport,
+  options?: CreateRendererApiOptions,
 ): Promise<RendererApi<B>> {
-  const resolvedTransport =
-    transport === undefined ? resolveGlobalTransport() : transport;
+  const resolvedTransport = options?.transport ?? resolveGlobalTransport();
   let response: unknown;
   try {
     response = await resolvedTransport.connect();

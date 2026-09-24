@@ -39,7 +39,7 @@ describe("renderer RPC races", () => {
   test("settles once when response and abort fire in the same turn in either order", async () => {
     for (const first of ["response", "abort"] as const) {
       const transport = new FakeTransport();
-      const api = await createRendererApi<AppBridge>(transport);
+      const api = await createRendererApi<AppBridge>({ transport });
       const controller = new AbortController();
       const settlements: string[] = [];
       const resultPromise = api.hardware.rpc.connect(
@@ -85,7 +85,7 @@ describe("renderer RPC races", () => {
 
     for (const first of ["response", "timeout"] as const) {
       const transport = new FakeTransport();
-      const api = await createRendererApi<AppBridge>(transport);
+      const api = await createRendererApi<AppBridge>({ transport });
       const settlements: string[] = [];
 
       const resultPromise = api.hardware.rpc.connect(
@@ -129,7 +129,7 @@ describe("renderer RPC races", () => {
 
   test("rejects an already-aborted call without sending or cancelling", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const controller = new AbortController();
     controller.abort();
 
@@ -147,7 +147,7 @@ describe("renderer RPC races", () => {
 
   test("keeps the response when it wins the response-abort race", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const controller = new AbortController();
     const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
 
@@ -168,7 +168,7 @@ describe("renderer RPC races", () => {
 
   test("cancels exactly once when abort wins and discards the late response", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const controller = new AbortController();
     const removeSpy = vi.spyOn(controller.signal, "removeEventListener");
     const resultPromise = api.hardware.rpc.connect(
@@ -197,7 +197,7 @@ describe("renderer RPC races", () => {
       recordCancel(requestId);
       controller.abort();
     };
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const settlements: string[] = [];
 
     const resultPromise = api.hardware.rpc.connect(
@@ -219,7 +219,7 @@ describe("renderer RPC races", () => {
   test("times out through the cancellation path and clears the timer", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect(
       { deviceId: "d1" },
@@ -242,7 +242,7 @@ describe("renderer RPC races", () => {
   test("defaults an omitted timeoutMs to 30s: undecided at 29,999ms, DEADLINE_EXCEEDED at 30,000ms, cancelled once", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const requestId = transport.invocations[0]!.requestId;
@@ -266,7 +266,7 @@ describe("renderer RPC races", () => {
 
   test("converts validated remote errors and maps malformed responses to INTERNAL", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const remotePromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const remoteRequestId = transport.invocations[0]!.requestId;
     transport.resolveInvocation(0, {
@@ -324,7 +324,7 @@ describe("renderer RPC races", () => {
 describe("renderer RPC dispose", () => {
   test("settles an in-flight sent call as CANCELLED and cancels it once", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const requestId = transport.invocations[0]!.requestId;
@@ -340,7 +340,7 @@ describe("renderer RPC dispose", () => {
 
   test("resolves a permanently pending call (Infinity timeout) on dispose", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect(
       { deviceId: "d1" },
@@ -355,7 +355,7 @@ describe("renderer RPC dispose", () => {
   test("dispose settlement wins over a later deadline timeout", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect(
       { deviceId: "d1" },
@@ -375,7 +375,7 @@ describe("renderer RPC dispose", () => {
 
   test("dispose settlement wins over a later abort signal", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const controller = new AbortController();
 
     const resultPromise = api.hardware.rpc.connect(
@@ -393,7 +393,7 @@ describe("renderer RPC dispose", () => {
 
   test("dispose is idempotent and cancels each in-flight call only once", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const requestId = transport.invocations[0]!.requestId;
@@ -407,7 +407,7 @@ describe("renderer RPC dispose", () => {
 
   test("does not cancel a call already settled by a response", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     transport.resolveInvocation(
@@ -423,7 +423,7 @@ describe("renderer RPC dispose", () => {
 
   test("rejects a call made after dispose without sending it", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     api.dispose();
 
@@ -438,7 +438,7 @@ describe("renderer RPC dispose", () => {
 
   test("ignores a late transport response after dispose settled the call", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const requestId = transport.invocations[0]!.requestId;
@@ -457,7 +457,7 @@ describe("renderer RPC dispose", () => {
       recordCancel(requestId);
       controller.abort();
     };
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect(
       { deviceId: "d1" },
@@ -479,7 +479,7 @@ describe("renderer RPC dispose", () => {
     transport.cancel = () => {
       throw new Error("cancel channel is gone");
     };
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
 

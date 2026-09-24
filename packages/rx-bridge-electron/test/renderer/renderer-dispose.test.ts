@@ -83,7 +83,7 @@ async function setup(): Promise<{
   readonly api: RendererApi<AppBridge>;
 }> {
   const transport = bridgeTransport();
-  const api = await createRendererApi<AppBridge>(transport);
+  const api = await createRendererApi<AppBridge>({ transport });
   return { transport, api };
 }
 

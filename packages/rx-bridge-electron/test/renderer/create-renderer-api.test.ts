@@ -90,10 +90,12 @@ describe("renderer handshake and API proxy", () => {
     transport.handshake = handshake.promise;
 
     let settled = false;
-    const apiPromise = createRendererApi<AppBridge>(transport).then((api) => {
-      settled = true;
-      return api;
-    });
+    const apiPromise = createRendererApi<AppBridge>({ transport }).then(
+      (api) => {
+        settled = true;
+        return api;
+      },
+    );
 
     await Promise.resolve();
     expect(transport.connectCalls).toBe(1);
@@ -155,7 +157,7 @@ describe("renderer handshake and API proxy", () => {
       transport.handshake = Promise.resolve(value);
 
       await expect(
-        createRendererApi<AppBridge>(transport),
+        createRendererApi<AppBridge>({ transport }),
       ).rejects.toMatchObject({
         code: "INTERNAL",
       });
@@ -177,7 +179,7 @@ describe("renderer handshake and API proxy", () => {
       });
 
       await expect(
-        createRendererApi<AppBridge>(transport),
+        createRendererApi<AppBridge>({ transport }),
       ).rejects.toMatchObject({
         code: "INTERNAL",
         message:
@@ -210,7 +212,7 @@ describe("renderer handshake and API proxy", () => {
       transport.handshake = Promise.resolve(value);
 
       await expect(
-        createRendererApi<AppBridge>(transport),
+        createRendererApi<AppBridge>({ transport }),
       ).rejects.toMatchObject({ code: "INTERNAL", message });
     },
   );
@@ -221,17 +223,17 @@ describe("renderer handshake and API proxy", () => {
       new Error("secret absolute path from preload"),
     );
 
-    await expect(createRendererApi<AppBridge>(transport)).rejects.toMatchObject(
-      {
-        code: "INTERNAL",
-        message: "Bridge handshake failed.",
-      },
-    );
+    await expect(
+      createRendererApi<AppBridge>({ transport }),
+    ).rejects.toMatchObject({
+      code: "INTERNAL",
+      message: "Bridge handshake failed.",
+    });
   });
 
   test("exposes only manifest entries and dispatches their canonical RPC keys", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
 
     expect("connect" in api.hardware.rpc).toBe(true);
     expect("missing" in api.hardware.rpc).toBe(false);
@@ -266,7 +268,7 @@ describe("renderer handshake and API proxy", () => {
         readonly state: { readonly status: string };
         readonly serial: { readonly rpc: { open(): string } };
       };
-    }>(transport);
+    }>({ transport });
 
     expect(Object.keys(api.hardware).sort()).toEqual([
       "rpc",
@@ -301,7 +303,7 @@ describe("renderer handshake and API proxy", () => {
     });
     const api = await createRendererApi<{
       readonly hardware: { readonly rpc: { dispose(): string } };
-    }>(transport);
+    }>({ transport });
 
     expect("dispose" in api).toBe(true);
     expect(Object.keys(api)).toEqual(["hardware"]);
@@ -330,7 +332,7 @@ describe("renderer handshake and API proxy", () => {
 
   test("keeps CallOptions separate from the one serializable RPC input", async () => {
     const transport = new FakeTransport();
-    const api = await createRendererApi<AppBridge>(transport);
+    const api = await createRendererApi<AppBridge>({ transport });
     const controller = new AbortController();
 
     const resultPromise = api.hardware.rpc.connect(
@@ -365,11 +367,11 @@ describe("createRendererApi transport default (RD-014)", () => {
     expect(typeof api.hardware.rpc.connect).toBe("function");
   });
 
-  test("passing undefined explicitly behaves the same as omitting transport", async () => {
+  test("passing an empty options object behaves the same as omitting transport", async () => {
     const transport = new FakeTransport();
     (globalThis as { rxBridge?: unknown }).rxBridge = transport;
 
-    const api = await createRendererApi<AppBridge>(undefined);
+    const api = await createRendererApi<AppBridge>({});
 
     expect(transport.connectCalls).toBe(1);
     expect(typeof api.hardware.rpc.connect).toBe("function");
@@ -380,7 +382,7 @@ describe("createRendererApi transport default (RD-014)", () => {
     const explicitTransport = new FakeTransport();
     (globalThis as { rxBridge?: unknown }).rxBridge = globalTransport;
 
-    await createRendererApi<AppBridge>(explicitTransport);
+    await createRendererApi<AppBridge>({ transport: explicitTransport });
 
     expect(explicitTransport.connectCalls).toBe(1);
     expect(globalTransport.connectCalls).toBe(0);
@@ -403,7 +405,7 @@ describe("createRendererApi transport default (RD-014)", () => {
     const transport = {} as BridgeTransport;
 
     expectTypeOf(createRendererApi<AppBridge>).toBeCallableWith();
-    expectTypeOf(createRendererApi<AppBridge>).toBeCallableWith(transport);
+    expectTypeOf(createRendererApi<AppBridge>).toBeCallableWith({ transport });
     expectTypeOf(createRendererApi<AppBridge>).returns.toEqualTypeOf<
       Promise<RendererApi<AppBridge>>
     >();
@@ -444,7 +446,10 @@ describe("Renderer API object tree", () => {
         event: ["event:hardware/change"],
       },
     });
-    return { api: await createRendererApi<TreeBridge>(transport), transport };
+    return {
+      api: await createRendererApi<TreeBridge>({ transport }),
+      transport,
+    };
   }
 
   test("returns the same reference for every access to the same path", async () => {

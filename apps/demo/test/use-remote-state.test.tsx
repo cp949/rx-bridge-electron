@@ -57,7 +57,7 @@ async function stateHarness(): Promise<{
   };
   const server = createBridgeServer(impl);
   const transport = createLoopbackTransport(server);
-  const api = await createRendererApi<StateBridge>(transport);
+  const api = await createRendererApi<StateBridge>({ transport });
   return {
     state: api.hardware.state.sensor,
     subject: sensor.subject,

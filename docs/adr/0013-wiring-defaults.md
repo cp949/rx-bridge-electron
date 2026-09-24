@@ -24,9 +24,11 @@
 
 대신 `import * as electron from "electron"`으로 모듈 네임스페이스 객체를 가져오고, 필요한 시점(함수 호출 시점)에 `electron.ipcMain`처럼 프로퍼티로 접근한다. 네임스페이스 import는 Node에서도 문자열 하나를 담은 객체로 링크되므로 `SyntaxError`가 나지 않고, 실제 Electron 프로세스에서는 정상적인 모듈 객체가 된다. 주입 인자(`options.ipcMain` 등)가 존재하면 `electron.*`보다 항상 우선한다 — 테스트가 mock을 주입해도 실제 `electron` 모듈 해석을 시도하지 않게 하기 위해서다. 주입값도 없고 `electron.*`도 얻을 수 없으면(비-Electron 런타임에서 기본값 경로를 탄 경우) 명확한 오류로 실패한다.
 
-## 결정: `createRendererApi<B>(transport?)`는 생략 시 `globalThis.rxBridge`를 읽는다
+## 결정: `createRendererApi<B>(options?)`는 `transport` 생략 시 `globalThis.rxBridge`를 읽는다
 
-`transport` 인자는 `BridgeTransport | undefined`만 받는다 — `{ globalName }`처럼 다른 정보를 얹은 옵션 객체 overload는 두지 않는다(아래 "범위 밖" 참고). 생략하면 `globalThis.rxBridge`를 읽어 `BridgeTransport`로 쓴다. `rxBridge`는 `exposeBridgeInMainWorld`의 `globalName` 기본값과 같은 문자열이다 — 두 기본값이 어긋나면 축약형 Renderer 코드가 항상 실패하므로 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`)를 공유한다. `globalName`을 바꾼 소비자는 `createRendererApi`에 transport를 직접 만들어 넘긴다(이 경로에서만 `declare global`이 필요하다). 전역에 값이 없으면 "어느 전역을 찾다가 실패했는지"를 담은 명확한 오류로 실패한다 — `undefined`를 그대로 전달해 나중에 알기 어려운 오류로 이어지지 않게 한다.
+> **개정 (RD-028, [ADR 0022](0022-renderer-diagnostics.md))**: 아래 "위치 인자 `transport` 하나만 받고 옵션 객체 overload는 두지 않는다"는 결정은 뒤집혔다 — `createRendererApi`는 이제 위치 인자 대신 `CreateRendererApiOptions`(`{ transport?, diagnostics? }`) 옵션 객체 하나를 받는다. 이 문서가 고정한 "`transport` 생략 시 `globalThis.rxBridge`를 읽는다"는 동작 자체는 그대로다.
+
+`transport`는 여전히 `BridgeTransport | undefined`만 받는다 — 생략하면 `globalThis.rxBridge`를 읽어 `BridgeTransport`로 쓴다. `rxBridge`는 `exposeBridgeInMainWorld`의 `globalName` 기본값과 같은 문자열이다 — 두 기본값이 어긋나면 축약형 Renderer 코드가 항상 실패하므로 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`)를 공유한다. `globalName`을 바꾼 소비자는 `createRendererApi`에 transport를 직접 만들어 넘긴다(이 경로에서만 `declare global`이 필요하다). 전역에 값이 없으면 "어느 전역을 찾다가 실패했는지"를 담은 명확한 오류로 실패한다 — `undefined`를 그대로 전달해 나중에 알기 어려운 오류로 이어지지 않게 한다.
 
 ## 결정: hello-world에서 `pagehide` dispose 등록을 뺀다. `dispose`는 SPA teardown 용도로 문서화한다
 

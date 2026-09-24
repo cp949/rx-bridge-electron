@@ -20,7 +20,7 @@ describe("non-hardware domain", () => {
     const notes = createNotes();
     const server = createBridgeServer(registerNotes(notes), { schemas });
     const transport = createLoopbackTransport(server, { role: "editor" });
-    const api = await createRendererApi<NotesBridge>(transport);
+    const api = await createRendererApi<NotesBridge>({ transport });
     try {
       await expect(
         api.notes.rpc.append({ text: "meeting at 10" }),
