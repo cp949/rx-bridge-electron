@@ -59,6 +59,10 @@ const subjects = {
 };
 const holds = new Set<() => void>();
 const diagnostics: BridgeDiagnostic[] = [];
+type Role = "editor" | "viewer";
+const windows = new Map<Role, BrowserWindow>();
+const navigationBlockers = new Map<Role, (event: Electron.Event) => void>();
+const navigationAttempts = new Map<Role, number>();
 
 const impl: BridgeImpl<LabBridge> = {
   lab: {
@@ -129,6 +133,27 @@ const probe = {
   releaseHolds: () => {
     for (const release of [...holds]) release();
   },
+  // DELTA-01: `will-navigate`를 막아 "문서는 살아 있는데 navigation 이벤트만
+  // 발생하는" case를 재현한다. RED test 전용 — `electron-adapter.ts`는 이 스위치를 모른다.
+  blockNavigation: (role: Role, enabled: boolean) => {
+    const window = windows.get(role);
+    if (window === undefined) return;
+    if (enabled) {
+      if (navigationBlockers.has(role)) return;
+      const blocker = (event: Electron.Event) => {
+        event.preventDefault();
+        navigationAttempts.set(role, (navigationAttempts.get(role) ?? 0) + 1);
+      };
+      navigationBlockers.set(role, blocker);
+      window.webContents.on("will-navigate", blocker);
+    } else {
+      const blocker = navigationBlockers.get(role);
+      if (blocker === undefined) return;
+      window.webContents.removeListener("will-navigate", blocker);
+      navigationBlockers.delete(role);
+    }
+  },
+  navigationAttempts: (role: Role) => navigationAttempts.get(role) ?? 0,
 };
 Object.assign(globalThis, { __rxBridgeProbe: probe });
 export type MultiWindowProbe = typeof probe;
@@ -144,7 +169,7 @@ async function start(): Promise<void> {
   const renderer =
     process.env.RX_BRIDGE_RENDERER ??
     fileURLToPath(new URL("./renderer.html", import.meta.url));
-  for (const role of ["editor", "viewer"]) {
+  for (const role of ["editor", "viewer"] as const) {
     const window = new BrowserWindow({
       show: false,
       webPreferences: {
@@ -156,6 +181,7 @@ async function start(): Promise<void> {
           fileURLToPath(new URL("./preload.ts", import.meta.url)),
       },
     });
+    windows.set(role, window);
     bridge.attach(window.webContents, role);
     await window.loadFile(renderer, { query: { role } });
   }

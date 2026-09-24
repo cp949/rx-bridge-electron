@@ -93,11 +93,13 @@ describe("bindElectronBridge dispose", () => {
     const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
-    expect(contents.listenerCount("did-start-navigation")).toBeGreaterThan(0);
+    expect(contents.listenerCount("did-navigate")).toBeGreaterThan(0);
+    expect(contents.listenerCount("did-fail-load")).toBeGreaterThan(0);
 
     bridge.dispose();
 
-    expect(contents.listenerCount("did-start-navigation")).toBe(0);
+    expect(contents.listenerCount("did-navigate")).toBe(0);
+    expect(contents.listenerCount("did-fail-load")).toBe(0);
     expect(contents.listenerCount("render-process-gone")).toBe(0);
     expect(contents.listenerCount("destroyed")).toBe(0);
   });
@@ -124,6 +126,179 @@ describe("bindElectronBridge dispose", () => {
 
     expect(callsBeforeDispose).toBe(0);
     expect(second).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("Electron adapter navigation commit retire", () => {
+  function makeSessionBridge(ipcMain: FakeIpcMain) {
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const server = createBridgeServer(waitImpl, { diagnostics });
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      namespace: "test",
+      allowedOrigins: ["app://local"],
+    });
+    return { server, bridge, diagnostics };
+  }
+
+  function sessionClosedCount(diagnostics: {
+    record: ReturnType<typeof vi.fn>;
+  }) {
+    return diagnostics.record.mock.calls.filter(
+      ([event]) => (event as BridgeDiagnostic).type === "session-closed",
+    ).length;
+  }
+
+  async function establish(
+    ipcMain: FakeIpcMain,
+    contents: FakeWebContents,
+    clientId: string,
+  ) {
+    const handshakeHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    )!;
+    const response = await handshakeHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      { protocolVersion: 1, clientId },
+    );
+    expect(response).toMatchObject({ manifest: expect.any(Object) });
+  }
+
+  test("did-start-navigation no longer retires the session (main frame, isInPlace true)", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    contents.emit(
+      "did-start-navigation",
+      {},
+      "app://local/#/other",
+      true,
+      true,
+    );
+
+    expect(sessionClosedCount(diagnostics)).toBe(0);
+  });
+
+  test("did-start-navigation no longer retires the session (main frame, isInPlace false)", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    contents.emit("did-start-navigation", {}, "app://local/next", false, true);
+
+    expect(sessionClosedCount(diagnostics)).toBe(0);
+  });
+
+  test("did-navigate retires the session", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    contents.emit("did-navigate", {}, "app://local/next", 200, "OK");
+
+    expect(sessionClosedCount(diagnostics)).toBe(1);
+  });
+
+  test("did-fail-load on the main frame with the current routingId retires the session", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    contents.emit(
+      "did-fail-load",
+      {},
+      -102,
+      "ERR_CONNECTION_REFUSED",
+      "app://local/next",
+      true,
+      1,
+      contents.mainFrame.routingId,
+    );
+
+    expect(sessionClosedCount(diagnostics)).toBe(1);
+  });
+
+  test("did-fail-load with a stale/undefined frameRoutingId does not retire the session", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    // 문서가 안 바뀐 취소(ERR_ABORTED)를 흉내 낸다: frameRoutingId가 현재
+    // main frame routingId와 다르거나 undefined다.
+    contents.emit(
+      "did-fail-load",
+      {},
+      -3,
+      "ERR_ABORTED",
+      "app://local/next",
+      true,
+      1,
+      contents.mainFrame.routingId + 1,
+    );
+    contents.emit(
+      "did-fail-load",
+      {},
+      -3,
+      "ERR_ABORTED",
+      "app://local/next",
+      true,
+      1,
+      undefined,
+    );
+
+    expect(sessionClosedCount(diagnostics)).toBe(0);
+  });
+
+  test("did-fail-load on a subframe does not retire the session", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    contents.emit(
+      "did-fail-load",
+      {},
+      -102,
+      "ERR_CONNECTION_REFUSED",
+      "app://local/frame",
+      false,
+      1,
+      999,
+    );
+
+    expect(sessionClosedCount(diagnostics)).toBe(0);
+  });
+
+  test("did-navigate-in-page (same-document) has no listener and does not retire the session", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeSessionBridge(ipcMain);
+    const contents = new FakeWebContents();
+    bridge.attach(contents as unknown as WebContents, "main");
+    await establish(ipcMain, contents, "client-1");
+
+    expect(contents.listenerCount("did-navigate-in-page")).toBe(0);
+    contents.emit(
+      "did-navigate-in-page",
+      {},
+      "app://local/#/other",
+      true,
+      true,
+    );
+
+    expect(sessionClosedCount(diagnostics)).toBe(0);
   });
 });
 

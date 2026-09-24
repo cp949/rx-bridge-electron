@@ -342,7 +342,7 @@ async function runScenario(mode: SinkMode): Promise<ScenarioResult> {
   );
 
   // A navigate → session-closed. B detach → session-closed + 활성 구독 cascade close.
-  contentsA.emit("did-start-navigation", {}, "app://local/next", false, true);
+  contentsA.emit("did-navigate", {}, "app://local/next", 200, "OK");
   detachB();
 
   const snapshotBeforeDispose = server.getDiagnosticsSnapshot();

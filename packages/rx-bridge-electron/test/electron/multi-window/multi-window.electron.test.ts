@@ -445,6 +445,170 @@ describe("Electron multi-window bridge", () => {
       )
       .toEqual([1, 1]);
   });
+
+  // DELTA-01 (RD-025 결함 재현): main frame `did-start-navigation`은 문서가
+  // 실제로 안 바뀌는 이동(pushState·hash·`will-navigate` 차단)에서도 발생하는데,
+  // `electron-adapter.ts`의 `onLifecycle`이 `_inPlace` 인자를 무시하고 매번
+  // 세션을 retire한다. 아래 세 test는 그 뒤에도 bridge가 계속 동작해야 한다는
+  // 기대를 고정한다 — 수정 전에는 RED다(RPC `FORBIDDEN`, 새 구독 무응답,
+  // `session-closed` 1건).
+  test("keeps the bridge alive after history.pushState changes the URL in place", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+
+    await editor.evaluate(() => {
+      history.pushState(
+        {},
+        "",
+        `${location.pathname}${location.search}#/other`,
+      );
+    });
+
+    await expect(
+      editor.evaluate(() =>
+        globalThis.fixtureRenderer.call("ping", "after-pushstate"),
+      ),
+    ).resolves.toEqual({ ok: true, value: "pong:after-pushstate" });
+
+    await app.evaluate(() => globalThis.__rxBridgeProbe.setStatus("busy"));
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready", "busy"] });
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status2", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status2")),
+      )
+      .toEqual({ values: ["busy"] });
+
+    const sessionClosed = await app.evaluate(
+      () =>
+        globalThis.__rxBridgeProbe
+          .diagnostics()
+          .filter((event) => event.type === "session-closed").length,
+    );
+    expect(sessionClosed).toBe(0);
+  });
+
+  test("keeps the bridge alive after location.hash changes", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+
+    await editor.evaluate(() => {
+      location.hash = "#x";
+    });
+
+    await expect(
+      editor.evaluate(() =>
+        globalThis.fixtureRenderer.call("ping", "after-hash"),
+      ),
+    ).resolves.toEqual({ ok: true, value: "pong:after-hash" });
+
+    await app.evaluate(() => globalThis.__rxBridgeProbe.setStatus("busy"));
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready", "busy"] });
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status2", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status2")),
+      )
+      .toEqual({ values: ["busy"] });
+
+    const sessionClosed = await app.evaluate(
+      () =>
+        globalThis.__rxBridgeProbe
+          .diagnostics()
+          .filter((event) => event.type === "session-closed").length,
+    );
+    expect(sessionClosed).toBe(0);
+  });
+
+  test("keeps the bridge alive after will-navigate blocks the navigation attempt", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+
+    await app.evaluate(() =>
+      globalThis.__rxBridgeProbe.blockNavigation("editor", true),
+    );
+    await editor.evaluate(() => {
+      location.href = `${location.href}&blocked=1`;
+    });
+    await expect
+      .poll(() =>
+        app!.evaluate(() =>
+          globalThis.__rxBridgeProbe.navigationAttempts("editor"),
+        ),
+      )
+      .toBe(1);
+
+    await expect(
+      editor.evaluate(() =>
+        globalThis.fixtureRenderer.call("ping", "after-blocked-nav"),
+      ),
+    ).resolves.toEqual({ ok: true, value: "pong:after-blocked-nav" });
+
+    await app.evaluate(() => globalThis.__rxBridgeProbe.setStatus("busy"));
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready", "busy"] });
+
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe("status2", "state", "status");
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status2")),
+      )
+      .toEqual({ values: ["busy"] });
+
+    const sessionClosed = await app.evaluate(
+      () =>
+        globalThis.__rxBridgeProbe
+          .diagnostics()
+          .filter((event) => event.type === "session-closed").length,
+    );
+    expect(sessionClosed).toBe(0);
+  });
 });
 
 /**
