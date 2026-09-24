@@ -7,7 +7,7 @@
 
 ## 오해하기 쉬운 신호
 
-- handshake·RPC가 이유 없이 `type: "error"`(`FORBIDDEN`류)로 돌아온다. loopback이나 server가 고장난 것처럼 보이지만 실제로는 재접속 방지 설계가 의도대로 동작한 것이다.
+- `connect()`가 `BridgeProtocolError`로 reject되고 `createRendererApi`가 `INTERNAL`("Bridge handshake failed.")로 실패한다(server의 handshake 거부 응답을 loopback이 preload처럼 `parseHandshakeResponse`에서 거부한다). 이미 연결된 transport의 RPC라면 `type: "error"` 응답으로 돌아온다. loopback이나 server가 고장난 것처럼 보이지만 실제로는 재접속 방지 설계가 의도대로 동작한 것이다.
 
 ## 원인
 

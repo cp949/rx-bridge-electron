@@ -47,7 +47,7 @@ export function createLoopbackTransport(
 
 ### 직렬화: 양방향 `structuredClone`, preload와 같은 protocol 함수
 
-`connect`·`invoke`의 요청·응답, `control`이 전달하는 stream 메시지 모두 `structuredClone`을 거친다 — 실제 IPC 경계처럼 참조를 공유하지 않는다. envelope 조립은 `withEnvelope`, stream 메시지 검사는 `parseStreamMessage`를 쓴다(둘 다 `../protocol/index.js`에서 값으로 import) — preload adapter(`src/preload/expose-bridge.ts`)가 쓰는 것과 같은 protocol 함수다. 참조를 그대로 넘기는 안(clone 생략)은 채택하지 않았다 — clone-불가능한 값(함수, class 인스턴스)이 실제로는 도달하지 못한다는 사실 자체가 이 adapter가 검증해야 할 대상이기 때문이다.
+`connect`·`invoke`의 요청·응답, `control`이 전달하는 stream 메시지 모두 `structuredClone`을 거친다 — 실제 IPC 경계처럼 참조를 공유하지 않는다. envelope 조립은 `withEnvelope`, 검사는 `parseRendererRpcRequest`·`parseRendererStreamCommand`(요청, 호출 시점에 동기), `parseHandshakeResponse`·`parseRpcResponse`·`parseStreamMessage`(응답·stream, clone 뒤)를 쓴다(모두 `../protocol/index.js`에서 값으로 import) — preload adapter(`src/preload/expose-bridge.ts`)가 쓰는 것과 같은 protocol 함수를 같은 위치에 둔다. 그래서 server가 handshake를 거부하면(`RpcResponse` 반환) `connect()`는 preload처럼 `parseHandshakeResponse`에서 reject되고, 거부 응답을 `HandshakeResponse`로 넘기지 않는다(RD-020 리뷰에서 교정 — 최초 구현은 거부 응답을 그대로 resolve했다). 참조를 그대로 넘기는 안(clone 생략)은 채택하지 않았다 — clone-불가능한 값(함수, class 인스턴스)이 실제로는 도달하지 못한다는 사실 자체가 이 adapter가 검증해야 할 대상이기 때문이다.
 
 ### 비동기 순서: `cancel`·`control`은 microtask로 미룬다
 

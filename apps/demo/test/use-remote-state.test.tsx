@@ -78,9 +78,12 @@ describe("useRemoteState", () => {
       await waitFor(() => expect(result.current.status).toBe("current"));
 
       rerender();
-
-      expect(subscribeCount()).toBe(1);
       expect(result.current.status).toBe("current");
+
+      // loopback은 control을 microtask 뒤에 server로 보낸다 — 재구독 명령이 있었다면
+      // server에 도달한 뒤에 upstream 구독 횟수를 센다.
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(subscribeCount()).toBe(1);
     } finally {
       dispose();
     }

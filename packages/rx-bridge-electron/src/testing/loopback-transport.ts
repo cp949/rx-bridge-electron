@@ -1,7 +1,12 @@
 // main에는 타입만 의존한다(`import type`) — `./testing`은 electron·`bindElectronBridge`·
-// `ipcMain`을 런타임에 불러오지 않는다(그릴링 결정 15). `withEnvelope`·`parseStreamMessage`는
-// preload adapter(`src/preload/expose-bridge.ts`)와 같은 protocol 함수를 값으로 쓴다.
+// `ipcMain`을 런타임에 불러오지 않는다(그릴링 결정 15). envelope 조립(`withEnvelope`)과
+// 요청·응답·stream 검사(`parse*`)는 preload adapter(`src/preload/expose-bridge.ts`)와 같은
+// protocol 함수를 값으로 쓴다 — 같은 입력에 preload와 같은 지점에서 실패한다.
 import {
+  parseHandshakeResponse,
+  parseRendererRpcRequest,
+  parseRendererStreamCommand,
+  parseRpcResponse,
   parseStreamMessage,
   withEnvelope,
   type HandshakeResponse,
@@ -39,8 +44,9 @@ function disposedError(): Error {
  * `BridgeTransport`의 두 번째 in-process adapter(test 전용). 호출자가 만든
  * `server`에 고정 target으로 `attach`해, admission 규칙(`DocumentSessions#admit`)을
  * 호출자가 몰라도 되게 한다. preload adapter와 같은 protocol 함수로 envelope를
- * 조립하고 `structuredClone`으로 요청·응답·stream 메시지를 복제한다(실제 IPC
- * 경계처럼 참조를 공유하지 않는다). `server` 자체는 dispose하지 않는다 — 한
+ * 조립·검사하고 `structuredClone`으로 요청·응답·stream 메시지를 복제한다(실제 IPC
+ * 경계처럼 참조를 공유하지 않는다). handshake 거부 응답은 preload처럼
+ * `parseHandshakeResponse`에서 reject된다. `server` 자체는 dispose하지 않는다 — 한
  * `server`에 여러 loopback transport를 붙일 수 있다.
  */
 export function createLoopbackTransport(
@@ -70,14 +76,15 @@ export function createLoopbackTransport(
     async connect(): Promise<HandshakeResponse> {
       if (disposed) throw disposedError();
       const response = server.handshake(sender, withEnvelope(clientId, {}));
-      return structuredClone(response) as HandshakeResponse;
+      return parseHandshakeResponse(structuredClone(response));
     },
 
     async invoke(request: RendererRpcRequest): Promise<RpcResponse> {
       if (disposed) throw disposedError();
-      const wireRequest = structuredClone(withEnvelope(clientId, request));
+      const parsed = parseRendererRpcRequest(request);
+      const wireRequest = structuredClone(withEnvelope(clientId, parsed));
       const response = await server.dispatchRpc(sender, wireRequest);
-      return structuredClone(response);
+      return parseRpcResponse(structuredClone(response));
     },
 
     cancel(requestId: string): void {
@@ -90,9 +97,11 @@ export function createLoopbackTransport(
 
     control(command: RendererStreamCommand): void {
       if (disposed) return;
+      // preload처럼 잘못된 command는 호출 시점에 동기로 throw한다.
+      const parsed = parseRendererStreamCommand(command);
       queueMicrotask(() => {
         if (disposed) return;
-        const wireCommand = withEnvelope(clientId, command);
+        const wireCommand = withEnvelope(clientId, parsed);
         void server.controlStream(sender, wireCommand, (message) => {
           // preload의 `onStreamMessage`(:99)와 같이 parse 실패분은 조용히
           // 버린다 — 여기서는 clone 실패도 같은 취급이다.

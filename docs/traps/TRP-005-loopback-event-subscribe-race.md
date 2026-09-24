@@ -7,7 +7,8 @@
 
 ## 오해하기 쉬운 신호
 
-- 가끔씩만 실패하는 event test(구독 직후 emit하는 패턴에서). microtask 스케줄링 타이밍 차이로 환경에 따라 통과·실패가 뒤바뀔 수 있다.
+- 구독 직후 emit한 event 값이 항상 빠진다. microtask 순서는 결정적이라 flaky하지 않고 매번 같은 결과가 난다 — "간헐 실패"로 보이면 이 trap이 아니라 다른 원인을 찾는다.
+- loopback 고유 결함처럼 보이지만 아니다. preload 경로도 `control`이 IPC로 비동기 전달되므로 replay 없는 event를 구독 확정 전에 emit하면 같은 값을 놓친다. loopback은 이 비동기성을 microtask로 재현할 뿐이다.
 
 ## 원인
 
@@ -15,4 +16,4 @@
 
 ## 탐지/회피
 
-event 구독 뒤 값을 emit하기 전에 microtask flush(예: `await new Promise((r) => setTimeout(r, 0))` 또는 "subscribed" 메시지 도착 확인)를 끼운다. state 구독은 현재 값을 재전송하므로 이 문제가 없다.
+event 구독 뒤 값을 emit하기 전에 macrotask 경계까지 한 번 진행한다(예: `await new Promise((r) => setTimeout(r, 0))`, transport를 직접 다루는 test라면 "subscribed" 메시지 도착 확인). 같은 이유로 구독 여부·횟수를 server 쪽에서 세는 단언도 이 경계 뒤에 둔다 — `control()` 직후 동기로 세면 재구독이 있어도 항상 통과한다. state 구독은 현재 값을 재전송하므로 이 문제가 없다.

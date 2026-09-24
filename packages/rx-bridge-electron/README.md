@@ -363,7 +363,7 @@ server.dispose();
 | `clientId` | `"loopback-client"`                                                              | 같은 `server`에 여러 transport를 붙일 때는 서로 다른 값을 주세요 — 같은 `webContentsId`에서 한 번 retire된 `clientId`는 재사용할 수 없습니다.  |
 | `role`     | `"default"`                                                                      | `server.attach`에 넘기는 target의 role — `authorize`의 `context.windowRole`로 전달됩니다.                                                      |
 
-요청·응답과 stream 메시지 모두 `structuredClone`을 거치고(preload와 같은 protocol 함수 `withEnvelope`·`parseStreamMessage`로 envelope를 조립·검사) 참조를 공유하지 않습니다. `cancel`·`control` 호출과 stream 메시지 전달은 microtask로 미뤄집니다(`control()`이 반환되기 전에 `onStreamMessage` listener가 불리지 않습니다). `server`가 던지는 예외는 폴백 없이 그대로 드러납니다(운영 adapter의 try/catch 폴백을 공유하지 않습니다). `dispose()`는 detach와 listener 해제만 합니다 — `server`는 dispose하지 않으므로 같은 `server`에 새 loopback transport를 계속 만들 수 있습니다.
+요청·응답과 stream 메시지 모두 `structuredClone`을 거치고 참조를 공유하지 않습니다. envelope 조립(`withEnvelope`)과 검사(`parseRendererRpcRequest`·`parseRendererStreamCommand`·`parseHandshakeResponse`·`parseRpcResponse`·`parseStreamMessage`)는 preload와 같은 protocol 함수를 쓰므로 같은 입력에서 preload와 같은 지점에서 실패합니다 — 예: server가 handshake를 거부하면 `connect()`가 reject되고 `createRendererApi`는 `INTERNAL`로 실패합니다. `cancel`·`control` 호출과 stream 메시지 전달은 microtask로 미뤄집니다(`control()`이 반환되기 전에 `onStreamMessage` listener가 불리지 않습니다). `server`가 던지는 예외는 폴백 없이 그대로 드러납니다(운영 adapter의 try/catch 폴백을 공유하지 않습니다). `dispose()`는 detach와 listener 해제만 합니다 — `server`는 dispose하지 않으므로 같은 `server`에 새 loopback transport를 계속 만들 수 있습니다.
 
 운영(production) 코드에서는 쓰지 않습니다 — Renderer는 여전히 고정 preload transport만 받아야 합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)). 근거는 [ADR 0017](../../docs/adr/0017-loopback-test-transport.md)에 있습니다.
 
