@@ -20,7 +20,7 @@
     "test": "vitest run",
     "test:soak": "pnpm build && vitest run --config vitest.soak.config.ts",
     "lint": "eslint .",
-    "verify": "pnpm check-types && pnpm test && pnpm build"
+    "verify": "pnpm build && pnpm check-types && pnpm test"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0",

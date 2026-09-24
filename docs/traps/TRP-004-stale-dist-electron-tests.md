@@ -2,8 +2,9 @@
 
 - 상태: ACTIVE
 - 적용 조건: `packages/rx-bridge-electron`의 `src/main`·`src/preload`·`src/renderer`를 고친 뒤,
-  `pnpm --filter @cp949/rx-bridge-electron build`를 다시 돌리지 않은 채
-  `test/electron/*.electron.test.ts`(또는 그 패키지의 `verify` 스크립트를 직접)를 실행할 때.
+  `pnpm --filter @cp949/rx-bridge-electron build`를 다시 돌리지 않은 채 패키지 로컬에서
+  `pnpm test`·`pnpm check-types`·`vitest run test/electron`을 직접 실행할 때. 패키지 `verify`와 루트
+  `pnpm check-types`·`pnpm test`·`pnpm verify`는 build를 먼저 하므로 해당하지 않는다.
 
 ## 오해하기 쉬운 신호
 
@@ -17,11 +18,9 @@
 - 실패가 tsup dts 빌드 에러(예: `Argument of type '{...}' is not assignable to parameter of type
 'BindElectronBridgeOptions'`)로 나타나, 방금 만든 fixture 코드가 잘못된 것처럼 보인다. 실제로는
   `dist/`가 이전 함수 시그니처를 그대로 들고 있는 것이다.
-- 이 패키지의 `verify` 스크립트(`pnpm check-types && pnpm test && pnpm build`, `packages/rx-bridge-electron/package.json`)는 `build`가 `test` _뒤에_ 있어서, 이 스크립트를 그대로 실행하면
-  stale dist인 채로 `test`(electron 테스트 포함)를 돌리게 된다. 저장소 루트의 `pnpm verify`/`pnpm test`는
-  `turbo.json`이 `@cp949/rx-bridge-electron#test`에 `dependsOn: ["build"]`를 선언해 이 문제를 피하므로,
-  이 트랩은 패키지 로컬 `pnpm --filter @cp949/rx-bridge-electron verify`(또는 `test`) 직접 실행에서만
-  나타난다.
+- 패키지 `verify`는 `pnpm build && pnpm check-types && pnpm test` 순서라 이 트랩을 피한다. 루트
+  turbo는 `@cp949/rx-bridge-electron#check-types`·`#test`에 `dependsOn: ["build"]`를 선언한다. 그래서
+  "verify는 통과했는데 직접 돌린 test는 실패한다"는 차이가 생길 수 있다 — 직접 실행 쪽이 stale `dist/`다.
 
 ## 원인
 
@@ -36,9 +35,7 @@
 - `src/main`·`src/preload`·`src/renderer`를 고친 뒤 `*.electron.test.ts`를 돌리기 전에
   `pnpm --filter @cp949/rx-bridge-electron build`를 먼저 실행한다.
 - 공개 타입을 바꿨으면 `build` 뒤에 `check-types`를 한 번 더 실행한다.
-- 저장소 루트에서는 `pnpm test`/`pnpm verify`(turbo 경유)를 쓴다 — `turbo.json`의
-  `dependsOn: ["build"]`가 이 패키지의 `test` 실행 전에 `build`를 강제한다.
+- 저장소 루트의 `pnpm check-types`/`pnpm test`/`pnpm verify`(turbo 경유)나 패키지 `verify`를 쓴다 —
+  둘 다 `build`를 먼저 실행한다.
 - 에러 메시지가 fixture 코드의 타입 문제처럼 보이는데 방금 손댄 게 `src/`뿐이라면, 먼저 `dist/` 재빌드를
   의심한다.
-- 패키지 로컬 `verify` 스크립트(`check-types && test && build`)를 직접 실행하지 않는다 — 순서상
-  `build`가 `test`보다 뒤에 있어 이 트랩을 그대로 재현한다.
