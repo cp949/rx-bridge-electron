@@ -167,16 +167,17 @@ function buildBridgeServer(
     type: "error",
     error: { code, message },
   });
+  const reject = (reason: RejectReason): void => {
+    recordDiagnostic(options.diagnostics, { type: "rejected", reason });
+  };
   return {
     [recordAdapterRejection](reason: RejectReason): void {
       recordDiagnostic(options.diagnostics, { type: "rejected", reason });
     },
     handshake(sender, clientId) {
-      if (sessions.establish(sender, clientId) === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "sender-unauthorized",
-        });
+      const admission = sessions.establish(sender, clientId);
+      if ("reason" in admission) {
+        reject(admission.reason);
         return undefined;
       }
       return { protocolVersion: 1, clientId, manifest };
@@ -189,30 +190,27 @@ function buildBridgeServer(
       envelope: WireRpcRequest,
     ): Promise<RpcResponse> {
       if (envelope.protocolVersion !== 1) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "version-mismatch",
-        });
+        reject("version-mismatch");
         return error(
           envelope,
           "VERSION_MISMATCH",
           "Unsupported protocol version.",
         );
       }
-      const session = sessions.establish(sender, envelope.clientId);
-      if (session === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "sender-unauthorized",
-        });
+      const admission = sessions.establish(sender, envelope.clientId);
+      if ("reason" in admission) {
+        reject(admission.reason);
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
       }
-      return rpcRequests.dispatch(session, sender, envelope);
+      return rpcRequests.dispatch(admission.session, sender, envelope);
     },
     cancel(sender: SenderIdentity, envelope: WireCancelRequest): void {
-      const session = sessions.current(sender, envelope.clientId);
-      if (session !== undefined)
-        rpcRequests.cancel(session, envelope.requestId);
+      const admission = sessions.current(sender, envelope.clientId);
+      if ("reason" in admission) {
+        reject(admission.reason);
+        return;
+      }
+      rpcRequests.cancel(admission.session, envelope.requestId);
     },
     async controlStream(
       sender: SenderIdentity,
@@ -220,33 +218,24 @@ function buildBridgeServer(
       send: StreamSender,
     ): Promise<void> {
       if (command.protocolVersion !== 1) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "version-mismatch",
-        });
+        reject("version-mismatch");
         return;
       }
       if (command.type !== "subscribe") {
-        const session = sessions.current(sender, command.clientId);
-        if (session === undefined) {
-          recordDiagnostic(options.diagnostics, {
-            type: "rejected",
-            reason: "sender-unauthorized",
-          });
+        const admission = sessions.current(sender, command.clientId);
+        if ("reason" in admission) {
+          reject(admission.reason);
           return;
         }
-        subscriptions.control(session, command);
+        subscriptions.control(admission.session, command);
         return;
       }
-      const session = sessions.establish(sender, command.clientId);
-      if (session === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "sender-unauthorized",
-        });
+      const admission = sessions.establish(sender, command.clientId);
+      if ("reason" in admission) {
+        reject(admission.reason);
         return;
       }
-      await subscriptions.subscribe(session, sender, command, send);
+      await subscriptions.subscribe(admission.session, sender, command, send);
     },
     dispose(): void {
       if (disposed) return;

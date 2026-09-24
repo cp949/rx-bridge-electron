@@ -89,9 +89,10 @@ const overflowError: RpcErrorPayload = {
 
 /**
  * 구독(subscription) 1건의 수명주기 전체(admission부터 terminal·slot 반환까지)를
- * 소유한다. server(`create-bridge-server.ts`)는 세션 해석과 `sender-unauthorized`
- * 판정만 하고, subscriptionId 파싱·watermark·등록 조회·slot·`authorize` 대기·
- * consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
+ * 소유한다. server(`create-bridge-server.ts`)는 세션 해석과 sender admission
+ * 판정(`DocumentSessions#admit` — `frame-not-main`·`origin-not-allowed`·
+ * `sender-unauthorized`)만 하고, subscriptionId 파싱·watermark·등록 조회·slot·
+ * `authorize` 대기·consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
  */
 export class Subscriptions {
   readonly #table: RegistrationTable;

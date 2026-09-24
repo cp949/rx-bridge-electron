@@ -395,12 +395,18 @@ describe("Main retired client retention", () => {
     const target = new FakeTarget();
     sessions.attach(target);
     for (const clientId of ["c1", "c2", "c3", "c4", "c5"])
-      expect(sessions.establish(sender(), clientId)).toBeDefined();
+      expect(sessions.establish(sender(), clientId)).toHaveProperty("session");
 
     expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
-    expect(sessions.establish(sender(), "c2")).toBeUndefined();
-    expect(sessions.establish(sender(), "c3")).toBeUndefined();
-    expect(sessions.establish(sender(), "c4")).toBeUndefined();
+    expect(sessions.establish(sender(), "c2")).toEqual({
+      reason: "sender-unauthorized",
+    });
+    expect(sessions.establish(sender(), "c3")).toEqual({
+      reason: "sender-unauthorized",
+    });
+    expect(sessions.establish(sender(), "c4")).toEqual({
+      reason: "sender-unauthorized",
+    });
   });
 
   test("an evicted retired id still fails the frame check for a non-current sender", () => {
@@ -411,9 +417,9 @@ describe("Main retired client retention", () => {
       sessions.establish(sender(), clientId);
 
     expect(sessions.retiredClientCount(target.webContentsId)).toBe(3);
-    expect(
-      sessions.establish(sender({ isMainFrame: false }), "c1"),
-    ).toBeUndefined();
+    expect(sessions.establish(sender({ isMainFrame: false }), "c1")).toEqual({
+      reason: "frame-not-main",
+    });
   });
 
   test("a destroyed lifecycle event clears retired ids for that webContents", () => {

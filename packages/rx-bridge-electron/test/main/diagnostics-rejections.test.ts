@@ -481,13 +481,129 @@ describe("rejected diagnostic reasons", () => {
     await server.controlStream(sender(), subscribeCommand(), send);
     expect(rejections(diagnostics)).toEqual([]);
   });
+
+  test("RPC sender-unauthorized: retired clientId", async () => {
+    const { server, diagnostics } = setup({});
+    await server.dispatchRpc(sender(), rpcRequest({ clientId: "document-1" }));
+    await server.dispatchRpc(sender(), rpcRequest({ clientId: "document-2" }));
+    const response = await server.dispatchRpc(
+      sender(),
+      rpcRequest({ clientId: "document-1", requestId: "request-3" }),
+    );
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "FORBIDDEN" },
+    });
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+  });
+
+  test("RPC sender-unauthorized: server disposed", async () => {
+    const { server, diagnostics } = setup({});
+    server.dispose();
+    await server.dispatchRpc(sender(), rpcRequest());
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+  });
+
+  test("cancel sender-unauthorized: no session established", () => {
+    const { server, diagnostics } = setup({});
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+  });
+});
+
+// frame·origin 불일치는 채널과 무관하게 같은 사유를 낸다(DocumentSessions#admit이
+// 하나의 판정을 모든 채널에 공급한다). cancel도 다른 채널과 같은 verdict로 거부를
+// 기록한다(전에는 조용히 무시했다) — 위 "cancel sender-unauthorized" test와 별개로,
+// frame·origin 불일치가 cancel에서도 기록되는지 여기서 함께 검증한다.
+describe.each([
+  ["frame-not-main" as const, sender({ isMainFrame: false })],
+  ["origin-not-allowed" as const, sender({ origin: "https://evil.example" })],
+])("channel-independent reason: %s", (reason, badSender) => {
+  test("RPC", async () => {
+    const { server, diagnostics } = setup({});
+    const response = await server.dispatchRpc(badSender, rpcRequest());
+    expect(response).toEqual({
+      protocolVersion: 1,
+      clientId: rpcRequest().clientId,
+      requestId: rpcRequest().requestId,
+      type: "error",
+      error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
+    });
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
+
+  test("subscribe", async () => {
+    const { server, diagnostics } = setup({});
+    await server.controlStream(badSender, subscribeCommand(), () => {});
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
+
+  test("unsubscribe", async () => {
+    const { server, diagnostics } = setup({});
+    await server.controlStream(sender(), subscribeCommand(), () => {});
+    await server.controlStream(
+      badSender,
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        type: "unsubscribe",
+        subscriptionId: testSubscriptionId(1),
+      },
+      () => {},
+    );
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
+
+  test("acknowledge", async () => {
+    const { server, diagnostics } = setup({});
+    await server.controlStream(sender(), subscribeCommand(), () => {});
+    await server.controlStream(
+      badSender,
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        type: "acknowledge",
+        subscriptionId: testSubscriptionId(1),
+        sequence: 0,
+      },
+      () => {},
+    );
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
+
+  test("cancel", async () => {
+    const { server, diagnostics } = setup({});
+    await server.dispatchRpc(sender(), rpcRequest());
+    server.cancel(badSender, {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
+
+  test("server handshake", () => {
+    const { server, diagnostics } = setup({});
+    expect(server.handshake(badSender, "client-1")).toBeUndefined();
+    expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+  });
 });
 
 // frame 교체(같은 webContentsId, 다른 frameId — 예: 페이지 탐색)를
 // characterization으로 고정한다. 옛 clientId는 탐색으로 즉시 retire되어
 // 그 자체로 거부되므로, frame 검사만 관측하려면 새 clientId를 써야 한다.
-// 지금은 두 사유 모두 `sender-unauthorized`다 — DELTA-02에서 frame 불일치가
-// `frame-not-main`으로 분리된다(이 test의 기대값도 그때 함께 바뀐다).
+// DELTA-02에서 frame 불일치가 `frame-not-main`으로 분리됐다(DELTA-01
+// 시점에는 `sender-unauthorized`였다).
 describe("frame replacement (characterization)", () => {
   test("frame 교체 뒤 옛 frameId로 새 clientId를 보내면 거부된다", async () => {
     const handler = vi.fn(async (input: { readonly id: string }) => input);
@@ -509,7 +625,7 @@ describe("frame replacement (characterization)", () => {
       error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
     });
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "sender-unauthorized" },
+      { type: "rejected", reason: "frame-not-main" },
     ]);
     expect(handler).toHaveBeenCalledTimes(1);
   });

@@ -4,6 +4,7 @@ import type { ResourceLimits } from "./resource-limits.js";
 import type {
   AttachedTarget,
   DiagnosticsSink,
+  RejectReason,
   SenderIdentity,
 } from "./types.js";
 
@@ -12,6 +13,17 @@ export interface DocumentSession {
   readonly clientId: string;
   readonly signal: AbortSignal;
 }
+
+/** sender admission이 낼 수 있는 사유만 좁힌 부분집합. */
+export type SenderRejectReason = Extract<
+  RejectReason,
+  "frame-not-main" | "origin-not-allowed" | "sender-unauthorized"
+>;
+
+/** `establish`·`current`의 판정 결과. 세션 아니면 사유, 둘 중 하나다. */
+export type Admission =
+  | { readonly session: DocumentSession }
+  | { readonly reason: SenderRejectReason };
 
 type LifecycleReason =
   "main-frame-navigation" | "render-process-gone" | "destroyed";
@@ -57,29 +69,37 @@ export class DocumentSessions {
     };
   }
 
-  public establish(
-    sender: SenderIdentity,
-    clientId: string,
-  ): DocumentSession | undefined {
-    if (this.#disposed) return undefined;
+  /**
+   * frame·origin·attachment 판정 하나. 채널과 무관하게 같은 사유를 낸다
+   * (`establish`·`current`가 공유). 순서: disposed·미attach →
+   * `sender-unauthorized`, subframe이거나 현재 main frame이 아님 →
+   * `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed`.
+   */
+  #admit(sender: SenderIdentity): Attachment | SenderRejectReason {
+    if (this.#disposed) return "sender-unauthorized";
     const attachment = this.#attachments.get(sender.webContentsId);
-    if (
-      attachment === undefined ||
-      !sender.isMainFrame ||
-      !attachment.target.isCurrentMainFrame(sender) ||
-      !attachment.target.isAllowedOrigin(sender.origin)
-    )
-      return undefined;
+    if (attachment === undefined) return "sender-unauthorized";
+    if (!sender.isMainFrame || !attachment.target.isCurrentMainFrame(sender))
+      return "frame-not-main";
+    if (!attachment.target.isAllowedOrigin(sender.origin))
+      return "origin-not-allowed";
+    return attachment;
+  }
+
+  public establish(sender: SenderIdentity, clientId: string): Admission {
+    const admitted = this.#admit(sender);
+    if (typeof admitted === "string") return { reason: admitted };
+    const attachment = admitted;
     const current = attachment.current;
-    if (current?.clientId === clientId) return current;
+    if (current?.clientId === clientId) return { session: current };
     if (this.#retiredClients.get(sender.webContentsId)?.has(clientId))
-      return undefined;
+      return { reason: "sender-unauthorized" };
     this.#retire(attachment);
     if (
       this.#attachments.get(sender.webContentsId) !== attachment ||
       attachment.current !== undefined
     )
-      return undefined;
+      return { reason: "sender-unauthorized" };
     const controller = new AbortController();
     const session: DocumentSession = {
       target: attachment.target,
@@ -89,26 +109,16 @@ export class DocumentSessions {
     this.#controllers.set(session, controller);
     attachment.current = session;
     recordDiagnostic(this.#diagnostics, { type: "session-opened" });
-    return session;
+    return { session };
   }
 
-  public current(
-    sender: SenderIdentity,
-    clientId: string,
-  ): DocumentSession | undefined {
-    if (this.#disposed) return undefined;
-    const attachment = this.#attachments.get(sender.webContentsId);
-    if (
-      attachment === undefined ||
-      !sender.isMainFrame ||
-      !attachment.target.isCurrentMainFrame(sender) ||
-      !attachment.target.isAllowedOrigin(sender.origin)
-    )
-      return undefined;
-    const session = attachment.current;
+  public current(sender: SenderIdentity, clientId: string): Admission {
+    const admitted = this.#admit(sender);
+    if (typeof admitted === "string") return { reason: admitted };
+    const session = admitted.current;
     return session?.clientId === clientId && !session.signal.aborted
-      ? session
-      : undefined;
+      ? { session }
+      : { reason: "sender-unauthorized" };
   }
 
   public sessionCount(): number {
