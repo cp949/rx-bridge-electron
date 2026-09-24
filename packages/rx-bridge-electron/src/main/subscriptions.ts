@@ -11,8 +11,10 @@ import {
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { recordDiagnostic } from "./diagnostics.js";
-import { SENDER_UNAUTHORIZED_MESSAGE } from "./document-sessions.js";
-import type { DocumentSession } from "./document-sessions.js";
+import {
+  SENDER_UNAUTHORIZED_MESSAGE,
+  type DocumentSession,
+} from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
@@ -86,6 +88,10 @@ const overflowError: RpcErrorPayload = {
   code: "STREAM_OVERFLOW",
   message: "Event buffer capacity exceeded.",
 };
+const senderUnauthorizedError: RpcErrorPayload = {
+  code: "FORBIDDEN",
+  message: SENDER_UNAUTHORIZED_MESSAGE,
+};
 /** detach·`server.dispose()`로 살아 있는 문서의 세션이 끝날 때 스트림에 보내는 종료 사유. */
 const sessionEndedError: RpcErrorPayload = {
   code: "CANCELLED",
@@ -108,8 +114,7 @@ function endNotice(
   cause: EndCause,
   sessionSignal?: AbortSignal,
 ): RpcErrorPayload | undefined {
-  if (cause.kind === "admission")
-    return { code: "FORBIDDEN", message: SENDER_UNAUTHORIZED_MESSAGE };
+  if (cause.kind === "admission") return senderUnauthorizedError;
   if (sessionSignal === undefined || !sessionSignal.aborted)
     return cause.kind === "rejected" ? cause.error : undefined;
   return sessionSignal.reason === "detach" || sessionSignal.reason === "dispose"
@@ -466,8 +471,9 @@ export class Subscriptions {
 
   /**
    * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire)의 통지:
-   * `subscribed`(0) 뒤 `endNotice`를 다시 평가해(전송 중 동기 retire 반영)
-   * `error`(1)를 보낸다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+   * `subscribed`(0) 전후로 `endNotice`를 평가해 `error`(1)를 보낸다. 앞 평가는
+   * 진단 sink가 동기로 일으킨 retire를, 뒤 평가는 `send` 중 동기 retire를
+   * 반영한다. 전송 실패는 삼킨다(ADR 0020 결정 6).
    */
   #endUnstarted(
     command: SubscribeCommand,
