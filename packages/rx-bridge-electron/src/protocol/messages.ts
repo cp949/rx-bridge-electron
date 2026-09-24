@@ -197,7 +197,7 @@ export function parseHandshakeResponse(
   const record = parseRecord(value, limits);
   assertKeys(record, ["protocolVersion", "clientId", "manifest"]);
   const manifest = parseRecord(record.manifest, limits);
-  assertKeys(manifest, ["rpc", "state", "event"]);
+  assertKeys(manifest, OPERATION_CATEGORIES);
   for (const category of OPERATION_CATEGORIES) {
     const values = manifest[category];
     if (
