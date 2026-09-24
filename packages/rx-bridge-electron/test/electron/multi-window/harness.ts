@@ -61,3 +61,18 @@ export async function windowFor(app: ElectronApp, role: Role): Promise<Page> {
   ).resolves.toBe(role);
   return page!;
 }
+
+/**
+ * Renderer의 dispose 호출 없이 role 창을 Main 쪽에서 강제로 닫는다(사용자가 창의 X 버튼을
+ * 누르는 것과 동일한 경로). `BrowserWindow#close()`가 실제 `closed` 이벤트를 내고 그 안에서
+ * `webContents`가 `destroyed`되므로, `bindElectronBridge`가 등록한 `contents.once("destroyed",
+ * ...)` 리스너를 거쳐 Main 쪽 세션 회수가 일어나는지 검증할 수 있다.
+ */
+export async function closeWindow(app: ElectronApp, role: Role): Promise<void> {
+  await app.evaluate(({ BrowserWindow }, targetRole) => {
+    const target = BrowserWindow.getAllWindows().find((candidate) =>
+      candidate.webContents.getURL().includes(`role=${targetRole}`),
+    );
+    target?.close();
+  }, role);
+}

@@ -3,6 +3,7 @@ import { afterEach, beforeAll, describe, expect, test } from "vitest";
 
 import {
   bundleMultiWindowFixture,
+  closeWindow,
   launch,
   windowFor,
   type ElectronApp,
@@ -356,6 +357,80 @@ describe("Electron multi-window bridge", () => {
     await expect(
       reloaded.evaluate(() => globalThis.fixtureRenderer.call("ping", "new")),
     ).resolves.toEqual({ ok: true, value: "pong:new" });
+
+    await viewer.evaluate(() => {
+      globalThis.fixtureRenderer.unsubscribe("status");
+      globalThis.fixtureRenderer.unsubscribe("notice");
+    });
+    await expect
+      .poll(() =>
+        app!.evaluate(() => {
+          const counts = globalThis.__rxBridgeProbe.upstream();
+          return [counts.status.unsubscribe, counts.notice.unsubscribe];
+        }),
+      )
+      .toEqual([1, 1]);
+  });
+
+  test("recovers the editor's session when its window is closed without dispose", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+    const viewer = await windowFor(app, "viewer");
+
+    for (const page of [editor, viewer]) {
+      await page.evaluate(async () => {
+        await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+        await globalThis.fixtureRenderer.subscribe("notice", "event", "notice");
+      });
+    }
+    await editor.evaluate(() =>
+      globalThis.fixtureRenderer.startCalls("held", "hold", 3),
+    );
+    await expect
+      .poll(() => app!.evaluate(() => globalThis.__rxBridgeProbe.snapshot()))
+      .toMatchObject({ sessions: 2, rpcInFlight: 3, subscriptions: 4 });
+
+    // renderer 쪽 dispose 없이 창만 닫는다 — 사용자가 창을 닫는 것과 동일한 경로.
+    await closeWindow(app, "editor");
+
+    await expect
+      .poll(() => app!.evaluate(() => globalThis.__rxBridgeProbe.snapshot()))
+      .toMatchObject({ sessions: 1, rpcInFlight: 0, subscriptions: 2 });
+    const diagnostics = await app.evaluate(() =>
+      globalThis.__rxBridgeProbe.diagnostics(),
+    );
+    expect(
+      diagnostics.filter((event) => event.type === "session-closed"),
+    ).toHaveLength(1);
+    expect(
+      diagnostics.filter((event) => event.type === "rpc-cancelled"),
+    ).toHaveLength(3);
+    expect(
+      diagnostics.filter((event) => event.type === "subscription-closed"),
+    ).toHaveLength(2);
+    await expect(
+      app.evaluate(() => {
+        const counts = globalThis.__rxBridgeProbe.upstream();
+        return { status: counts.status, notice: counts.notice };
+      }),
+    ).resolves.toEqual({
+      status: { subscribe: 1, unsubscribe: 0 },
+      notice: { subscribe: 1, unsubscribe: 0 },
+    });
+
+    // viewer는 영향 없이 계속 State·Event를 수신한다.
+    await app.evaluate(() => {
+      globalThis.__rxBridgeProbe.setStatus("after-close");
+      globalThis.__rxBridgeProbe.emit("notice", ["after-close"]);
+    });
+    await expect
+      .poll(() =>
+        viewer.evaluate(() => [
+          globalThis.fixtureRenderer.received("status").values.at(-1),
+          globalThis.fixtureRenderer.received("notice").values,
+        ]),
+      )
+      .toEqual(["after-close", ["after-close"]]);
 
     await viewer.evaluate(() => {
       globalThis.fixtureRenderer.unsubscribe("status");
