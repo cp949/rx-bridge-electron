@@ -26,7 +26,7 @@
 
 ## 수용한 동작 변화
 
-retire 시 대기 중인 `authorize`의 `AbortSignal`이 이제 RPC의 그것과 같은 시점(`session.signal` abort)에 abort된다. 이전엔 `DocumentSessions.#retire`가 RPC를 먼저 취소하고 그다음 pending stream을 취소하는, 손으로 짠 순서였다. 둘 다 같은 동기 호출 안에서 끝나므로 관측 가능한 차이는 없다.
+retire 시 대기 중인 stream `authorize`의 `AbortSignal`이 이제 RPC `AbortSignal`보다 먼저 abort된다. 이전엔 `DocumentSessions.#retire`가 RPC를 먼저 취소(`rpc-cancelled` 기록)하고 그다음 pending stream을 취소했다. 이제 pending stream은 `session.signal` abort listener로 취소되고, 이 abort가 `#retire`의 RPC 취소 루프보다 먼저 실행된다. 둘 다 같은 동기 호출 안에서 끝나지만, 두 signal의 abort listener 실행 순서와 `rpc-cancelled` 진단 대비 stream 취소 시점은 바뀐다. 어느 쪽 순서에도 의존하는 계약은 없다.
 
 ## 보존
 

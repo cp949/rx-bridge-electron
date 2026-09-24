@@ -268,6 +268,40 @@ describe("세션별 구독 한도", () => {
     expect(types(messages)).toEqual(["subscribed", "batch"]);
   });
 
+  test("대기 중 세션 retire는 authorize signal을 abort하고 늦은 허용을 무시한다", async () => {
+    let allow!: (value: boolean) => void;
+    let signal: AbortSignal | undefined;
+    const authorize: Authorize = (context) => {
+      signal = context.signal;
+      return new Promise<boolean>((resolve) => {
+        allow = resolve;
+      });
+    };
+    const { server, target, currentSource } = setup({
+      resourceLimits: { maxSubscriptions: 1 },
+      authorize,
+    });
+    const late: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
+      (message) => late.push(message),
+    );
+    await vi.waitFor(() => expect(signal).toBeDefined());
+    target.endDocument();
+    expect(signal?.aborted).toBe(true);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    allow(true);
+    await pending;
+    expect(late).toEqual([]);
+    expect(currentSource.observed).toBe(false);
+  });
+
   test("State 소스 complete 뒤 슬롯이 반환된다", async () => {
     const { server, currentSource } = setup({
       resourceLimits: { maxSubscriptions: 1 },

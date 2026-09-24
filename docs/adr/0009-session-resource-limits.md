@@ -16,7 +16,7 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 8. **범위**: 세션별 한도만 둔다. 서버 전역(모든 세션 합계) 상한은 두지 않는다.
 9. **기본값**: 아래 표. 모두 `resourceLimits` 옵션으로 개별 덮어쓸 수 있다.
 10. **RPC 슬롯 반환**: 취소나 deadline으로 응답을 먼저 보내도, handler Promise가 실제로 끝날 때(resolve/reject) 슬롯을 반환한다. `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유하며 다른 세션에 영향을 주지 않는다.
-11. **구독 계산**: 대기(`authorize` 중)와 활성을 합쳐 `maxSubscriptions` 하나로 센다. unsubscribe·거부(`FORBIDDEN`/`NOT_FOUND`/`authorize` 예외)·세션 retire 경로는 슬롯을 즉시 반환한다. 완료·오류·overflow(source 쪽 종료)는 source를 즉시 분리하되 대기 값을 ack 순서대로 모두 전달한 뒤 terminal을 보내고 그 뒤 슬롯을 반환한다(RD-009에서 문구 정정 — 동작은 처음부터 이 순서였다. 이전 문구는 모든 경로를 "즉시 반환"으로 적었다). 초과 시 `streams.reject()`로 `subscribed` 다음 `RESOURCE_EXHAUSTED` `error`를 보낸다.
+11. **구독 계산**: 대기(`authorize` 중)와 활성을 합쳐 `maxSubscriptions` 하나로 센다. unsubscribe·거부(`FORBIDDEN`/`NOT_FOUND`/`authorize` 예외)·세션 retire 경로는 슬롯을 즉시 반환한다. 완료·오류·overflow(source 쪽 종료)는 source를 즉시 분리하되 대기 값을 ack 순서대로 모두 전달한 뒤 terminal을 보내고 그 뒤 슬롯을 반환한다(RD-009에서 문구 정정 — 동작은 처음부터 이 순서였다. 이전 문구는 모든 경로를 "즉시 반환"으로 적었다). 초과 시 `subscribed` 다음 `RESOURCE_EXHAUSTED` `error`를 보낸다.
 12. **payload 한도 적용 지점**: `electron-adapter.ts`와 `preload/expose-bridge.ts`는 envelope 구조(깊이·항목 수·문자열 길이 모두 `Number.MAX_SAFE_INTEGER`)만 검사하고 payload 한도는 강제하지 않는다. payload 한도는 서버가 계약 기준(`contract.payloadLimits`와 기본값의 병합)으로만 적용한다. 계약이 기본값보다 큰 한도를 선언하면 그 한도가 adapter를 거쳐 handler까지 실제로 적용된다.
 13. **ID 계약**: 워터마크 대상은 stream `subscriptionId`뿐(RPC `requestId`는 대상이 아니다). 형식은 `<nonce>:<scope>:<seq base36>`(`src/renderer/ids.ts`의 `createOpaqueId` 산출 형식, `src/protocol/opaque-id.ts`의 `parseOpaqueIdSequence`가 파싱한다). 형식 오류는 `INVALID_ARGUMENT`로 reject한다. 워터마크 이하(재사용·늦은 도착)는 메시지 없이 조용히 무시한다.
 
