@@ -23,6 +23,10 @@ _Avoid_: stream consumer, 스트림 세션
 렌더러 문서 세션이 소유하는 요청-응답 단위. `requestId`로 식별하며, 수명은 등록 조회·slot 획득부터 handler 종료와 slot 반환까지다. 응답이 취소·deadline으로 먼저 나가도 slot은 handler가 끝날 때 반환한다. 세션이 retire되면 취소된다. Main에서는 `RpcRequests` 모듈이 소유한다.
 _Avoid_: RPC 호출(call), dispatch
 
+**operation key (wire key)**:
+`category:domain/op` 형식의 식별자다(예: `rpc:device/connect`). 등록 table의 key, handshake manifest의 key, `authorize(context, operationId)`의 `operationId`, 진단 이벤트의 `key`가 모두 이 형식을 쓴다. 문법(생성·분해, segment·예약어 검증, 경로 충돌 검사)은 `src/protocol/operation-key.ts` 하나가 소유하고, Main 등록(`buildRegistrationTableFromImpl`)과 Renderer manifest 파서(`createRendererApi`)가 각각 호출한다.
+_Avoid_: table key(`domain/op`, category 없는 조회 전용 표기 — 더는 쓰지 않는다)
+
 **계약 (contract)**:
 런타임 값이 아니라 순수 TS 타입 `B`다. 도메인들의 중첩 객체 타입이며, 각 도메인 노드는 `rpc`·`state`·`event` 중 있는 카테고리만 키로 갖고 그 외 키는 하위 namespace로 재귀 처리한다(ADR 0007 계층). 값을 갖지 않으므로 런타임 계약 조합·등록 함수가 없다.
 _Avoid_: 계약을 런타임 descriptor 트리로 조합하던 옛 함수들(제거됨, 근거·이전 방법은 ADR 0012)
