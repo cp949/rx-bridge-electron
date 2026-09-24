@@ -1,4 +1,3 @@
-import { EventEmitter } from "node:events";
 import { BehaviorSubject, Subject } from "rxjs";
 import { afterEach, describe, expect, test, vi } from "vitest";
 import type { IpcMain, WebContents } from "electron";
@@ -13,6 +12,7 @@ import {
   type SenderIdentity,
 } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
+import { FakeIpcMain, FakeWebContents } from "./fake-ipc.js";
 
 /**
  * RD-007 통합 시나리오: DELTA-01~05의 계약(진단 이벤트 종류, 거부 사유, 수명주기,
@@ -62,40 +62,6 @@ const integrationSchemas = {
 const integrationErrors = {
   hardware: { rpc: { connect: ["DEVICE_GONE"] as const } },
 };
-
-/** Minimal fake standing in for Electron's `ipcMain`, mirroring `electron-adapter.test.ts`. */
-class FakeIpcMain extends EventEmitter {
-  public readonly handlers = new Map<
-    string,
-    (event: unknown, value: unknown) => unknown
-  >();
-
-  public handle(
-    channel: string,
-    listener: (event: unknown, value: unknown) => unknown,
-  ): void {
-    this.handlers.set(channel, listener);
-  }
-
-  public removeHandler(channel: string): void {
-    this.handlers.delete(channel);
-  }
-}
-
-/** Minimal fake standing in for Electron's `WebContents`: id + mainFrame + lifecycle events. */
-class FakeContents extends EventEmitter {
-  public readonly id: number;
-  public readonly mainFrame: {
-    readonly routingId: number;
-    readonly url: string;
-  };
-
-  public constructor(id: number, routingId: number, url: string) {
-    super();
-    this.id = id;
-    this.mainFrame = { routingId, url };
-  }
-}
 
 type SinkMode = "record" | "none" | "throw";
 
@@ -178,9 +144,9 @@ async function runScenario(mode: SinkMode): Promise<ScenarioResult> {
   const handshakeHandler = ipcMain.handlers.get(channels.handshake)!;
   const rpcHandler = ipcMain.handlers.get(channels.rpc)!;
 
-  const contentsA = new FakeContents(1, 10, "app://local");
-  const contentsB = new FakeContents(2, 20, "app://local");
-  const evilContents = new FakeContents(99, 30, `app://${MARKER}-evil`);
+  const contentsA = new FakeWebContents(1, 10, "app://local");
+  const contentsB = new FakeWebContents(2, 20, "app://local");
+  const evilContents = new FakeWebContents(99, 30, `app://${MARKER}-evil`);
   bridge.attach(contentsA as unknown as WebContents, "main");
   const detachB = bridge.attach(contentsB as unknown as WebContents, "main");
 

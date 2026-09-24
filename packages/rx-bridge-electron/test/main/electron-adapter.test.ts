@@ -1,11 +1,15 @@
-import { EventEmitter } from "node:events";
 import { describe, expect, test, vi } from "vitest";
 import type { IpcMain, WebContents } from "electron";
 
 import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import { BridgeProtocolError } from "../../src/protocol/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
+import {
+  FakeIpcMain,
+  FakeTarget,
+  FakeWebContents,
+  sender,
+} from "./fake-ipc.js";
 import {
   bindElectronBridge,
   createBridgeServer,
@@ -19,37 +23,6 @@ type WaitBridge = { hardware: { rpc: { wait(): undefined } } };
 const waitImpl: BridgeImpl<WaitBridge> = {
   hardware: { rpc: { wait: async () => undefined } },
 };
-
-/** Minimal fake standing in for Electron's `ipcMain`: adds `handle`/`removeHandler` over a plain EventEmitter. */
-class FakeIpcMain extends EventEmitter {
-  public readonly handlers = new Map<
-    string,
-    (event: unknown, value: unknown) => unknown
-  >();
-
-  public handle(
-    channel: string,
-    listener: (event: unknown, value: unknown) => unknown,
-  ): void {
-    this.handlers.set(channel, listener);
-  }
-
-  public removeHandler(channel: string): void {
-    this.handlers.delete(channel);
-  }
-}
-
-/** Minimal fake standing in for Electron's `WebContents`: id + mainFrame + EventEmitter lifecycle events. */
-class FakeWebContents extends EventEmitter {
-  public readonly id: number;
-  public readonly mainFrame: { readonly routingId: number };
-
-  public constructor(id = 1, routingId = 10) {
-    super();
-    this.id = id;
-    this.mainFrame = { routingId };
-  }
-}
 
 function makeBridge(ipcMain: FakeIpcMain) {
   const server = createBridgeServer(waitImpl);
@@ -154,20 +127,6 @@ describe("bindElectronBridge dispose", () => {
   });
 });
 
-/** Minimal fake WebContents whose main frame carries a real `url`, for origin checks. */
-class UrlWebContents extends EventEmitter {
-  public readonly id = 1;
-  public readonly mainFrame: {
-    readonly routingId: number;
-    readonly url: string;
-  };
-
-  public constructor(url: string) {
-    super();
-    this.mainFrame = { routingId: 10, url };
-  }
-}
-
 describe("Electron adapter payload limits", () => {
   test("forwards input past the adapter's structural check up to the contract's larger maxStringBytes", async () => {
     const stringSchema: Schema<string> = {
@@ -196,7 +155,7 @@ describe("Electron adapter payload limits", () => {
       namespace: "test",
       allowedOrigins: ["app://local"],
     });
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
     const rpcHandler = ipcMain.handlers.get(
@@ -245,7 +204,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("frame-not-main: senderFrame is not the attached WebContents' main frame", async () => {
     const ipcMain = new FakeIpcMain();
     const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
     const handshakeHandler = ipcMain.handlers.get(
@@ -265,7 +224,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("origin-not-allowed: main frame with a disallowed origin", async () => {
     const ipcMain = new FakeIpcMain();
     const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://evil");
+    const contents = new FakeWebContents(1, 10, "app://evil");
     bridge.attach(contents as unknown as WebContents, "main");
 
     const handshakeHandler = ipcMain.handlers.get(
@@ -285,7 +244,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("malformed-envelope: handshake parse failure", async () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
 
     const handshakeHandler = ipcMain.handlers.get(
       ELECTRON_BRIDGE_CHANNELS("test").handshake,
@@ -304,7 +263,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("malformed-envelope: rpc parse failure", async () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
 
     const rpcHandler = ipcMain.handlers.get(
       ELECTRON_BRIDGE_CHANNELS("test").rpc,
@@ -323,7 +282,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("malformed-envelope: cancel parse failure", () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
 
     ipcMain.emit(
       ELECTRON_BRIDGE_CHANNELS("test").cancel,
@@ -339,7 +298,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("malformed-envelope: control parse failure", () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
 
     ipcMain.emit(
       ELECTRON_BRIDGE_CHANNELS("test").control,
@@ -355,7 +314,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("a server-side handshake rejection (unattached webContents) is recorded exactly once", async () => {
     const ipcMain = new FakeIpcMain();
     const { diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     // Intentionally not attached: session establish fails on the server side.
 
     const handshakeHandler = ipcMain.handlers.get(
@@ -387,7 +346,7 @@ describe("Electron adapter rejection diagnostics", () => {
       namespace: "test",
       allowedOrigins: ["app://local"],
     });
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
     const rpcHandler = ipcMain.handlers.get(
@@ -417,7 +376,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("RPC version-mismatch: wire response is VERSION_MISMATCH and the reason is recorded", async () => {
     const ipcMain = new FakeIpcMain();
     const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
     const rpcHandler = ipcMain.handlers.get(
@@ -455,7 +414,7 @@ describe("Electron adapter rejection diagnostics", () => {
     async (channel) => {
       const ipcMain = new FakeIpcMain();
       const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
-      const contents = new UrlWebContents("app://local");
+      const contents = new FakeWebContents();
       bridge.attach(contents as unknown as WebContents, "main");
       const event = { sender: contents, senderFrame: contents.mainFrame };
 
@@ -495,7 +454,7 @@ describe("Electron adapter rejection diagnostics", () => {
   test("RPC frame-not-main is channel-independent (same reason as handshake)", async () => {
     const ipcMain = new FakeIpcMain();
     const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
     bridge.attach(contents as unknown as WebContents, "main");
 
     const rpcHandler = ipcMain.handlers.get(
@@ -614,7 +573,7 @@ describe("bindElectronBridge argument defaults (RD-014)", () => {
       server,
       allowedOrigins: ["app://local"],
     });
-    const contents = new UrlWebContents("app://local");
+    const contents = new FakeWebContents();
 
     // role 인자를 생략한다 — 기본값 "default"가 BridgeContext.windowRole까지 전달돼야 한다.
     bridge.attach(contents as unknown as WebContents);

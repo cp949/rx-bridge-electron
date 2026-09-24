@@ -1,3 +1,5 @@
+import { EventEmitter } from "node:events";
+
 import type { AttachedTarget, SenderIdentity } from "../../src/main/index.js";
 
 export const sender = (
@@ -74,5 +76,39 @@ export class FakeTarget implements AttachedTarget {
     reason: "main-frame-navigation" | "render-process-gone" | "destroyed",
   ): void {
     for (const listener of this.listeners) listener(reason);
+  }
+}
+
+/** Minimal fake standing in for Electron's `ipcMain`: adds `handle`/`removeHandler` over a plain EventEmitter. */
+export class FakeIpcMain extends EventEmitter {
+  public readonly handlers = new Map<
+    string,
+    (event: unknown, value: unknown) => unknown
+  >();
+
+  public handle(
+    channel: string,
+    listener: (event: unknown, value: unknown) => unknown,
+  ): void {
+    this.handlers.set(channel, listener);
+  }
+
+  public removeHandler(channel: string): void {
+    this.handlers.delete(channel);
+  }
+}
+
+/** Minimal fake standing in for Electron's `WebContents`: id + mainFrame(routingId, url) + EventEmitter lifecycle events. */
+export class FakeWebContents extends EventEmitter {
+  public readonly id: number;
+  public readonly mainFrame: {
+    readonly routingId: number;
+    readonly url: string;
+  };
+
+  public constructor(id = 1, routingId = 10, url = "app://local") {
+    super();
+    this.id = id;
+    this.mainFrame = { routingId, url };
   }
 }
