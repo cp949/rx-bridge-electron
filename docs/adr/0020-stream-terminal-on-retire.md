@@ -37,7 +37,7 @@
 
 활성 구독, `authorize` 대기 구독, admission 거부 구독(`sender-unauthorized`·`frame-not-main`·`origin-not-allowed`).
 
-_(개정: RD-032 — 시작 전 거부 응답(`subscribed`) 전송 도중 retire된 구독도 통지 대상이다. `subscribed`를 이미 보냈다면 retire 사유가 `detach`·`dispose`일 때 원래 거부 대신 `CANCELLED "Bridge session ended."`로 마감한다(결정 3의 "이미 기록된 terminal을 대체한다"와 같은 규칙). 실제 adapter(`webContents.send`)와 loopback 전달은 비동기라 이 창이 생기지 않는다 — 동기 `send`를 쓰는 embedder나 test에서만 관찰된다.)_
+_(개정: RD-032 — 시작 전 거부 응답을 보내기 직전이나 `subscribed` 전송 도중 retire된 구독도 통지 대상이다. retire 사유가 `detach`·`dispose`면 원래 거부 대신 `subscribed`(0) 뒤 `CANCELLED "Bridge session ended."`로 마감한다(결정 3의 "이미 기록된 terminal을 대체한다"와 같은 규칙). 보내기 직전 창은 `diagnostics.record`가 `rejected` 진단을 받는 중 동기로 detach·dispose할 때 생기며 실제 adapter에서도 열린다 — 이전에는 `subscribed`조차 보내지 않았다. `subscribed` 전송 도중 창은 실제 adapter(`webContents.send`)와 loopback 전달이 비동기라 생기지 않고, 동기 `send`를 쓰는 embedder나 test에서만 관찰된다.)_
 
 ### 3. 쌓인 값은 버리고 종료 메시지를 바로 보낸다
 
