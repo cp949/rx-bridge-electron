@@ -1,6 +1,20 @@
 /**
+ * Formats an opaque ID: `<nonce>:<scope>:<seq base36>`. Pure string
+ * assembly, no validation — the sole caller, `src/renderer/ids.ts`
+ * `createOpaqueId`, always passes a valid `nonce`, `scope`, and
+ * `sequence`.
+ */
+export function formatOpaqueId(
+  nonce: string,
+  scope: string,
+  sequence: number,
+): string {
+  return `${nonce}:${scope}:${sequence.toString(36)}`;
+}
+
+/**
  * Parses the sequence portion of an opaque ID produced by
- * `src/renderer/ids.ts` `createOpaqueId`: `<nonce>:<scope>:<seq base36>`.
+ * `formatOpaqueId`: `<nonce>:<scope>:<seq base36>`.
  * Returns `undefined` if `id` does not match that format (wrong segment
  * count, empty segment, leading zero, non-base36 digits, or a sequence
  * that is not a safe integer).

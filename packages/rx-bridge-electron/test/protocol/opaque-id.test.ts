@@ -1,6 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { parseOpaqueIdSequence } from "../../src/protocol/opaque-id.js";
+import {
+  formatOpaqueId,
+  parseOpaqueIdSequence,
+} from "../../src/protocol/opaque-id.js";
 import { createOpaqueId } from "../../src/renderer/index.js";
 
 describe("parseOpaqueIdSequence", () => {
@@ -32,4 +35,14 @@ describe("parseOpaqueIdSequence", () => {
     expect(parseOpaqueIdSequence("nonce:subscription:1")).toBe(1);
     expect(parseOpaqueIdSequence("nonce:subscription:a")).toBe(10);
   });
+});
+
+describe("formatOpaqueId", () => {
+  test.each([1, 36, Number.MAX_SAFE_INTEGER])(
+    "round-trips through parseOpaqueIdSequence for sequence=%d",
+    (sequence) => {
+      const id = formatOpaqueId("nonce", "subscription", sequence);
+      expect(parseOpaqueIdSequence(id)).toBe(sequence);
+    },
+  );
 });

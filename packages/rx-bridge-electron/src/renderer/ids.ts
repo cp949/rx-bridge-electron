@@ -1,3 +1,5 @@
+import { formatOpaqueId } from "../protocol/opaque-id.js";
+
 const sessionNonce =
   globalThis.crypto?.randomUUID?.() ??
   `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
@@ -10,5 +12,5 @@ export function createOpaqueId(scope: string): string {
     throw new Error("Renderer ID space exhausted.");
   }
   nextSequence += 1;
-  return `${sessionNonce}:${scope}:${nextSequence.toString(36)}`;
+  return formatOpaqueId(sessionNonce, scope, nextSequence);
 }
