@@ -1,11 +1,7 @@
+import type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
 import type { BridgeValue, RpcResponse } from "../protocol/index.js";
 
-export interface SenderIdentity {
-  readonly webContentsId: number;
-  readonly frameId: number;
-  readonly isMainFrame: boolean;
-  readonly origin: string;
-}
+export type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
 
 export interface AttachedTarget {
   readonly webContentsId: number;
@@ -17,14 +13,6 @@ export interface AttachedTarget {
       reason: "main-frame-navigation" | "render-process-gone" | "destroyed",
     ) => void,
   ): () => void;
-}
-
-export interface BridgeContext {
-  readonly requestId: string;
-  readonly clientId: string;
-  readonly windowRole: string;
-  readonly sender: SenderIdentity;
-  readonly signal: AbortSignal;
 }
 
 export type Authorize = (

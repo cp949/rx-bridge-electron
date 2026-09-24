@@ -64,4 +64,23 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    files: ["packages/rx-bridge-electron/src/contract/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-restricted-imports": [
+        "error",
+        {
+          patterns: [
+            {
+              group: ["../main/*", "../../main/*"],
+              message:
+                "contract는 모든 프로세스가 쓰는 계층이라 src/main/*을 타입으로도 " +
+                "import하지 않는다. BridgeImpl이 참조하는 타입은 " +
+                "contract/impl-types.ts에 두고 main이 re-export한다.",
+            },
+          ],
+        },
+      ],
+    },
+  },
 );

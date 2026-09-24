@@ -1,4 +1,4 @@
-Status: 후보 (RD-023에서 범위 제외)
+Status: closed — 선택지 1(타입을 `contract`로 옮기고 `main`이 re-export) 적용
 
 # `contract`가 `main`의 타입을 import한다
 
@@ -18,3 +18,4 @@ Status: 후보 (RD-023에서 범위 제외)
 ## Comments
 
 - 2026-09-25: RD-023 마무리에서 등록. 삭제가 아니라 타입 소유 위치를 정하는 설계 결정이라 RD-023 범위 밖이다.
+- 2026-09-25: 선택지 1로 해결. `BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`·`BroadcastEventSource`·`ScopedEventSource`·`EventSourceBuffer`·`OverflowPolicy`를 `src/contract/impl-types.ts`로 옮겼다. `main/types.ts`·`main/sources.ts`는 re-export로 기존 import 경로를 유지한다. eslint에 `src/contract/**`의 `src/main/*` import 금지 규칙을 추가했다(`allowTypeImports` 없음). 변경 전후 `dist/*/index.d.ts` 6개 entry의 export 목록이 동일함을 확인했다. 선택지 2는 re-export 경로로 역의존이 남고, 3은 계층 방향을 문서 예외로 남겨 기각했다. 부수 발견: 순환 chunk 경고를 피하려고 barrel 대신 `bridge-types.ts`를 직접 가리킨다는 주석 3곳의 전제가 변경 전 코드에서도 재현되지 않는다 → `.scratch/stale-cycle-chunk-comments/issues/01-stale-cycle-chunk-comments.md`.

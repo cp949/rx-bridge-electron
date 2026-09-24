@@ -1,40 +1,22 @@
 import { Observable } from "rxjs";
 
+import type {
+  BridgeContext,
+  BroadcastEventSource,
+  CurrentValueSource,
+  EventSourceBuffer,
+  ScopedEventSource,
+} from "../contract/impl-types.js";
 import type { BridgeValue } from "../protocol/index.js";
-import type { BridgeContext } from "./types.js";
 
-export interface CurrentValueSource<T> extends Observable<T> {
-  getValue(): T;
-}
-
-/** Event source 버퍼가 가득 찼을 때의 처리 정책. */
-export type OverflowPolicy = "error" | "drop-oldest" | "drop-newest";
-
-/**
- * Event source의 배압 버퍼 설정. source 생성 시점(`broadcastEvent`·
- * `scopedEvent`)에 정한다 — 생략 시 `DEFAULT_EVENT_BUFFER`(capacity 100,
- * overflow "error")를 `main/registration.ts`의 `buildRegistrationTableFromImpl`이
- * 적용한다.
- */
-export interface EventSourceBuffer {
-  readonly capacity: number;
-  readonly overflow: OverflowPolicy;
-}
-
-export interface BroadcastEventSource<T> {
-  readonly mode: "broadcast";
-  readonly source: Observable<T>;
-  readonly buffer?: EventSourceBuffer;
-}
-
-export interface ScopedEventSource<T> {
-  readonly mode: "scoped";
-  readonly factory: (context: BridgeContext) => Observable<T>;
-  readonly buffer?: EventSourceBuffer;
-}
-
-export type EventSource<T extends BridgeValue = BridgeValue> =
-  Observable<T> | BroadcastEventSource<T> | ScopedEventSource<T>;
+export type {
+  BroadcastEventSource,
+  CurrentValueSource,
+  EventSource,
+  EventSourceBuffer,
+  OverflowPolicy,
+  ScopedEventSource,
+} from "../contract/impl-types.js";
 
 export function currentValueSource<T extends BridgeValue>(
   source: CurrentValueSource<T>,
