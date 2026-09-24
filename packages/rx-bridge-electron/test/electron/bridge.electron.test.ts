@@ -120,12 +120,12 @@ describe("Electron bridge process seam", () => {
       };
     });
 
-    expect(ELECTRON_BRIDGE_CHANNELS("fixture")).toEqual({
-      handshake: "rx-bridge-electron:v1:fixture:handshake",
-      rpc: "rx-bridge-electron:v1:fixture:rpc",
-      cancel: "rx-bridge-electron:v1:fixture:cancel",
-      control: "rx-bridge-electron:v1:fixture:control",
-      stream: "rx-bridge-electron:v1:fixture:stream",
+    expect(ELECTRON_BRIDGE_CHANNELS()).toEqual({
+      handshake: "rx-bridge-electron:v1:default:handshake",
+      rpc: "rx-bridge-electron:v1:default:rpc",
+      cancel: "rx-bridge-electron:v1:default:cancel",
+      control: "rx-bridge-electron:v1:default:control",
+      stream: "rx-bridge-electron:v1:default:stream",
     });
     expect(result.handshake.clientId).toMatch(/^client-/);
     expect(result.rpc).toMatchObject({ type: "success", result: "pong:hello" });

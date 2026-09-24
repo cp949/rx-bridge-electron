@@ -42,12 +42,7 @@ const server = createBridgeServer(impl, { schemas });
 
 async function start(): Promise<void> {
   await app.whenReady();
-  const bridge = bindElectronBridge({
-    ipcMain: (await import("electron")).ipcMain,
-    server,
-    namespace: "fixture",
-    allowedOrigins: ["file://"],
-  });
+  const bridge = bindElectronBridge({ server, allowedOrigins: ["file://"] });
   const window = new BrowserWindow({
     show: false,
     webPreferences: {
@@ -59,7 +54,7 @@ async function start(): Promise<void> {
         fileURLToPath(new URL("./preload.ts", import.meta.url)),
     },
   });
-  bridge.attach(window.webContents, "main");
+  bridge.attach(window.webContents);
   window.on("closed", () => bridge.dispose());
   await window.loadFile(
     process.env.RX_BRIDGE_RENDERER ??
