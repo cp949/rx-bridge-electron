@@ -1,4 +1,4 @@
-Status: 후보 (RD-017에서 범위 제외)
+Status: 승격 (ROADMAP.md#RD-024)
 
 # `authorize`의 key 인자 형식
 
@@ -15,3 +15,4 @@ RD-017은 코어(`src/protocol/operation-key.ts`)를 비공개로 두었다. 이
 ## Comments
 
 - 2026-09-24: RD-017 마무리에서 등록. 후보 상태이고 결정은 RD-017 범위 밖이다.
+- 2026-09-25: 설계 인터뷰에서 결정. 첫 번째 선택지(구조화 인자)를 교체 방식으로 채택했다 — `Authorize = (context, operation: BridgeOperation)`, `{ key, category, domain: readonly string[], operation }`, 등록 시 동결 객체 1회 생성, `./main` type export. 진단 `key`는 문자열 유지, `operation-key.ts`는 비공개 유지, 외부 사용 이력이 없어 이전 안내 없음. ROADMAP.md#RD-024로 승격, 근거는 [ADR 0018](../../../docs/adr/0018-authorize-structured-operation.md).

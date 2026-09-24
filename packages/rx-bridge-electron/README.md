@@ -96,6 +96,17 @@ api.device.state.connection.subscribe(console.log);
 
 `impl: BridgeImpl<AppBridge>`는 계약이 선언한 모든 도메인·모든 operation에 대응하는 handler/source를 가진 일반 객체입니다. 계약과 구현이 어긋나면(누락, 초과, handler·소스 형태 오류) 컴파일 타임에 실패합니다 — `AppBridge`와 `impl`이 같은 타입에서 파생하므로 별도의 런타임 재검증이 필요 없습니다(근거: [ADR 0012](../../docs/adr/0012-lightweight-type-contract.md)). manifest는 `impl`의 키에서 만들므로, 타입을 우회해(`as any`) 빠뜨린 operation은 애초에 Renderer에 노출되지 않습니다. impl 형태 검사(handler가 함수인지, state가 `getValue`를 갖는지 등)는 타입을 우회한 값을 상대로 한 방어선으로 유지되며, 위반 시 서버 생성이 `TypeError`로 실패합니다.
 
+`authorize(context, operation)`는 등록된 operation에 대한 RPC·구독 요청마다 호출되는 인가 콜백입니다(생략하면 전부 허용). `operation`은 wire key를 미리 분해한 동결 객체 `BridgeOperation`이므로 문자열을 직접 자를 필요가 없습니다.
+
+| 필드        | 예(`rpc:admin/users/remove`) | 설명                                        |
+| ----------- | ---------------------------- | ------------------------------------------- |
+| `key`       | `"rpc:admin/users/remove"`   | wire key 전체. 특정 operation 비교에 씁니다 |
+| `category`  | `"rpc"`                      | `"rpc" \| "state" \| "event"`               |
+| `domain`    | `["admin", "users"]`         | 도메인 segment 배열                         |
+| `operation` | `"remove"`                   | operation 이름                              |
+
+`BridgeOperation`·`OperationCategory` 타입은 `@cp949/rx-bridge-electron/main`에서 가져옵니다(근거: [ADR 0018](../../docs/adr/0018-authorize-structured-operation.md)).
+
 `bindElectronBridge({ ipcMain?, server, namespace?, allowedOrigins })`로 서버를 연결하고, 허용한 각 최상위 창에 `attach(webContents, role?)`을 호출합니다. `ipcMain`·`namespace`·`role`은 생략 가능하며 기본값은 아래 표를 참고하세요. `allowedOrigins`는 origin 검증이라는 보안 경계 자체이므로 생략할 수 없습니다. Main을 종료하기 전에 `bridge.dispose()`로 연결을 해제해야 합니다. `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색 및 창 생성 제한, 명시적 신뢰 origin 허용 목록을 사용하세요. `dispose()` 뒤 서버와 bind는 다시 쓸 수 없습니다 — 되돌릴 수 없는 종료이므로, 다시 연결하려면 새 `createBridgeServer`와 `bindElectronBridge`를 만드세요.
 
 `api.dispose()`(`api[Symbol.dispose]`와 같은 함수)는 진행 중 RPC를 취소하고 활성 구독을 정리하는 명시적 teardown입니다. hello-world처럼 창이 떠 있는 동안에는 호출할 필요가 없습니다 — 창을 닫거나 reload하면 Main이 이미 그 문서 세션을 회수합니다. `dispose()`는 브리지가 살아있는 동안 Renderer 스스로 정리를 끝내고 싶을 때(SPA 라우팅으로 화면을 벗어나며 그 화면의 구독을 끊는 경우 등) 쓰는 용도입니다. 근거는 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.

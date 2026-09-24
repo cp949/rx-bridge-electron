@@ -8,7 +8,12 @@
 ## 오해하기 쉬운 신호
 
 - `pnpm --filter @cp949/rx-bridge-electron test`(non-electron 단위 테스트)는 `src/`를 직접 보므로
-  통과한다. `check-types`·`lint`도 `src/`만 본다 — 오직 `*.electron.test.ts`만 영향받는다.
+  통과한다. 단위 test 기준으로는 `*.electron.test.ts`만 영향받는다.
+- `check-types`도 stale `dist/`로 통과할 수 있다. `tsconfig.json`이 `test/**/*.ts`를 포함하고,
+  fixture(`test/electron/multi-window/main.ts` 등)는 패키지 이름으로 import해 `dist/*.d.ts`를 본다.
+  공개 타입을 바꾼 뒤 build 전에 돌린 `check-types`는 fixture의 옛 시그니처 사용을 잡지 못하고
+  exit 0이다(예: `authorize` 인자를 바꿨을 때 build 후에야 `TS2345: Argument of type
+'BridgeOperation' is not assignable to parameter of type 'string'.`).
 - 실패가 tsup dts 빌드 에러(예: `Argument of type '{...}' is not assignable to parameter of type
 'BindElectronBridgeOptions'`)로 나타나, 방금 만든 fixture 코드가 잘못된 것처럼 보인다. 실제로는
   `dist/`가 이전 함수 시그니처를 그대로 들고 있는 것이다.
@@ -30,6 +35,7 @@
 
 - `src/main`·`src/preload`·`src/renderer`를 고친 뒤 `*.electron.test.ts`를 돌리기 전에
   `pnpm --filter @cp949/rx-bridge-electron build`를 먼저 실행한다.
+- 공개 타입을 바꿨으면 `build` 뒤에 `check-types`를 한 번 더 실행한다.
 - 저장소 루트에서는 `pnpm test`/`pnpm verify`(turbo 경유)를 쓴다 — `turbo.json`의
   `dependsOn: ["build"]`가 이 패키지의 `test` 실행 전에 `build`를 강제한다.
 - 에러 메시지가 fixture 코드의 타입 문제처럼 보이는데 방금 손댄 게 `src/`뿐이라면, 먼저 `dist/` 재빌드를
