@@ -19,6 +19,18 @@ import { RpcClient } from "./rpc-client.js";
 import { StreamMultiplexer } from "./stream-multiplexer.js";
 import type { BridgeTransport, CallOptions } from "./transport.js";
 
+// `exposeBridgeInMainWorld`(preload)가 기본으로 노출하는 전역 이름과 정확히 일치해야 한다
+// (`src/preload/expose-bridge.ts`의 리터럴 `"rxBridge"`). 이 파일은 renderer 전용이라 그
+// 파일을 import할 수 없으므로(electron/main 코드가 renderer 번들에 섞이면 안 됨) 리터럴을
+// 그대로 둔다. ADR 0013 참고.
+const DEFAULT_GLOBAL_NAME = "rxBridge";
+
+declare global {
+  interface Window {
+    readonly rxBridge: BridgeTransport;
+  }
+}
+
 const handshakeLimits: PayloadLimits = {
   maxDepth: Number.MAX_SAFE_INTEGER,
   maxEntries: Number.MAX_SAFE_INTEGER,
@@ -276,18 +288,51 @@ function createProxy(
   });
 }
 
+function isBridgeTransport(value: unknown): value is BridgeTransport {
+  if (typeof value !== "object" || value === null) {
+    return false;
+  }
+  const candidate = value as Partial<BridgeTransport>;
+  return (
+    typeof candidate.connect === "function" &&
+    typeof candidate.invoke === "function" &&
+    typeof candidate.cancel === "function" &&
+    typeof candidate.control === "function" &&
+    typeof candidate.onStreamMessage === "function"
+  );
+}
+
+// `transport` 생략(또는 명시 `undefined`) 시 preload가 `exposeBridgeInMainWorld`로 채운
+// `globalThis.rxBridge`를 읽는다. 없거나 transport 모양이 아니면 preload 설정 누락을
+// 바로 알아차릴 수 있게 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 에러를 던진다.
+function resolveGlobalTransport(): BridgeTransport {
+  const candidate = (globalThis as { rxBridge?: unknown })[DEFAULT_GLOBAL_NAME];
+  if (!isBridgeTransport(candidate)) {
+    throw new TypeError(
+      "createRendererApi requires a transport: no 'transport' argument was " +
+        `given and 'globalThis.${DEFAULT_GLOBAL_NAME}' is not a bridge ` +
+        "transport. Call exposeBridgeInMainWorld() in your preload script " +
+        `(it exposes 'window.${DEFAULT_GLOBAL_NAME}'), or pass a transport ` +
+        "explicitly.",
+    );
+  }
+  return candidate;
+}
+
 export async function createRendererApi<B>(
-  transport: BridgeTransport,
+  transport?: BridgeTransport,
 ): Promise<RendererApi<B>> {
+  const resolvedTransport =
+    transport === undefined ? resolveGlobalTransport() : transport;
   let response: unknown;
   try {
-    response = await transport.connect();
+    response = await resolvedTransport.connect();
   } catch {
     throw internal("Bridge handshake failed.");
   }
   const handshake = parseHandshake(response);
-  const rpcClient = new RpcClient(transport, handshake.session);
-  const streams = new StreamMultiplexer(transport, handshake.session);
+  const rpcClient = new RpcClient(resolvedTransport, handshake.session);
+  const streams = new StreamMultiplexer(resolvedTransport, handshake.session);
   return createProxy(handshake.tree, { rpcClient, streams }, () => {
     rpcClient.dispose();
     streams[Symbol.dispose]();
