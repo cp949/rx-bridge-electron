@@ -13,13 +13,14 @@ import { recordDiagnostic } from "./diagnostics.js";
 import type { DocumentSession } from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
-import type {
-  EventRegistrationEntry,
-  RegistrationTable,
-  StateRegistrationEntry,
+import {
+  isScopedSource,
+  type EventRegistrationEntry,
+  type RegistrationTable,
+  type StateRegistrationEntry,
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
-import type { EventSource, ScopedEventSource } from "./sources.js";
+import type { BroadcastEventSource } from "./sources.js";
 import type {
   Authorize,
   BridgeContext,
@@ -160,7 +161,10 @@ export class Subscriptions {
       this.#reject(
         command,
         send,
-        { code: "INVALID_ARGUMENT", message: "Invalid bridge subscription ID." },
+        {
+          code: "INVALID_ARGUMENT",
+          message: "Invalid bridge subscription ID.",
+        },
         session.signal,
       );
       return;
@@ -291,7 +295,8 @@ export class Subscriptions {
 
   public dispose(): void {
     for (const state of [...this.#liveStates]) {
-      for (const pending of [...state.pending.values()]) pending.controller.abort();
+      for (const pending of [...state.pending.values()])
+        pending.controller.abort();
       state.pending.clear();
       for (const consumer of [...state.consumers.values()])
         if (!consumer.closed) this.#close(consumer);
@@ -381,10 +386,9 @@ export class Subscriptions {
       );
     }
     try {
-      if (
-        registration.kind === "event" &&
-        this.#isScoped(registration.source)
-      ) {
+      if (registration.kind === "state") {
+        this.#startShared(consumer, command.key, registration.source);
+      } else if (isScopedSource(registration.source)) {
         const context: BridgeContext = {
           requestId: command.subscriptionId,
           clientId: command.clientId,
@@ -400,42 +404,11 @@ export class Subscriptions {
         consumer.own = upstream;
         source.subscribe(upstream);
       } else {
-        const source =
-          registration.kind === "state"
-            ? registration.source
-            : this.#broadcastSource(registration.source);
-        let shared = this.#shared.get(command.key);
-        if (shared === undefined) {
-          shared = { source, consumers: new Set() };
-          this.#shared.set(command.key, shared);
-        }
-        (consumer as { shared?: SharedSource }).shared = shared;
-        const startsUpstream = shared.consumers.size === 0;
-        shared.consumers.add(consumer);
-        if (startsUpstream) {
-          const upstream = new Subscriber<BridgeValue>({
-            next: (value) => {
-              for (const member of [...shared.consumers])
-                this.#next(member, value);
-            },
-            error: (error: unknown) => {
-              for (const member of [...shared.consumers])
-                this.#terminate(member, {
-                  type: "error",
-                  error: serializeError(error, [], this.#limits),
-                });
-            },
-            complete: () => {
-              for (const member of [...shared.consumers])
-                this.#terminate(member, { type: "complete" });
-            },
-          });
-          shared.upstream = upstream;
-          source.subscribe(upstream);
-          if (shared.consumers.size === 0) upstream.unsubscribe();
-        } else if (registration.kind === "state") {
-          this.#next(consumer, registration.source.getValue());
-        }
+        this.#startShared(
+          consumer,
+          command.key,
+          this.#broadcastSource(registration.source),
+        );
       }
     } catch {
       this.#terminate(consumer, { type: "error", error: internalError });
@@ -471,18 +444,52 @@ export class Subscriptions {
     }
   }
 
-  #isScoped(source: EventSource): source is ScopedEventSource<BridgeValue> {
-    return !(source instanceof Observable) && source.mode === "scoped";
+  /**
+   * state·broadcast event 공용 fan-out: key 하나에 upstream 구독 하나를 두고
+   * 여러 consumer가 나눠 받는다(scoped는 요청별 factory라 별도 경로).
+   */
+  #startShared(
+    consumer: Consumer,
+    key: string,
+    source: Observable<BridgeValue>,
+  ): void {
+    let shared = this.#shared.get(key);
+    if (shared === undefined) {
+      shared = { source, consumers: new Set() };
+      this.#shared.set(key, shared);
+    }
+    (consumer as { shared?: SharedSource }).shared = shared;
+    const startsUpstream = shared.consumers.size === 0;
+    shared.consumers.add(consumer);
+    if (startsUpstream) {
+      const upstream = new Subscriber<BridgeValue>({
+        next: (value) => {
+          for (const member of [...shared.consumers]) this.#next(member, value);
+        },
+        error: (error: unknown) => {
+          for (const member of [...shared.consumers])
+            this.#terminate(member, {
+              type: "error",
+              error: serializeError(error, [], this.#limits),
+            });
+        },
+        complete: () => {
+          for (const member of [...shared.consumers])
+            this.#terminate(member, { type: "complete" });
+        },
+      });
+      shared.upstream = upstream;
+      source.subscribe(upstream);
+      if (shared.consumers.size === 0) upstream.unsubscribe();
+    } else if (consumer.registration.kind === "state") {
+      this.#next(consumer, consumer.registration.source.getValue());
+    }
   }
 
-  #broadcastSource(source: EventSource): Observable<BridgeValue> {
-    return source instanceof Observable
-      ? source
-      : source.mode === "broadcast"
-        ? source.source
-        : (() => {
-            throw new TypeError("Scoped source needs context.");
-          })();
+  #broadcastSource(
+    source: Observable<BridgeValue> | BroadcastEventSource<BridgeValue>,
+  ): Observable<BridgeValue> {
+    return source instanceof Observable ? source : source.source;
   }
 
   #observer(consumer: Consumer) {

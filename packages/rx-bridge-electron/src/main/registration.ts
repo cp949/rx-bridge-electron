@@ -273,7 +273,8 @@ function readRpcSchemaEntry(
   };
 }
 
-function isScopedSource(
+/** event source가 요청별 scoped factory인지 판별한다(구독 시작 경로와 공유). */
+export function isScopedSource(
   source: EventSource,
 ): source is ScopedEventSource<BridgeValue> {
   return !(source instanceof Observable) && source.mode === "scoped";
