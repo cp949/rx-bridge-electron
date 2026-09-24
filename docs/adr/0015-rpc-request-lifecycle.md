@@ -63,7 +63,7 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 ## 범위 밖
 
 - ROADMAP RD-016 후보 03(wire key 문법 — `startsWith("rpc:")`·`slice(4)`를 protocol 모듈로 옮기는 것. 이 ADR은 조회 위치만 `RpcRequests` 안으로 옮겼을 뿐 문법 자체는 손대지 않았다)과 후보 04(server version 분기 — 운영 경로 도달 불가, `recordAdapterRejection` Symbol, `FakeTarget` frameId).
-- deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 해결은 후속 이슈(`.scratch/rpc-deadline-cancel-diagnostic/issues/01-deadline-cancel-diagnostic.md`)로 미룬다.
+- deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 후속 이슈(`.scratch/rpc-deadline-cancel-diagnostic/issues/01-deadline-cancel-diagnostic.md`)에서 "먼저 확정된 원인 하나만 기록"으로 해결했다([ADR 0010](0010-operational-diagnostics.md) §8).
 - wire 형식·채널·handshake·공개 export 변경. `RpcRequests`는 `src/main/index.ts`의 공개 export가 아니다 — `Subscriptions`와 같은 내부 구현이다.
 
 ## 이전(migration)

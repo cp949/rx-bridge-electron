@@ -87,8 +87,9 @@ function setup(options: {
       ? {}
       : { resourceLimits: options.resourceLimits }),
   });
-  server.attach(new FakeTarget());
-  return { server, diagnostics };
+  const target = new FakeTarget();
+  server.attach(target);
+  return { server, diagnostics, target };
 }
 
 function finishedEvents(diagnostics: { record: ReturnType<typeof vi.fn> }) {
@@ -156,7 +157,7 @@ describe("rpc-timed-out 기록", () => {
     expect(finishedIndex).toBeGreaterThan(timedOutIndex);
   });
 
-  test("deadline 만료 뒤 handler가 끝나기 전에 cancel을 보내면 rpc-cancelled가 rpc-timed-out 뒤에 기록된다", async () => {
+  test("deadline 만료 뒤 handler가 끝나기 전에 cancel을 보내도 rpc-cancelled를 기록하지 않는다", async () => {
     vi.useFakeTimers();
     const controls: Array<(value: undefined) => void> = [];
     const { server, diagnostics } = setup({
@@ -178,20 +179,82 @@ describe("rpc-timed-out 기록", () => {
       clientId: "document-1",
       requestId: "request-1",
     });
-    expect(allEvents(diagnostics)).toContainEqual({
-      type: "rpc-cancelled",
-      key: "rpc:hardware/wait",
-    });
-    const timedOutIndex = allEvents(diagnostics).findIndex(
-      (event) => event.type === "rpc-timed-out",
-    );
-    const cancelledIndex = allEvents(diagnostics).findIndex(
-      (event) => event.type === "rpc-cancelled",
-    );
-    expect(timedOutIndex).toBeGreaterThanOrEqual(0);
-    expect(cancelledIndex).toBeGreaterThan(timedOutIndex);
     controls[0]?.(undefined);
     await vi.advanceTimersByTimeAsync(0);
+    expect(
+      allEvents(diagnostics).filter(
+        (event) =>
+          event.type === "rpc-timed-out" || event.type === "rpc-cancelled",
+      ),
+    ).toEqual([{ type: "rpc-timed-out", key: "rpc:hardware/wait" }]);
+    expect(finishedEvents(diagnostics)).toHaveLength(1);
+  });
+
+  test("deadline 만료 뒤 handler가 끝나기 전에 세션이 retire돼도 rpc-cancelled를 기록하지 않는다", async () => {
+    vi.useFakeTimers();
+    const controls: Array<(value: undefined) => void> = [];
+    const { server, diagnostics, target } = setup({
+      handlers: {
+        wait: vi.fn(
+          () => new Promise<undefined>((resolve) => controls.push(resolve)),
+        ),
+      },
+      resourceLimits: { maxRpcDurationMs: 1000 },
+    });
+    const pending = server.dispatchRpc(sender(), request());
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toMatchObject({
+      type: "error",
+      error: { code: "DEADLINE_EXCEEDED" },
+    });
+    target.endDocument();
+    controls[0]?.(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      allEvents(diagnostics).filter(
+        (event) =>
+          event.type === "rpc-timed-out" || event.type === "rpc-cancelled",
+      ),
+    ).toEqual([{ type: "rpc-timed-out", key: "rpc:hardware/wait" }]);
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(0);
+  });
+
+  test("cancel 뒤 signal을 무시한 handler가 deadline을 넘기면 CANCELLED로 응답하고 rpc-timed-out을 기록하지 않는다", async () => {
+    vi.useFakeTimers();
+    const controls: Array<(value: undefined) => void> = [];
+    const { server, diagnostics } = setup({
+      handlers: {
+        wait: vi.fn(
+          () => new Promise<undefined>((resolve) => controls.push(resolve)),
+        ),
+      },
+      resourceLimits: { maxRpcDurationMs: 1000 },
+    });
+    const pending = server.dispatchRpc(sender(), request());
+    await vi.advanceTimersByTimeAsync(500);
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    await vi.advanceTimersByTimeAsync(500);
+    await expect(pending).resolves.toEqual({
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    expect(finishedEvents(diagnostics)).toEqual([]);
+    controls[0]?.(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(
+      allEvents(diagnostics).filter(
+        (event) =>
+          event.type === "rpc-timed-out" || event.type === "rpc-cancelled",
+      ),
+    ).toEqual([{ type: "rpc-cancelled", key: "rpc:hardware/wait" }]);
+    expect(finishedEvents(diagnostics)).toHaveLength(1);
   });
 
   test("maxRpcDurationMs: Infinity면 rpc-timed-out을 기록하지 않는다", async () => {

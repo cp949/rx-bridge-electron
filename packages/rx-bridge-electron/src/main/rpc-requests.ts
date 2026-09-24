@@ -197,6 +197,12 @@ export class RpcRequests {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<RpcResponse>((resolve) => {
       timer = setTimeout(() => {
+        // 취소가 먼저 확정됐으면 deadline은 응답만 대신 확정하고 진단을 남기지 않는다.
+        const cancelled = cancelledIfAborted(controller.signal, envelope);
+        if (cancelled !== undefined) {
+          resolve(cancelled);
+          return;
+        }
         controller.abort();
         recordDiagnostic(this.#diagnostics, {
           type: "rpc-timed-out",
@@ -283,6 +289,8 @@ export class RpcRequests {
     if (entry === undefined) return;
     state.active.delete(id);
     session.signal.removeEventListener("abort", entry.onSessionAbort);
+    // active에 남은 채 이미 aborted면 deadline이 먼저 확정해 rpc-timed-out을 남긴 요청이다.
+    if (entry.controller.signal.aborted) return;
     entry.controller.abort();
     recordDiagnostic(this.#diagnostics, {
       type: "rpc-cancelled",
