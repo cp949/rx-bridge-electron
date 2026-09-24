@@ -14,14 +14,12 @@ import { recordDiagnostic } from "./diagnostics.js";
 import { notifiesRenderer, type DocumentSession } from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
-import {
-  isScopedSource,
-  type EventRegistrationEntry,
-  type RegistrationTable,
-  type StateRegistrationEntry,
+import type {
+  EventRegistrationEntry,
+  RegistrationTable,
+  StateRegistrationEntry,
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
-import type { BroadcastEventSource } from "./sources.js";
 import type {
   Authorize,
   BridgeContext,
@@ -427,7 +425,7 @@ export class Subscriptions {
       }
       if (registration.kind === "state") {
         this.#startShared(consumer, command.key, registration.source);
-      } else if (isScopedSource(registration.source)) {
+      } else if (registration.delivery.mode === "scoped") {
         const context: BridgeContext = {
           requestId: command.subscriptionId,
           clientId: command.clientId,
@@ -435,7 +433,7 @@ export class Subscriptions {
           sender,
           signal: controller.signal,
         };
-        const source = registration.source.factory(context);
+        const source = registration.delivery.factory(context);
         if (consumer.closed) return;
         if (!(source instanceof Observable))
           throw new TypeError("Scoped factory must return an Observable.");
@@ -443,11 +441,7 @@ export class Subscriptions {
         consumer.own = upstream;
         source.subscribe(upstream);
       } else {
-        this.#startShared(
-          consumer,
-          command.key,
-          this.#broadcastSource(registration.source),
-        );
+        this.#startShared(consumer, command.key, registration.delivery.source);
       }
     } catch {
       this.#terminate(consumer, { type: "error", error: internalError });
@@ -523,12 +517,6 @@ export class Subscriptions {
     } else if (consumer.registration.kind === "state") {
       this.#next(consumer, consumer.registration.source.getValue());
     }
-  }
-
-  #broadcastSource(
-    source: Observable<BridgeValue> | BroadcastEventSource<BridgeValue>,
-  ): Observable<BridgeValue> {
-    return source instanceof Observable ? source : source.source;
   }
 
   #observer(consumer: Consumer) {

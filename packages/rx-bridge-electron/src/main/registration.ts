@@ -21,7 +21,7 @@ import type {
   OverflowPolicy,
   ScopedEventSource,
 } from "./sources.js";
-import type { BridgeOperation, RpcHandler } from "./types.js";
+import type { BridgeContext, BridgeOperation, RpcHandler } from "./types.js";
 
 /**
  * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
@@ -144,12 +144,26 @@ export interface StateRegistrationEntry {
   readonly output?: Schema<BridgeValue>;
 }
 
+/**
+ * 등록 시점에 정규화한 event 전달 방식(확정 결정 4). `broadcast`는 key당
+ * 공유할 `Observable` 하나를, `scoped`는 구독마다 새 upstream을 만드는
+ * factory를 가진다. `Subscriptions`는 raw `EventSource`(plain `Observable` |
+ * `BroadcastEventSource` | `ScopedEventSource`)를 더는 판별하지 않고 이
+ * 두 갈래만 읽는다.
+ */
+export type EventDelivery =
+  | { readonly mode: "broadcast"; readonly source: Observable<BridgeValue> }
+  | {
+      readonly mode: "scoped";
+      readonly factory: (context: BridgeContext) => Observable<BridgeValue>;
+    };
+
 export interface EventRegistrationEntry {
   readonly kind: "event";
   readonly domainName: string;
   readonly operation: string;
   readonly bridgeOperation: BridgeOperation;
-  readonly source: EventSource;
+  readonly delivery: EventDelivery;
   readonly output?: Schema<BridgeValue>;
   readonly buffer: {
     readonly capacity: number;
@@ -249,8 +263,8 @@ function readRpcSchemaEntry(
   };
 }
 
-/** event source가 요청별 scoped factory인지 판별한다(구독 시작 경로와 공유). */
-export function isScopedSource(
+/** event source가 요청별 scoped factory인지 판별한다(등록 시점 정규화 전용). */
+function isScopedSource(
   source: EventSource,
 ): source is ScopedEventSource<BridgeValue> {
   return !(source instanceof Observable) && source.mode === "scoped";
@@ -434,6 +448,12 @@ function walkImplNode(
           rawBuffer = source.buffer;
         }
         const buffer = normalizeEventBuffer(rawBuffer, path);
+        const delivery: EventDelivery =
+          source instanceof Observable
+            ? { mode: "broadcast", source }
+            : isBroadcastSource(source)
+              ? { mode: "broadcast", source: source.source }
+              : { mode: "scoped", factory: source.factory };
         const eventOutput = categorySchemas?.[operation] as
           Schema<BridgeValue> | undefined;
         eventTable.set(key, {
@@ -441,7 +461,7 @@ function walkImplNode(
           domainName,
           operation,
           bridgeOperation,
-          source,
+          delivery,
           ...(eventOutput === undefined ? {} : { output: eventOutput }),
           buffer,
         });
