@@ -657,9 +657,8 @@ describe("세션별 구독 한도", () => {
   });
 });
 
-describe("구독 시작 실패 시 슬롯 반환", () => {
-  test("직접 작성한 source의 capacity 결함으로 BoundedQueue 생성이 실패해도 슬롯이 반환된다", async () => {
-    const diagnostics = { record: vi.fn() };
+describe("직접 작성한 event source의 buffer 결함은 등록 시점에 거부된다", () => {
+  test("capacity 0인 직접 작성 source는 createBridgeServer가 생성 시점에 TypeError를 던진다(DELTA-03 전환: 이전에는 subscribe 시점에 BoundedQueue 생성이 실패해 slot이 샜다)", () => {
     const brokenEvents = new Subject<number>();
     const impl: BridgeImpl<AppBridge> = {
       hardware: {
@@ -676,50 +675,10 @@ describe("구독 시작 실패 시 슬롯 반환", () => {
         },
       },
     };
-    const server: StreamBridgeServer = createBridgeServer(impl, {
-      resourceLimits: { maxSubscriptions: 1 },
-      diagnostics,
-    });
-    const target = new FakeTarget();
-    server.attach(target);
-
-    const first: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => first.push(message),
+    expect(() =>
+      createBridgeServer(impl, { resourceLimits: { maxSubscriptions: 1 } }),
+    ).toThrow(
+      /Event source 'hardware\/change\$' buffer capacity must be a positive safe integer\./,
     );
-    expect(types(first)).toEqual(["subscribed", "error"]);
-    expect(first[1]).toMatchObject({
-      error: { code: "INTERNAL", message: "Internal bridge error." },
-    });
-
-    const diagnosticTypes = diagnostics.record.mock.calls.map(
-      ([event]) => (event as { type: string }).type,
-    );
-    expect(diagnosticTypes).toContain("subscription-opened");
-    expect(diagnosticTypes).toContain("subscription-closed");
-    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
-
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => second.push(message),
-    );
-    expect(types(second)).toEqual(["subscribed", "error"]);
-    expect(second[1]).toMatchObject({
-      error: { code: "INTERNAL", message: "Internal bridge error." },
-    });
   });
 });

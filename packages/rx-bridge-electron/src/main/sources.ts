@@ -51,26 +51,19 @@ export function currentValueSource<T extends BridgeValue>(
   );
 }
 
-/** `capacity`가 양의 안전 정수인지 source 생성 시점에 검증한다. */
-function assertEventBuffer(
-  buffer: EventSourceBuffer | undefined,
-): EventSourceBuffer | undefined {
-  if (buffer === undefined) return undefined;
-  if (!Number.isSafeInteger(buffer.capacity) || buffer.capacity < 1) {
-    throw new TypeError(
-      "Event buffer capacity must be a positive safe integer.",
-    );
-  }
-  return Object.freeze({ ...buffer });
-}
-
+/**
+ * event source 동결 객체를 만드는 순수 생성자. 모양·buffer 검증은
+ * registration(`buildRegistrationTableFromImpl`)이 등록 시점에 한다 — 직접
+ * 작성한 source 리터럴도 같은 검증을 받으므로 여기서는 검증하지 않는다.
+ */
 export function broadcastEvent<T extends BridgeValue>(
   source: Observable<T>,
   options: { readonly buffer?: EventSourceBuffer } = {},
 ): BroadcastEventSource<T> {
-  if (!(source instanceof Observable))
-    throw new TypeError("Event source must be an Observable.");
-  const buffer = assertEventBuffer(options.buffer);
+  const buffer =
+    options.buffer === undefined
+      ? undefined
+      : Object.freeze({ ...options.buffer });
   return Object.freeze({
     mode: "broadcast" as const,
     source,
@@ -82,9 +75,10 @@ export function scopedEvent<T extends BridgeValue>(
   factory: (context: BridgeContext) => Observable<T>,
   options: { readonly buffer?: EventSourceBuffer } = {},
 ): ScopedEventSource<T> {
-  if (typeof factory !== "function")
-    throw new TypeError("Scoped Event source must be a factory.");
-  const buffer = assertEventBuffer(options.buffer);
+  const buffer =
+    options.buffer === undefined
+      ? undefined
+      : Object.freeze({ ...options.buffer });
   return Object.freeze({
     mode: "scoped" as const,
     factory,

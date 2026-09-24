@@ -17,6 +17,7 @@ import type {
   BroadcastEventSource,
   CurrentValueSource,
   EventSource,
+  EventSourceBuffer,
   OverflowPolicy,
   ScopedEventSource,
 } from "./sources.js";
@@ -261,6 +262,36 @@ function isBroadcastSource(
   return !(source instanceof Observable) && source.mode === "broadcast";
 }
 
+const VALID_OVERFLOW_POLICIES: ReadonlySet<OverflowPolicy> = new Set([
+  "error",
+  "drop-oldest",
+  "drop-newest",
+]);
+
+/**
+ * event source의 `buffer.capacity`·`buffer.overflow`를 검증하고 동결 복사본을
+ * 돌려준다(확정 결정 2, 3, 10). `buffer`가 없으면 기본값을 쓴다. helper
+ * (`broadcastEvent`/`scopedEvent`)는 더 이상 이 검증을 하지 않는다 — 직접
+ * 작성한 source 객체 리터럴도 여기를 거쳐야 같은 보호를 받는다.
+ */
+function normalizeEventBuffer(
+  buffer: EventSourceBuffer | undefined,
+  path: string,
+): { readonly capacity: number; readonly overflow: OverflowPolicy } {
+  if (buffer === undefined) return DEFAULT_EVENT_BUFFER;
+  if (!Number.isSafeInteger(buffer.capacity) || buffer.capacity < 1) {
+    throw new TypeError(
+      `Event source '${path}' buffer capacity must be a positive safe integer.`,
+    );
+  }
+  if (!VALID_OVERFLOW_POLICIES.has(buffer.overflow)) {
+    throw new TypeError(
+      `Event source '${path}' buffer overflow must be "error", "drop-oldest", or "drop-newest".`,
+    );
+  }
+  return Object.freeze({ capacity: buffer.capacity, overflow: buffer.overflow });
+}
+
 /**
  * impl 트리 한 노드(도메인 자신 또는 중첩 네임스페이스)를 재귀 순회하며
  * rpc/state/event 카테고리는 등록하고, 그 외 키는 중첩 도메인으로 보고
@@ -384,10 +415,25 @@ function walkImplNode(
             `Event source '${path}' must be an Observable or source adapter.`,
           );
         }
-        const buffer =
-          source instanceof Observable
-            ? DEFAULT_EVENT_BUFFER
-            : (source.buffer ?? DEFAULT_EVENT_BUFFER);
+        let rawBuffer: EventSourceBuffer | undefined;
+        if (source instanceof Observable) {
+          rawBuffer = undefined;
+        } else if (isBroadcastSource(source)) {
+          if (!(source.source instanceof Observable)) {
+            throw new TypeError(
+              `Event source '${path}' source must be an Observable.`,
+            );
+          }
+          rawBuffer = source.buffer;
+        } else {
+          if (typeof source.factory !== "function") {
+            throw new TypeError(
+              `Event source '${path}' factory must be a function.`,
+            );
+          }
+          rawBuffer = source.buffer;
+        }
+        const buffer = normalizeEventBuffer(rawBuffer, path);
         const eventOutput = categorySchemas?.[operation] as
           Schema<BridgeValue> | undefined;
         eventTable.set(key, {

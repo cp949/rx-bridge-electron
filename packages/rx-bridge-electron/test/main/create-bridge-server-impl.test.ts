@@ -18,6 +18,7 @@ import {
   broadcastEvent,
   createBridgeServer,
   currentValueSource,
+  scopedEvent,
   type BridgeDiagnostic,
 } from "../../src/main/index.js";
 import type { StreamMessage } from "../../src/protocol/index.js";
@@ -166,6 +167,135 @@ describe("createBridgeServer(impl, options): impl 형태 오류는 생성 시점
     ).toThrow(
       /Event source 'device\/data' must be an Observable or source adapter\./,
     );
+  });
+});
+
+describe("createBridgeServer(impl, options): registration이 event source의 buffer·타입을 검증한다(RD-029)", () => {
+  test.each([
+    [0, "capacity 0"],
+    [-1, "음수 capacity"],
+    [1.5, "비정수 capacity"],
+    [NaN, "NaN capacity"],
+  ])("capacity가 %s(%s)이면 실패한다", (capacity) => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: {
+              mode: "broadcast",
+              source: new Subject<SerialLine>(),
+              buffer: { capacity, overflow: "error" },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      /Event source 'device\/data' buffer capacity must be a positive safe integer\./,
+    );
+  });
+
+  test("overflow 값이 오타면 실패한다", () => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: {
+              mode: "broadcast",
+              source: new Subject<SerialLine>(),
+              buffer: { capacity: 10, overflow: "drop" },
+            },
+          },
+        },
+      }),
+    ).toThrow(
+      /Event source 'device\/data' buffer overflow must be "error", "drop-oldest", or "drop-newest"\./,
+    );
+  });
+
+  test("scoped factory가 함수가 아니면 실패한다", () => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: { mode: "scoped", factory: "not-a-function" },
+          },
+        },
+      }),
+    ).toThrow(/Event source 'device\/data' factory must be a function\./);
+  });
+
+  test("broadcast source가 Observable이 아니면 실패한다", () => {
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: { mode: "broadcast", source: { not: "an observable" } },
+          },
+        },
+      }),
+    ).toThrow(/Event source 'device\/data' source must be an Observable\./);
+  });
+
+  test("직접 작성한 올바른 broadcast 리터럴은 helper로 만든 것과 같게 동작한다", async () => {
+    const events = new Subject<SerialLine>();
+    const server = createBridgeServer({
+      device: {
+        event: {
+          data: {
+            mode: "broadcast" as const,
+            source: events,
+            buffer: { capacity: 10, overflow: "error" as const },
+          },
+        },
+      },
+    });
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      {
+        protocolVersion: 1,
+        clientId: "doc-1",
+        type: "subscribe",
+        subscriptionId: testSubscriptionId(1),
+        key: "event:device/data",
+      },
+      (message) => messages.push(message),
+    );
+    events.next({ text: "a" });
+    expect(messageTypes(messages)).toEqual(["subscribed", "batch"]);
+  });
+
+  test("직접 작성한 올바른 scoped 리터럴은 helper로 만든 것과 같게 동작한다", async () => {
+    let perSubscriptionSubject: Subject<SerialLine> | undefined;
+    const server = createBridgeServer({
+      device: {
+        event: {
+          data: {
+            mode: "scoped" as const,
+            factory: () => {
+              perSubscriptionSubject = new Subject<SerialLine>();
+              return perSubscriptionSubject;
+            },
+          },
+        },
+      },
+    });
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      {
+        protocolVersion: 1,
+        clientId: "doc-1",
+        type: "subscribe",
+        subscriptionId: testSubscriptionId(1),
+        key: "event:device/data",
+      },
+      (message) => messages.push(message),
+    );
+    perSubscriptionSubject?.next({ text: "a" });
+    expect(messageTypes(messages)).toEqual(["subscribed", "batch"]);
   });
 });
 
@@ -507,11 +637,24 @@ describe("createBridgeServer(impl, options): event buffer 옵션", () => {
     ).toHaveLength(1);
   });
 
-  test("event() 규칙과 같은 capacity 검증을 broadcastEvent에도 적용한다", () => {
+  test("broadcastEvent 자체는 capacity를 검증하지 않고, createBridgeServer가 등록 시점에 검증한다", () => {
     expect(() =>
       broadcastEvent(new Subject<SerialLine>(), {
         buffer: { capacity: 0, overflow: "error" },
       }),
-    ).toThrow(/Event buffer capacity must be a positive safe integer\./);
+    ).not.toThrow();
+    expect(() =>
+      createBridgeServer({
+        device: {
+          event: {
+            data: broadcastEvent(new Subject<SerialLine>(), {
+              buffer: { capacity: 0, overflow: "error" },
+            }),
+          },
+        },
+      }),
+    ).toThrow(
+      /Event source 'device\/data' buffer capacity must be a positive safe integer\./,
+    );
   });
 });
