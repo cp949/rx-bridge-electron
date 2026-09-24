@@ -5,6 +5,12 @@ import type {
   WebContents,
   WebFrameMain,
 } from "electron";
+// Named import(`import { ipcMain } from "electron"`)는 Electron 밖(Node 유닛 테스트 등)에서
+// "electron" 패키지가 실행 파일 경로 문자열 하나만 export하기 때문에 ESM 링크 단계에서
+// SyntaxError를 낸다. namespace import는 그 환경에서도 링크가 되고, 없는 프로퍼티 접근은
+// 단순히 undefined를 반환한다 — 그래서 실제 조회는 호출 시점에 프로퍼티 접근으로 미룬다.
+// ADR 0013 참고.
+import * as electron from "electron";
 
 import {
   BridgeProtocolError,
@@ -34,8 +40,16 @@ export interface ElectronBridgeChannels {
   readonly stream: string;
 }
 
+/**
+ * Main과 preload가 `namespace`를 생략했을 때 함께 쓰는 기본값. 두 지점이 각자 다른
+ * 기본값을 두면 한쪽만 생략했을 때 채널이 어긋나는 조용한 실패가 생기므로, 이 상수 하나를
+ * 공유한다(ADR 0013). preload(`src/preload/expose-bridge.ts`)는 이 파일에서
+ * `ELECTRON_BRIDGE_CHANNELS`를 이미 import하고 있으므로 같은 경로에서 이 상수도 가져온다.
+ */
+export const DEFAULT_ELECTRON_BRIDGE_NAMESPACE = "default";
+
 export function ELECTRON_BRIDGE_CHANNELS(
-  namespace: string,
+  namespace: string = DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
 ): ElectronBridgeChannels {
   const prefix = `rx-bridge-electron:v1:${namespace}`;
   return {
@@ -48,9 +62,9 @@ export function ELECTRON_BRIDGE_CHANNELS(
 }
 
 export interface BindElectronBridgeOptions {
-  readonly ipcMain: IpcMain;
+  readonly ipcMain?: IpcMain;
   readonly server: StreamBridgeServer;
-  readonly namespace: string;
+  readonly namespace?: string;
   readonly allowedOrigins: readonly string[];
 }
 
@@ -142,9 +156,21 @@ function targetFor(
 /** Binds fixed Electron channels; renderer code receives no Electron objects. */
 export function bindElectronBridge(options: BindElectronBridgeOptions): {
   readonly channels: ElectronBridgeChannels;
-  attach(contents: WebContents, role: string): () => void;
+  attach(contents: WebContents, role?: string): () => void;
   dispose(): void;
 } {
+  // 주입값이 항상 우선한다. 둘 다 없으면(비-Electron 런타임에서 이 기본값 경로를 탄 경우)
+  // `electron.ipcMain`은 undefined이며(네임스페이스 import이므로 여기서 링크 에러는 나지
+  // 않는다), 아래에서 명확한 에러로 실패한다. ADR 0013 참고.
+  const ipcMain = options.ipcMain ?? electron.ipcMain;
+  if (ipcMain === undefined) {
+    throw new TypeError(
+      "bindElectronBridge requires 'ipcMain': no 'ipcMain' option was given " +
+        "and Electron's 'ipcMain' export is unavailable in this runtime " +
+        "(not running inside Electron's main process). Pass 'ipcMain' " +
+        "explicitly, e.g. in unit tests.",
+    );
+  }
   const channels = ELECTRON_BRIDGE_CHANNELS(options.namespace);
   const attached = new Map<number, () => void>();
   const streamSender =
@@ -152,7 +178,7 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
     (message: StreamMessage) => {
       event.senderFrame?.send(channels.stream, message);
     };
-  options.ipcMain.handle(channels.handshake, (event, value: unknown) => {
+  ipcMain.handle(channels.handshake, (event, value: unknown) => {
     let request;
     try {
       request = parseHandshakeRequest(value, limits);
@@ -180,7 +206,7 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       return protocolError(value);
     }
   });
-  options.ipcMain.handle(channels.rpc, async (event, value: unknown) => {
+  ipcMain.handle(channels.rpc, async (event, value: unknown) => {
     let request;
     try {
       request = parseWireRpcRequest(value, limits);
@@ -222,12 +248,12 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       );
     } catch {}
   };
-  options.ipcMain.on(channels.cancel, onCancel);
-  options.ipcMain.on(channels.control, onControl);
+  ipcMain.on(channels.cancel, onCancel);
+  ipcMain.on(channels.control, onControl);
   let disposed = false;
   return {
     channels,
-    attach(contents, role) {
+    attach(contents, role = "default") {
       if (disposed)
         throw new BridgeProtocolError(
           "FORBIDDEN",
@@ -249,10 +275,10 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       disposed = true;
       for (const detach of attached.values()) detach();
       attached.clear();
-      options.ipcMain.removeHandler(channels.handshake);
-      options.ipcMain.removeHandler(channels.rpc);
-      options.ipcMain.removeListener(channels.cancel, onCancel);
-      options.ipcMain.removeListener(channels.control, onControl);
+      ipcMain.removeHandler(channels.handshake);
+      ipcMain.removeHandler(channels.rpc);
+      ipcMain.removeListener(channels.cancel, onCancel);
+      ipcMain.removeListener(channels.control, onControl);
       options.server.dispose();
     },
   };

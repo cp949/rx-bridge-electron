@@ -4,10 +4,13 @@ import type { IpcMain, WebContents } from "electron";
 
 import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import { BridgeProtocolError } from "../../src/protocol/index.js";
+import type { BridgeValue } from "../../src/protocol/index.js";
 import {
   bindElectronBridge,
   createBridgeServer,
+  DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
+  type BridgeContext,
   type BridgeDiagnostic,
 } from "../../src/main/index.js";
 import { recordAdapterRejection } from "../../src/main/diagnostics.js";
@@ -464,5 +467,83 @@ describe("Electron adapter rejection diagnostics", () => {
       recordAdapterRejection,
     );
     expect(Object.values(mainIndex)).not.toContain(recordAdapterRejection);
+  });
+});
+
+/**
+ * RD-014 배선 축약(ADR 0013): `bindElectronBridge`의 `ipcMain`·`namespace`,
+ * `attach`의 `role`을 생략했을 때의 기본값과 미주입 오류 경로.
+ */
+describe("bindElectronBridge argument defaults (RD-014)", () => {
+  test("omitting namespace uses the shared default and channels are rx-bridge-electron:v1:default:*", () => {
+    const ipcMain = new FakeIpcMain();
+    const server = createBridgeServer(waitImpl);
+
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      allowedOrigins: ["app://local"],
+    });
+
+    expect(DEFAULT_ELECTRON_BRIDGE_NAMESPACE).toBe("default");
+    expect(bridge.channels).toEqual(
+      ELECTRON_BRIDGE_CHANNELS(DEFAULT_ELECTRON_BRIDGE_NAMESPACE),
+    );
+    expect(bridge.channels.rpc).toBe("rx-bridge-electron:v1:default:rpc");
+    expect(bridge.channels.handshake).toBe(
+      "rx-bridge-electron:v1:default:handshake",
+    );
+  });
+
+  test("omitting role on attach defaults to 'default' and reaches BridgeContext.windowRole", async () => {
+    const ipcMain = new FakeIpcMain();
+    let capturedRole: string | undefined;
+    type RoleBridge = { hardware: { rpc: { role(): undefined } } };
+    const roleImpl: BridgeImpl<RoleBridge> = {
+      hardware: {
+        rpc: {
+          role: (_input: BridgeValue, context: BridgeContext) => {
+            capturedRole = context.windowRole;
+            return undefined;
+          },
+        },
+      },
+    };
+    const server = createBridgeServer(roleImpl);
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      allowedOrigins: ["app://local"],
+    });
+    const contents = new UrlWebContents("app://local");
+
+    // role 인자를 생략한다 — 기본값 "default"가 BridgeContext.windowRole까지 전달돼야 한다.
+    bridge.attach(contents as unknown as WebContents);
+
+    const rpcHandler = ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS().rpc)!;
+    const response = await rpcHandler(
+      { sender: contents, senderFrame: contents.mainFrame },
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        requestId: "request-1",
+        key: "rpc:hardware/role",
+        input: undefined,
+      },
+    );
+
+    expect(response).toMatchObject({ type: "success" });
+    expect(capturedRole).toBe("default");
+  });
+
+  test("omitting ipcMain throws a clear error when Electron's ipcMain export is unavailable (Node test runtime)", () => {
+    const server = createBridgeServer(waitImpl);
+
+    expect(() =>
+      bindElectronBridge({
+        server,
+        allowedOrigins: ["app://local"],
+      }),
+    ).toThrow(/ipcMain/);
   });
 });

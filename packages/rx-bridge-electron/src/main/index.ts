@@ -11,6 +11,7 @@ export type {
 } from "../contract/bridge-types.js";
 export {
   bindElectronBridge,
+  DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
 } from "./electron-adapter.js";
 export type {
