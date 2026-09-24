@@ -1,6 +1,6 @@
 # Renderer API의 Proxy 의존을 동결 객체 트리로 교체 검토
 
-- Status: open
+- Status: closed (RD-027)
 - 출처: `_works/20260923-01-renderer-api-naming/pending-issues/01.md`(RD-001 작업 중 발견, 범위 밖으로 분리).
 
 ## 배경
@@ -16,3 +16,7 @@
 ## 다음 단계
 
 착수 여부와 우선순위는 아직 정하지 않았다. 착수하기로 결정하면 이 스펙을 다듬고 새 ROADMAP 항목으로 승격할지, 이 `.scratch/` 항목으로 계속 진행할지 그때 판단한다.
+
+## Comments
+
+- 2026-09-25: RD-027로 승격해 교체했다. leaf는 lazy getter 대신 즉시 생성하는 data property로 두었다(생성 부작용 없음). 결정은 [ADR 0021](../../docs/adr/0021-renderer-frozen-api-tree.md).

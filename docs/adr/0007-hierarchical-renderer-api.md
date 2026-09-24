@@ -10,6 +10,8 @@
 
 도메인에 정의가 없거나 비어 있는 종류는 노출하지 않는다. 런타임 값은 `undefined`이고 `InferBridge` 타입에도 키가 없다. 지금 Proxy가 manifest에 있는 경로만 노출하는 규칙과 같다.
 
+_(개정: ADR 0021 — Renderer API는 Proxy가 아니라 manifest로 만든 동결 객체 트리다. manifest에 있는 경로만 노출하는 규칙은 같다.)_
+
 ADR 0005의 나머지 결정은 유효하다: 루트 `api.dispose()`와 `api[Symbol.dispose]`는 같은 함수이고 첫 segment가 `dispose`인 도메인 이름은 예약한다. 스트림 이름에 `$` 접미사를 자동으로 붙이지 않는다 — 계층의 `state`·`event`가 종류를 드러내므로 접미사가 할 일도 없다. 호환 별칭은 두지 않는다. npm 배포 이력이 없고 저장소 내부 소비자(`apps/demo`, Electron fixture, README)는 이 결정과 함께 옮겼다. 외부 소비자는 `api.<domain>.<op>`를 op의 종류에 따라 `api.<domain>.rpc.<op>`, `.state.<op>`, `.event.<op>`로 바꾸고, operation 이름에 `/`를 썼다면 그 앞부분을 도메인 경로로 옮긴다.
 
 ## 개정: wire key 문법의 단일 소유 (RD-017)
