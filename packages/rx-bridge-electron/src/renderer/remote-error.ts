@@ -22,3 +22,8 @@ export class RemoteError extends Error {
 export function createDisposedError(): RemoteError {
   return new RemoteError("CANCELLED", "Renderer API is disposed.");
 }
+
+/** Renderer가 원격 응답 없이 로컬에서 확정하는 RemoteError를 만든다. */
+export function localError(code: string, message: string): RemoteError {
+  return new RemoteError(code, message);
+}

@@ -19,7 +19,8 @@ import {
   type OperationCategory,
   type OperationKeyReject,
 } from "../protocol/operation-key.js";
-import { RemoteError } from "./remote-error.js";
+import { localError } from "./remote-error.js";
+import type { RemoteError } from "./remote-error.js";
 import { RemoteEvent } from "./remote-event.js";
 import { RemoteStateClient } from "./remote-state.js";
 import { RpcClient } from "./rpc-client.js";
@@ -69,10 +70,6 @@ interface PathNode<Leaf> {
 
 type ManifestNode = PathNode<ManifestLeaf>;
 
-function internal(message: string): RemoteError {
-  return new RemoteError("INTERNAL", message);
-}
-
 /**
  * wire key 파싱 실패 verdict를 `RemoteError("INTERNAL")`로 번역한다. 문구는
  * Main `TypeError`와 같은 표현이고 대상은 manifest entry 전체다. 문구는
@@ -84,21 +81,30 @@ function rejectManifestEntry(
 ): RemoteError {
   switch (verdict.reason) {
     case "empty-segment":
-      return internal(
+      return localError(
+        "INTERNAL",
         `Manifest entry '${key}' cannot contain an empty segment.`,
       );
     case "dotted-segment":
-      return internal(
+      return localError(
+        "INTERNAL",
         `Manifest entry '${key}' cannot contain dotted segments.`,
       );
     case "reserved-segment":
-      return internal(
+      return localError(
+        "INTERNAL",
         `Manifest entry '${key}' contains reserved segment '${verdict.segment}'.`,
       );
     case "nested-operation":
-      return internal(`Manifest entry '${key}' cannot be a nested path.`);
+      return localError(
+        "INTERNAL",
+        `Manifest entry '${key}' cannot be a nested path.`,
+      );
     case "unknown-category":
-      return internal("Manifest entry has an unsupported category.");
+      return localError(
+        "INTERNAL",
+        "Manifest entry has an unsupported category.",
+      );
   }
 }
 
@@ -132,15 +138,18 @@ function addManifestPath(
     throw rejectManifestEntry(key, verdict);
   }
   if (verdict.category !== category) {
-    throw internal("Manifest entry has an unsupported category.");
+    throw localError("INTERNAL", "Manifest entry has an unsupported category.");
   }
   const segments = [...verdict.domain, verdict.operation];
   const pathVerdict = paths.add(segments);
   if (!pathVerdict.ok) {
     const path = segments.join("/");
     throw pathVerdict.reason === "leaf-namespace-collision"
-      ? internal(`Leaf/namespace collision at '${path}'.`)
-      : internal(`Duplicate path or leaf/namespace collision at '${path}'.`);
+      ? localError("INTERNAL", `Leaf/namespace collision at '${path}'.`)
+      : localError(
+          "INTERNAL",
+          `Duplicate path or leaf/namespace collision at '${path}'.`,
+        );
   }
   addPath(root, [...verdict.domain, category, verdict.operation], {
     category,
@@ -158,7 +167,8 @@ function parseHandshake(value: unknown): {
   try {
     response = parseHandshakeResponse(value);
   } catch (cause) {
-    throw internal(
+    throw localError(
+      "INTERNAL",
       cause instanceof BridgeProtocolError && cause.code === "VERSION_MISMATCH"
         ? "Unsupported bridge handshake."
         : "Malformed bridge handshake.",
@@ -289,7 +299,7 @@ export async function createRendererApi<B>(
   try {
     response = await resolvedTransport.connect();
   } catch {
-    throw internal("Bridge handshake failed.");
+    throw localError("INTERNAL", "Bridge handshake failed.");
   }
   const handshake = parseHandshake(response);
   const rpcClient = new RpcClient(resolvedTransport, handshake.session);

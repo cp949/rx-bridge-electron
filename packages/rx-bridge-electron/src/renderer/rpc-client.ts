@@ -4,14 +4,14 @@ import {
   type ProtocolEnvelope,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
-import { createDisposedError, RemoteError } from "./remote-error.js";
+import {
+  createDisposedError,
+  localError,
+  RemoteError,
+} from "./remote-error.js";
 import type { BridgeTransport, CallOptions } from "./transport.js";
 
 const DEFAULT_TIMEOUT_MS = 30_000;
-
-function localError(code: string, message: string): RemoteError {
-  return new RemoteError(code, message);
-}
 
 function readTimeout(timeoutMs: number | undefined): number {
   const timeout = timeoutMs ?? DEFAULT_TIMEOUT_MS;

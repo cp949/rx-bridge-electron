@@ -6,7 +6,11 @@ import {
   type StreamMessage,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
-import { createDisposedError, RemoteError } from "./remote-error.js";
+import {
+  createDisposedError,
+  localError,
+  RemoteError,
+} from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
 export interface StreamGenerationHandlers {
@@ -23,10 +27,6 @@ interface StreamGeneration {
 
 function remoteError(payload: RpcErrorPayload): RemoteError {
   return new RemoteError(payload.code, payload.message, payload.details);
-}
-
-function internal(message: string): RemoteError {
-  return new RemoteError("INTERNAL", message);
 }
 
 export class StreamMultiplexer implements Disposable {
@@ -73,7 +73,7 @@ export class StreamMultiplexer implements Disposable {
     } catch {
       if (this.#generations.get(subscriptionId) === generation) {
         this.#generations.delete(subscriptionId);
-        handlers.error(internal("Stream transport failed."));
+        handlers.error(localError("INTERNAL", "Stream transport failed."));
       }
     }
   }
