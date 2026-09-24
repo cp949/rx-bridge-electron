@@ -254,11 +254,14 @@ describe("Main RPC dispatch", () => {
 describe("Duplicate requestId handling", () => {
   function setupDuplicate() {
     const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
-    const pending: Array<{ resolve: (value: string) => void }> = [];
+    const pending: Array<{
+      resolve: (value: string) => void;
+      signal: AbortSignal;
+    }> = [];
     const handler = vi.fn(
-      () =>
+      (_input: unknown, context: BridgeContext) =>
         new Promise<string>((resolve) => {
-          pending.push({ resolve });
+          pending.push({ resolve, signal: context.signal });
         }),
     );
     const impl: BridgeImpl<HardwareBridge> = {
@@ -291,6 +294,8 @@ describe("Duplicate requestId handling", () => {
 
     const second = server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(pending[0]?.signal.aborted).toBe(true);
+    expect(pending[1]?.signal.aborted).toBe(false);
     expect(cancelledEvents(diagnostics)).toEqual([
       { type: "rpc-cancelled", key: "rpc:hardware/connect" },
     ]);

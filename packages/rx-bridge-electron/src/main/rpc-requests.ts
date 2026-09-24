@@ -23,6 +23,27 @@ import type {
   SenderIdentity,
 } from "./types.js";
 
+type RpcResponseBody =
+  | { readonly type: "success"; readonly result: BridgeValue }
+  | {
+      readonly type: "error";
+      readonly error: {
+        readonly code: string;
+        readonly message: string;
+        readonly details?: BridgeValue;
+      };
+    };
+
+/** 요청 envelope의 `clientId`·`requestId`를 붙여 응답을 만든다. */
+function respond(envelope: WireRpcRequest, body: RpcResponseBody): RpcResponse {
+  return {
+    protocolVersion: 1,
+    clientId: envelope.clientId,
+    requestId: envelope.requestId,
+    ...body,
+  } as RpcResponse;
+}
+
 /**
  * ADR 0011 "CANCELLED 우선" 규칙의 단일 정의 지점. `signal`이 aborted면
  * 취소 오류 응답을 돌려주고, 아니면 `undefined`를 돌려줘 호출부가 원래
@@ -34,13 +55,10 @@ function cancelledIfAborted(
   envelope: WireRpcRequest,
 ): RpcResponse | undefined {
   if (!signal.aborted) return undefined;
-  return {
-    protocolVersion: 1,
-    clientId: envelope.clientId,
-    requestId: envelope.requestId,
+  return respond(envelope, {
     type: "error",
     error: { code: "CANCELLED", message: "Request cancelled." },
-  } as RpcResponse;
+  });
 }
 
 /** 진행 중인 요청 하나. `key`는 진단 기록용, `controller`는 취소·deadline abort. */
@@ -102,26 +120,8 @@ export class RpcRequests {
     sender: SenderIdentity,
     envelope: WireRpcRequest,
   ): Promise<RpcResponse> {
-    const respond = (
-      response:
-        | { readonly type: "success"; readonly result: BridgeValue }
-        | {
-            readonly type: "error";
-            readonly error: {
-              readonly code: string;
-              readonly message: string;
-              readonly details?: BridgeValue;
-            };
-          },
-    ): RpcResponse =>
-      ({
-        protocolVersion: 1,
-        clientId: envelope.clientId,
-        requestId: envelope.requestId,
-        ...response,
-      }) as RpcResponse;
     const error = (code: string, message: string): RpcResponse =>
-      respond({ type: "error", error: { code, message } });
+      respond(envelope, { type: "error", error: { code, message } });
 
     const registration = this.#lookupRegistration(envelope.key);
     if (registration === undefined) {
@@ -297,24 +297,6 @@ export class RpcRequests {
     envelope: WireRpcRequest,
     context: BridgeContext,
   ): Promise<RpcResponse> {
-    const respond = (
-      response:
-        | { readonly type: "success"; readonly result: BridgeValue }
-        | {
-            readonly type: "error";
-            readonly error: {
-              readonly code: string;
-              readonly message: string;
-              readonly details?: BridgeValue;
-            };
-          },
-    ): RpcResponse =>
-      ({
-        protocolVersion: 1,
-        clientId: envelope.clientId,
-        requestId: envelope.requestId,
-        ...response,
-      }) as RpcResponse;
     let parsed: BridgeValue;
     try {
       parsed = parseBridgeValue(envelope.input, this.#limits);
@@ -329,7 +311,7 @@ export class RpcRequests {
             : "invalid-input",
         key: envelope.key,
       });
-      return respond({
+      return respond(envelope, {
         type: "error",
         error: {
           code: "INVALID_ARGUMENT",
@@ -351,7 +333,7 @@ export class RpcRequests {
         reason: "invalid-input",
         key: envelope.key,
       });
-      return respond({
+      return respond(envelope, {
         type: "error",
         error: {
           code: "INVALID_ARGUMENT",
@@ -366,11 +348,11 @@ export class RpcRequests {
       const cancelled = cancelledIfAborted(context.signal, envelope);
       if (cancelled !== undefined) return cancelled;
       if (error instanceof BridgeProtocolError)
-        return respond({
+        return respond(envelope, {
           type: "error",
           error: { code: "INTERNAL", message: "Internal bridge error." },
         });
-      return respond({
+      return respond(envelope, {
         type: "error",
         error: serializeError(error, registration.errors, this.#limits),
       });
@@ -387,11 +369,11 @@ export class RpcRequests {
       });
       const cancelled = cancelledIfAborted(context.signal, envelope);
       if (cancelled !== undefined) return cancelled;
-      return respond({
+      return respond(envelope, {
         type: "error",
         error: { code: "INTERNAL", message: "Internal bridge error." },
       });
     }
-    return respond({ type: "success", result: output });
+    return respond(envelope, { type: "success", result: output });
   }
 }
