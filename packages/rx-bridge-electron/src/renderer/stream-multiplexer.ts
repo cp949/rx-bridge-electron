@@ -6,11 +6,7 @@ import {
   type StreamMessage,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
-import {
-  createDisposedError,
-  localError,
-  RemoteError,
-} from "./remote-error.js";
+import { localError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
 export interface StreamGenerationHandlers {
@@ -61,12 +57,6 @@ export class StreamMultiplexer implements Disposable {
     };
     this.#generations.set(subscriptionId, generation);
     registered(subscriptionId);
-
-    if (this.#disposed) {
-      this.#generations.delete(subscriptionId);
-      handlers.error(createDisposedError());
-      return;
-    }
 
     try {
       this.#transport.control({ type: "subscribe", subscriptionId, key });

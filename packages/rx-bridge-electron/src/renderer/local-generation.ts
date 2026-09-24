@@ -45,6 +45,7 @@ export class LocalGeneration<T> {
     // 종료 뒤에는 dispose 루프가 아직 complete하지 않은 활성 generation에도
     // 합류하지 않는다. 합류하면 현재값 재생과 늦은 complete를 받게 된다.
     // generation을 건드리지 않으므로 snapshot도 바뀌지 않는다.
+    // 이 검사가 종료 뒤 subscribe의 유일한 차단 지점이다.
     if (this.#multiplexer.disposed) {
       subscriber.error(createDisposedError());
       return;
