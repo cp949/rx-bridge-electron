@@ -57,7 +57,7 @@ preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBr
 
 ## 문서 세션과 정리
 
-Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. sender admission(`DocumentSessions`의 private `#admit`)이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하며, handshake·RPC·subscribe(`establish`)와 cancel·unsubscribe/acknowledge(`current`)가 채널과 무관하게 같은 판정을 공유한다. main-frame navigation, renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
+Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. sender admission(`DocumentSessions`의 private `#admit`)이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하며, handshake·RPC·subscribe(`establish`)와 cancel·unsubscribe/acknowledge(`current`)가 채널과 무관하게 같은 판정을 공유한다. main-frame navigation(main frame이 실제로 새 문서로 commit되는 시점 — navigation이 시작만 되고 같은 문서가 유지되는 이동은 retire하지 않는다, [ADR 0019](adr/0019-navigation-retire-on-commit.md)), renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
 
 이 소유 단위는 창이 아니라 렌더러 문서다. 한 창에서 reload/navigation이 발생하면 이전 문서에서 시작한 비동기 작업이 새 문서로 넘어가지 않아야 한다.
 

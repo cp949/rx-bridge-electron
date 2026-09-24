@@ -13,7 +13,7 @@ _Avoid_: 창 세션, 클라이언트 세션
 _Avoid_: close, shutdown(구분 없이 섞어 쓰기)
 
 **은퇴 (retire)**:
-렌더러 문서 세션이 수명 사건으로 끝나는 것이다. 수명 사건은 main-frame navigation, renderer 종료, webContents 파괴, detach, 서버 종료다. retire된 client ID는 재사용하지 않는다.
+렌더러 문서 세션이 수명 사건으로 끝나는 것이다. 수명 사건은 main-frame navigation(main frame이 실제로 새 문서로 commit되는 시점 — [ADR 0019](docs/adr/0019-navigation-retire-on-commit.md)), renderer 종료, webContents 파괴, detach, 서버 종료다. retire된 client ID는 재사용하지 않는다.
 
 **sender admission**:
 요청을 보낸 frame·origin·clientId가 현재 렌더러 문서 세션에 속하는지 판정하는 것이다. `DocumentSessions`의 private `#admit`이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하고, `establish`(handshake·RPC·subscribe)와 `current`(cancel·unsubscribe·acknowledge)가 이어서 client 판정(retired clientId, 경합)까지 마쳐 세션 또는 사유를 돌려준다. 채널과 무관하게 같은 사유를 낸다. 아래 "구독(subscription)"의 admission(ID 형식·watermark·등록 조회·slot·`authorize`)과는 다른 개념이다 — 그 admission은 sender admission을 통과해 세션을 얻은 뒤의 다음 단계다.

@@ -40,13 +40,13 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 
 ### 근거 가설
 
-세션이 현재가 아니게 되는 모든 경로(main-frame navigation, render-process-gone, destroyed, detach, dispose, 같은 `webContents`의 새 `clientId`)는 예외 없이 `DocumentSessions.#retire`를 거치고, `#retire`는 그 세션의 `session.signal`을 abort한다. Electron에서 main frame `routingId`가 `did-start-navigation` 없이 바뀌는 경로는 없다. 이 가설이 성립하면 "세션이 더 이상 현재가 아니다"와 "이 요청의 signal이 abort됐다"는 항상 같은 사실을 가리키므로, signal 판정 하나로 재검사를 대체해도 관측 가능한 동작은 바뀌지 않는다.
+세션이 현재가 아니게 되는 모든 경로(main-frame navigation, render-process-gone, destroyed, detach, dispose, 같은 `webContents`의 새 `clientId`)는 예외 없이 `DocumentSessions.#retire`를 거치고, `#retire`는 그 세션의 `session.signal`을 abort한다. Electron에서 main frame `routingId`가 `did-start-navigation` 없이 바뀌는 경로는 없다. _(개정: [ADR 0019](0019-navigation-retire-on-commit.md) — 이 문장은 더 이상 정확하지 않다. `routingId`는 `did-start-navigation` 없이도 바뀐다(예: 오류 페이지 commit은 `did-start-navigation` 뒤 `did-fail-load`만 오고 `did-navigate`가 없다). RD-025 실험(DELTA-02) 이후 새 가설 문구: "main frame `routingId`는 `did-navigate` 또는 (`did-fail-load`이면서 그 시점의 `contents.mainFrame.routingId`가 이벤트의 `frameRoutingId`와 일치하는 경우) 없이는 바뀌지 않는다." 이 문서 시점(RD-016)의 서술은 당시 retire 신호(`did-start-navigation`) 기준이었다는 점은 그대로 남긴다.)_ 이 가설이 성립하면 "세션이 더 이상 현재가 아니다"와 "이 요청의 signal이 abort됐다"는 항상 같은 사실을 가리키므로, signal 판정 하나로 재검사를 대체해도 관측 가능한 동작은 바뀌지 않는다.
 
 이 가설은 새로 만든 것이 아니다. [ADR 0014](0014-stream-lookup-before-authorize.md)의 `Subscriptions`(`#finishPending`)가 구독 쪽에서 이미 같은 가설에 기대고 있고, 이 ADR의 "`RpcRequests` 모듈" 결정이 RPC의 retire 전달 경로를 구독과 동일한 `session.signal` abort listener 패턴으로 맞췄기 때문에 두 경로가 같은 가설을 공유하게 됐다.
 
 ### 틀렸을 때의 대가
 
-가설이 실제로 깨지는 Electron 경로가 있다면(예: `did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스), `authorize`가 오래 걸리는 요청이 이미 retire된 옛 세션을 향해 `FORBIDDEN`이나 성공 응답을 잘못 돌려줄 수 있다. 이 가설을 직접 검증하는 자동 test는 없다. 단위 test의 `FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않아 frame 교체를 관측하지 못하고(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`), Electron acceptance(multi-window reload·창 닫기)는 retire 경로만 거치며 `authorize` 대기 중 navigation 시나리오를 갖지 않는다. 가설이 깨졌다는 의심이 들면 Electron acceptance에 navigation 중 `authorize`가 지연되는 시나리오를 추가해 재현을 시도한다.
+가설이 실제로 깨지는 Electron 경로가 있다면(예: `did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스), `authorize`가 오래 걸리는 요청이 이미 retire된 옛 세션을 향해 `FORBIDDEN`이나 성공 응답을 잘못 돌려줄 수 있다. 이 가설을 직접 검증하는 자동 test는 없다. 단위 test의 `FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않아 frame 교체를 관측하지 못하고(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`), Electron acceptance(multi-window reload·창 닫기)는 retire 경로만 거치며 `authorize` 대기 중 navigation 시나리오를 갖지 않는다. 가설이 깨졌다는 의심이 들면 Electron acceptance에 navigation 중 `authorize`가 지연되는 시나리오를 추가해 재현을 시도한다. _(개정: [ADR 0019](0019-navigation-retire-on-commit.md) — RD-025가 이 문단이 예로 든 "`did-start-navigation` 없이 라우팅이 바뀌는 엣지 케이스"를 실제로 실행 실험(DELTA-02, Electron 44.4.5)으로 찾아냈다: 오류 페이지 commit(`ERR_CONNECTION_REFUSED`)이 `did-navigate` 없이 `did-fail-load`만 내며 `routingId`를 바꾼다. retire 신호를 `did-navigate` + `did-fail-load`(routingId 일치) 조합으로 바꿔 이 case를 포함하도록 고쳤다 — "틀렸을 때의 대가"가 우려한 시나리오가 실제로 존재했고, 대응은 이 ADR이 기록한다.)_
 
 ## 동작
 
