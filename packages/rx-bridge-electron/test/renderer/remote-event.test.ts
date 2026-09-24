@@ -244,6 +244,35 @@ describe("renderer remote Event", () => {
     expect(nextValues).toEqual(["fresh"]);
   });
 
+  test("opens a fresh generation when a complete callback subscribes again", async () => {
+    const transport = eventTransport();
+    const api = await createRendererApi<EventBridge>(transport);
+    const nextValues: string[] = [];
+
+    api.hardware.event.fault$.subscribe({
+      complete: () => {
+        api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
+      },
+    });
+    const firstId = subscriptions(transport)[0]!.subscriptionId;
+    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(message(firstId, { type: "complete", sequence: 1 }));
+
+    expect(subscriptions(transport)).toHaveLength(2);
+    const secondId = subscriptions(transport)[1]!.subscriptionId;
+    expect(secondId).not.toBe(firstId);
+    transport.emitStream(
+      message(firstId, { type: "batch", sequence: 2, values: ["late"] }),
+    );
+    transport.emitStream(
+      message(secondId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      message(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+    );
+    expect(nextValues).toEqual(["fresh"]);
+  });
+
   test("routes subscribed and a synchronous first batch through the pre-registered generation", async () => {
     const transport = eventTransport();
     const wireOrder: string[] = [];
