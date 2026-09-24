@@ -8,6 +8,7 @@ import {
   type WireRpcRequest,
 } from "../protocol/index.js";
 import { PayloadLimitError } from "../protocol/bridge-value.js";
+import { authorizeOperation, bridgeContext } from "./authorization.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import type { DocumentSession } from "./document-sessions.js";
 import { internalError, serializeError } from "./error-serializer.js";
@@ -74,12 +75,13 @@ interface SessionState {
 }
 
 /**
- * RPC 요청 1건의 수명주기 전체(등록 조회·slot부터 `authorize`·validation
- * pipeline·handler·deadline·retire·slot 반환까지)를 소유한다.
- * `create-bridge-server.ts`는 세션 해석만 맡긴다 — 이 클래스는
- * `DocumentSessions`를 모른다(`DocumentSession` 타입만 참조). "세션이
- * 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부 `session.signal`을
- * abort하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
+ * RPC 요청 1건의 수명주기 전체(등록 조회·slot부터 authorize 판정·validation
+ * pipeline·handler·deadline·retire·slot 반환까지)를 소유한다. `authorize`
+ * 호출과 예외·거부 분류는 `authorization.ts`의 공유 단계가 맡고, 이 class는
+ * 그 판정을 응답으로 번역만 한다. `create-bridge-server.ts`는 세션 해석만
+ * 맡긴다 — 이 클래스는 `DocumentSessions`를 모른다(`DocumentSession` 타입만
+ * 참조). "세션이 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부
+ * `session.signal`을 abort하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
  */
 export class RpcRequests {
   readonly #table: RegistrationTable;
@@ -142,41 +144,27 @@ export class RpcRequests {
       );
     }
     const controller = this.#begin(session, envelope.requestId, envelope.key);
-    const context: BridgeContext = {
-      requestId: envelope.requestId,
-      clientId: envelope.clientId,
-      windowRole: session.target.role,
-      sender,
-      signal: controller.signal,
-    };
+    const context = bridgeContext(session, sender, envelope, controller.signal);
     const started = performance.now();
     const work = (async (): Promise<RpcResponse> => {
       let response: RpcResponse | undefined;
       try {
-        let allowed: boolean;
-        try {
-          allowed =
-            this.#authorize === undefined
-              ? true
-              : await this.#authorize(context, registration.bridgeOperation);
-        } catch {
-          response =
-            cancelledIfAborted(controller.signal, envelope) ??
-            respond(envelope, { type: "error", error: internalError });
+        const pending = authorizeOperation(
+          this.#authorize,
+          this.#diagnostics,
+          context,
+          registration.bridgeOperation,
+        );
+        const verdict = pending instanceof Promise ? await pending : pending;
+        if (verdict.type === "cancelled") {
+          // authorizeOperation이 cancelled를 돌려준 것은 signal이 aborted라는
+          // 증거이므로 cancelledIfAborted는 항상 값을 돌려준다(CANCELLED
+          // 문구를 여기서 복제하지 않는다, ADR 0015).
+          response = cancelledIfAborted(controller.signal, envelope)!;
           return response;
         }
-        const cancelled = cancelledIfAborted(controller.signal, envelope);
-        if (cancelled !== undefined) {
-          response = cancelled;
-          return response;
-        }
-        if (!allowed) {
-          recordDiagnostic(this.#diagnostics, {
-            type: "rejected",
-            reason: "authorize-denied",
-            key: envelope.key,
-          });
-          response = error("FORBIDDEN", "Bridge operation is forbidden.");
+        if (verdict.type === "rejected") {
+          response = respond(envelope, { type: "error", error: verdict.error });
           return response;
         }
         response = await this.#runRegistered(registration, envelope, context);
