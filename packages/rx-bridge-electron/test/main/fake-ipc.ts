@@ -13,19 +13,35 @@ export const sender = (
 export class FakeTarget implements AttachedTarget {
   public readonly webContentsId: number;
   public readonly role: string;
+  // 현재 main frame의 frameId. `sender()` 기본값(10)과 맞춘다. 실제
+  // adapter(`contents.mainFrame.routingId`)처럼 탐색이 일어나면 바뀐다.
+  private mainFrameId: number;
   private readonly listeners = new Set<
     (
       reason: "main-frame-navigation" | "render-process-gone" | "destroyed",
     ) => void
   >();
 
-  public constructor(webContentsId = 1, role = "main") {
+  public constructor(webContentsId = 1, role = "main", mainFrameId = 10) {
     this.webContentsId = webContentsId;
     this.role = role;
+    this.mainFrameId = mainFrameId;
   }
 
   public isCurrentMainFrame(value: SenderIdentity): boolean {
-    return value.webContentsId === this.webContentsId && value.isMainFrame;
+    return (
+      value.webContentsId === this.webContentsId &&
+      value.isMainFrame &&
+      value.frameId === this.mainFrameId
+    );
+  }
+
+  // main frame 탐색을 흉내 낸다. Electron은 탐색 시작이 커밋보다 먼저
+  // 일어나므로(`did-start-navigation`), lifecycle 알림을 먼저 쏘고 나서
+  // 현재 main frame id를 바꾼다(ADR 0015: routingId는 retire 없이 바뀌지 않는다).
+  public replaceMainFrame(newFrameId: number): void {
+    this.fireLifecycle("main-frame-navigation");
+    this.mainFrameId = newFrameId;
   }
 
   public isAllowedOrigin(origin: string): boolean {

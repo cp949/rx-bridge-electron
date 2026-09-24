@@ -76,8 +76,9 @@ function setup(options: {
       ? {}
       : { resourceLimits: options.resourceLimits }),
   });
-  server.attach(new FakeTarget());
-  return { server, diagnostics };
+  const target = new FakeTarget();
+  server.attach(target);
+  return { server, diagnostics, target };
 }
 
 const rpcRequest = (
@@ -479,5 +480,57 @@ describe("rejected diagnostic reasons", () => {
     await server.controlStream(sender(), subscribeCommand(), send);
     await server.controlStream(sender(), subscribeCommand(), send);
     expect(rejections(diagnostics)).toEqual([]);
+  });
+});
+
+// frame 교체(같은 webContentsId, 다른 frameId — 예: 페이지 탐색)를
+// characterization으로 고정한다. 옛 clientId는 탐색으로 즉시 retire되어
+// 그 자체로 거부되므로, frame 검사만 관측하려면 새 clientId를 써야 한다.
+// 지금은 두 사유 모두 `sender-unauthorized`다 — DELTA-02에서 frame 불일치가
+// `frame-not-main`으로 분리된다(이 test의 기대값도 그때 함께 바뀐다).
+describe("frame replacement (characterization)", () => {
+  test("frame 교체 뒤 옛 frameId로 새 clientId를 보내면 거부된다", async () => {
+    const handler = vi.fn(async (input: { readonly id: string }) => input);
+    const { server, diagnostics, target } = setup({ handler });
+    const first = await server.dispatchRpc(sender(), rpcRequest());
+    expect(first).toMatchObject({ type: "success" });
+
+    target.replaceMainFrame(11);
+
+    const second = await server.dispatchRpc(
+      sender({ frameId: 10 }),
+      rpcRequest({ clientId: "document-2", requestId: "request-2" }),
+    );
+    expect(second).toEqual({
+      protocolVersion: 1,
+      clientId: "document-2",
+      requestId: "request-2",
+      type: "error",
+      error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
+    });
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  test("frame 교체 뒤 새 frameId의 새 clientId는 세션을 연다", async () => {
+    const handler = vi.fn(async (input: { readonly id: string }) => input);
+    const { server, diagnostics, target } = setup({ handler });
+    await server.dispatchRpc(sender(), rpcRequest());
+
+    target.replaceMainFrame(11);
+
+    const second = await server.dispatchRpc(
+      sender({ frameId: 11 }),
+      rpcRequest({ clientId: "document-2", requestId: "request-2" }),
+    );
+    expect(second).toMatchObject({ type: "success" });
+    expect(rejections(diagnostics)).toEqual([]);
+    expect(handler).toHaveBeenCalledTimes(2);
+    const sessionOpenedCount = diagnostics.record.mock.calls.filter(
+      ([event]) => event.type === "session-opened",
+    ).length;
+    expect(sessionOpenedCount).toBe(2);
   });
 });
