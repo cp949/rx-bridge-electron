@@ -8,7 +8,10 @@
 // descriptor 경로와 같은 동작을 내는지가 핵심이다.
 import { describe, expect, test } from "vitest";
 
-import { createBridgeServer, type BridgeDiagnostic } from "../../src/main/index.js";
+import {
+  createBridgeServer,
+  type BridgeDiagnostic,
+} from "../../src/main/index.js";
 import type { StreamMessage } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
 import { buildAppBridgeImpl, errors, schemas } from "./impl-schemas-fixture.js";

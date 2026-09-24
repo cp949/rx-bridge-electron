@@ -138,7 +138,9 @@ test("BridgeImpl: 올바른 구현은 그대로 대입된다(정상 케이스)",
           return { bytesWritten: input.command.length };
         },
       },
-      state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+      state: {
+        connection: currentValueSource(new BehaviorSubject({ ok: true })),
+      },
       event: { data: broadcastEvent(new Subject<SerialLine>()) },
     },
     nested: {
@@ -158,7 +160,9 @@ test("BridgeImpl: BridgeValue로 넓게 선언한 handler도 반환 타입만 �
   const implementation: BridgeImpl<AppBridge> = {
     device: {
       rpc: { connect: () => ({ ok: true }), send: wideSendHandler },
-      state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+      state: {
+        connection: currentValueSource(new BehaviorSubject({ ok: true })),
+      },
       event: { data: broadcastEvent(new Subject<SerialLine>()) },
     },
     nested: { inner: { rpc: { ping: () => ({ ok: true }) } } },

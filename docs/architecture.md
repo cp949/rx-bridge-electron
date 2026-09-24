@@ -8,12 +8,12 @@
 
 ## 패키지 경계
 
-| 진입점                               | 실행 위치     | 책임                                                  |
-| ------------------------------------ | ------------- | ----------------------------------------------------- |
+| 진입점                               | 실행 위치     | 책임                                                                           |
+| ------------------------------------ | ------------- | ------------------------------------------------------------------------------ |
 | `@cp949/rx-bridge-electron/contract` | 모든 프로세스 | 계약 타입에서 파생하는 타입(`BridgeApi`/`BridgeImpl`/`SchemasFor`/`ErrorsFor`) |
-| `@cp949/rx-bridge-electron/main`     | Electron Main | 서버 생성, 핸들러 등록, 권한 확인, 검증, 세션 및 스트림 관리 |
-| `@cp949/rx-bridge-electron/preload`  | preload       | 고정 IPC 채널 어댑터와 `contextBridge` 노출           |
-| `@cp949/rx-bridge-electron/renderer` | Renderer      | 비동기 API, RPC 클라이언트, `RemoteState`, RxJS Event |
+| `@cp949/rx-bridge-electron/main`     | Electron Main | 서버 생성, 핸들러 등록, 권한 확인, 검증, 세션 및 스트림 관리                   |
+| `@cp949/rx-bridge-electron/preload`  | preload       | 고정 IPC 채널 어댑터와 `contextBridge` 노출                                    |
+| `@cp949/rx-bridge-electron/renderer` | Renderer      | 비동기 API, RPC 클라이언트, `RemoteState`, RxJS Event                          |
 
 계약은 런타임 값이 아니라 순수 TS 타입 `B`다. handler, Electron 객체, 자격증명, Node API, 함수, Observable/Subject는 preload 경계를 건너지 않는다. Renderer에는 고정된 `BridgeTransport`만 노출하며 `ipcRenderer`, 임의 채널, raw Electron event를 공개하지 않는다.
 

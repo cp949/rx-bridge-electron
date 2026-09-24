@@ -1,4 +1,7 @@
-import { broadcastEvent, currentValueSource } from "@cp949/rx-bridge-electron/main";
+import {
+  broadcastEvent,
+  currentValueSource,
+} from "@cp949/rx-bridge-electron/main";
 import type { BridgeImpl } from "@cp949/rx-bridge-electron/contract";
 import type { AppBridge } from "../bridge/contract.js";
 import type { Device } from "./virtual-device.js";

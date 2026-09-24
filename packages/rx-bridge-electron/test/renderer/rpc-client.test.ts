@@ -14,9 +14,9 @@ import { FakeTransport, deferred } from "./fake-transport.js";
 interface AppBridge {
   readonly hardware: {
     readonly rpc: {
-      connect(input: {
-        readonly deviceId: string;
-      }): { readonly connected: boolean };
+      connect(input: { readonly deviceId: string }): {
+        readonly connected: boolean;
+      };
     };
   };
 }

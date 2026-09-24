@@ -171,9 +171,7 @@ export interface EventRegistrationEntry {
 }
 
 export type RegistrationEntry =
-  | RpcRegistrationEntry
-  | StateRegistrationEntry
-  | EventRegistrationEntry;
+  RpcRegistrationEntry | StateRegistrationEntry | EventRegistrationEntry;
 
 export interface RegistrationTable {
   readonly rpc: ReadonlyMap<string, RpcRegistrationEntry>;
@@ -189,12 +187,16 @@ export interface RegistrationTable {
  */
 function manifestCategoryList(
   category: "rpc" | "state" | "event",
-  entries: ReadonlyMap<string, { readonly domainName: string; readonly operation: string }>,
+  entries: ReadonlyMap<
+    string,
+    { readonly domainName: string; readonly operation: string }
+  >,
 ): readonly string[] {
   const byDomain = new Map<string, string[]>();
   for (const entry of entries.values()) {
     const operations = byDomain.get(entry.domainName);
-    if (operations === undefined) byDomain.set(entry.domainName, [entry.operation]);
+    if (operations === undefined)
+      byDomain.set(entry.domainName, [entry.operation]);
     else operations.push(entry.operation);
   }
   const list: string[] = [];
@@ -257,7 +259,10 @@ function asOptionalRecord(
 function readRpcSchemaEntry(
   value: unknown,
   path: string,
-): { readonly input?: Schema<BridgeValue>; readonly output?: Schema<BridgeValue> } {
+): {
+  readonly input?: Schema<BridgeValue>;
+  readonly output?: Schema<BridgeValue>;
+} {
   if (value === undefined) return {};
   if (value === null || typeof value !== "object") {
     throw new TypeError(`Schema entry for 'rpc:${path}' must be an object.`);
@@ -336,7 +341,10 @@ function walkImplNode(
         if (typeof value !== "function") {
           throw new TypeError(`RPC handler '${path}' must be a function.`);
         }
-        const schemaEntry = readRpcSchemaEntry(categorySchemas?.[operation], path);
+        const schemaEntry = readRpcSchemaEntry(
+          categorySchemas?.[operation],
+          path,
+        );
         const declaredErrors = categoryErrors?.[operation];
         if (declaredErrors !== undefined && !Array.isArray(declaredErrors)) {
           throw new TypeError(
@@ -349,22 +357,27 @@ function walkImplNode(
           operation,
           path: [domainName, operation],
           handler: value as RpcHandler,
-          ...(schemaEntry.input === undefined ? {} : { input: schemaEntry.input }),
+          ...(schemaEntry.input === undefined
+            ? {}
+            : { input: schemaEntry.input }),
           ...(schemaEntry.output === undefined
             ? {}
             : { output: schemaEntry.output }),
-          errors: Object.freeze([...(declaredErrors ?? [])]) as readonly string[],
+          errors: Object.freeze([
+            ...(declaredErrors ?? []),
+          ]) as readonly string[],
         });
       } else if (category === "state") {
         if (
           !(value instanceof Observable) ||
           typeof (value as { getValue?: unknown }).getValue !== "function"
         ) {
-          throw new TypeError(`State source '${path}' must have a current value.`);
+          throw new TypeError(
+            `State source '${path}' must have a current value.`,
+          );
         }
         const stateOutput = categorySchemas?.[operation] as
-          | Schema<BridgeValue>
-          | undefined;
+          Schema<BridgeValue> | undefined;
         stateTable.set(path, {
           kind: "state",
           domainName,
@@ -393,8 +406,7 @@ function walkImplNode(
             ? DEFAULT_EVENT_BUFFER
             : (source.buffer ?? DEFAULT_EVENT_BUFFER);
         const eventOutput = categorySchemas?.[operation] as
-          | Schema<BridgeValue>
-          | undefined;
+          Schema<BridgeValue> | undefined;
         eventTable.set(path, {
           kind: "event",
           domainName,
@@ -456,7 +468,12 @@ function assertNoExtraOptionPaths(
       }
       continue;
     }
-    assertNoExtraOptionPaths(record[key], [...domainSegments, key], label, hasPath);
+    assertNoExtraOptionPaths(
+      record[key],
+      [...domainSegments, key],
+      label,
+      hasPath,
+    );
   }
 }
 

@@ -4,12 +4,12 @@
 
 ## 진입점과 프로세스 경계
 
-| 진입점                               | 실행 위치     | 책임                                                                     |
-| ------------------------------------ | ------------- | ------------------------------------------------------------------------ |
+| 진입점                               | 실행 위치     | 책임                                                                           |
+| ------------------------------------ | ------------- | ------------------------------------------------------------------------------ |
 | `@cp949/rx-bridge-electron/contract` | 모든 프로세스 | 계약 타입에서 파생하는 타입(`BridgeApi`/`BridgeImpl`/`SchemasFor`/`ErrorsFor`) |
-| `@cp949/rx-bridge-electron/main`     | Main          | 서버 생성, 핸들러 연결, 권한 확인, 검증, 세션, 진단 정보                 |
-| `@cp949/rx-bridge-electron/preload`  | preload       | `contextBridge`로 노출하는 고정 Electron 채널 어댑터                     |
-| `@cp949/rx-bridge-electron/renderer` | renderer      | 비동기 Proxy, RPC 클라이언트, `RemoteState`, RxJS Event                  |
+| `@cp949/rx-bridge-electron/main`     | Main          | 서버 생성, 핸들러 연결, 권한 확인, 검증, 세션, 진단 정보                       |
+| `@cp949/rx-bridge-electron/preload`  | preload       | `contextBridge`로 노출하는 고정 Electron 채널 어댑터                           |
+| `@cp949/rx-bridge-electron/renderer` | renderer      | 비동기 Proxy, RPC 클라이언트, `RemoteState`, RxJS Event                        |
 
 계약은 런타임 값이 아니라 순수 TS 타입입니다. 핸들러, Electron 객체, 자격 증명, Node API, 함수, `Observable`, `Subject`는 preload 경계를 넘지 않습니다. Renderer 애플리케이션 코드는 동결된 `BridgeTransport`만 받으며 `ipcRenderer`, `send`, `invoke`, 채널 이름 또는 원시 Electron 이벤트에는 접근할 수 없습니다.
 
@@ -31,10 +31,12 @@ Install the package and its peer dependencies with npm. The source repository is
 
 ```ts
 // bridge/contract.ts — 공유 선언만 둡니다.
-export type AppBridge = { device: {
-  rpc: { connect(): { readonly connected: boolean } };
-  state: { connection: { readonly connected: boolean } };
-} };
+export type AppBridge = {
+  device: {
+    rpc: { connect(): { readonly connected: boolean } };
+    state: { connection: { readonly connected: boolean } };
+  };
+};
 ```
 
 ```ts

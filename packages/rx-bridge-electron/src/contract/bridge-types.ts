@@ -35,16 +35,17 @@ type CategoryKey = "rpc" | "state" | "event";
  * 추출해 Renderer용 함수 타입으로 바꾼다. 인자가 없으면 `Args`가 `[]`, 하나면
  * `[I]`. 인자가 둘 이상인 다중 인자 RPC는 범위 밖이라 `never`가 된다.
  */
-type RpcApiOperation<Method> =
-  Method extends (...args: infer Args) => infer Output
-    ? Args extends []
-      ? () => Promise<BridgeValueOrNever<Output>>
-      : Args extends [infer Input]
-        ? (
-            input: BridgeValueOrNever<Input>,
-          ) => Promise<BridgeValueOrNever<Output>>
-        : never
-    : never;
+type RpcApiOperation<Method> = Method extends (
+  ...args: infer Args
+) => infer Output
+  ? Args extends []
+    ? () => Promise<BridgeValueOrNever<Output>>
+    : Args extends [infer Input]
+      ? (
+          input: BridgeValueOrNever<Input>,
+        ) => Promise<BridgeValueOrNever<Output>>
+      : never
+  : never;
 
 /**
  * RPC operation 시그니처에서 Main이 구현해야 하는 handler 타입을 만든다.
@@ -54,39 +55,39 @@ type RpcApiOperation<Method> =
  * 선언한 매개변수 수가 적어도 대입 가능하므로, context가 필요 없는 구현은
  * `() => O`만 써도 된다.
  */
-type RpcImplOperation<Method> =
-  Method extends (...args: infer Args) => infer Output
-    ? Args extends []
+type RpcImplOperation<Method> = Method extends (
+  ...args: infer Args
+) => infer Output
+  ? Args extends []
+    ? (
+        input: undefined,
+        context: BridgeContext,
+      ) => BridgeValueOrNever<Output> | Promise<BridgeValueOrNever<Output>>
+    : Args extends [infer Input]
       ? (
-          input: undefined,
+          input: BridgeValueOrNever<Input>,
           context: BridgeContext,
         ) => BridgeValueOrNever<Output> | Promise<BridgeValueOrNever<Output>>
-      : Args extends [infer Input]
-        ? (
-            input: BridgeValueOrNever<Input>,
-            context: BridgeContext,
-          ) =>
-            | BridgeValueOrNever<Output>
-            | Promise<BridgeValueOrNever<Output>>
-        : never
-    : never;
+      : never
+  : never;
 
 /**
  * RPC operation 시그니처에서 `options.schemas`에 올 수 있는 부분 항목
  * (`{ input?, output? }`)을 만든다. 입력이 없는 RPC는 `input` 자체를 두지
  * 않는다.
  */
-type SchemasForOperation<Method> =
-  Method extends (...args: infer Args) => infer Output
-    ? Args extends []
-      ? { readonly output?: Schema<BridgeValueOrNever<Output>> }
-      : Args extends [infer Input]
-        ? {
-            readonly input?: Schema<BridgeValueOrNever<Input>>;
-            readonly output?: Schema<BridgeValueOrNever<Output>>;
-          }
-        : never
-    : never;
+type SchemasForOperation<Method> = Method extends (
+  ...args: infer Args
+) => infer Output
+  ? Args extends []
+    ? { readonly output?: Schema<BridgeValueOrNever<Output>> }
+    : Args extends [infer Input]
+      ? {
+          readonly input?: Schema<BridgeValueOrNever<Input>>;
+          readonly output?: Schema<BridgeValueOrNever<Output>>;
+        }
+      : never
+  : never;
 
 /**
  * 계약 노드(도메인 또는 그 하위 네임스페이스)를 Renderer 공개 타입으로
@@ -220,9 +221,7 @@ type ErrorsForNode<Node> = (Node extends { readonly rpc: infer Rpc }
       };
     }
   : unknown) & {
-  readonly [Key in Exclude<keyof Node, CategoryKey>]?: ErrorsForNode<
-    Node[Key]
-  >;
+  readonly [Key in Exclude<keyof Node, CategoryKey>]?: ErrorsForNode<Node[Key]>;
 };
 
 /** `createBridgeServer`의 `options.errors` 타입. */

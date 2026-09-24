@@ -17,7 +17,11 @@ import type {
   StateRegistrationEntry,
 } from "./registration.js";
 import type { EventSource, ScopedEventSource } from "./sources.js";
-import type { BridgeContext, DiagnosticsSink, SenderIdentity } from "./types.js";
+import type {
+  BridgeContext,
+  DiagnosticsSink,
+  SenderIdentity,
+} from "./types.js";
 
 export type StreamSender = (message: StreamMessage) => void;
 
@@ -80,9 +84,15 @@ export class StreamHub {
     this.#limits = limits;
     this.#diagnostics = diagnostics;
     for (const entry of table.state.values())
-      this.#registrations.set(`state:${entry.domainName}/${entry.operation}`, entry);
+      this.#registrations.set(
+        `state:${entry.domainName}/${entry.operation}`,
+        entry,
+      );
     for (const entry of table.event.values())
-      this.#registrations.set(`event:${entry.domainName}/${entry.operation}`, entry);
+      this.#registrations.set(
+        `event:${entry.domainName}/${entry.operation}`,
+        entry,
+      );
   }
 
   public isRegistered(key: string): boolean {

@@ -10,7 +10,10 @@ import { PayloadLimitError } from "../protocol/bridge-value.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
-import type { RegistrationTable, RpcRegistrationEntry } from "./registration.js";
+import type {
+  RegistrationTable,
+  RpcRegistrationEntry,
+} from "./registration.js";
 import type { BridgeContext, DiagnosticsSink } from "./types.js";
 
 export function findRpc(
@@ -72,7 +75,10 @@ export async function dispatchRegistered(
   }
   let input: BridgeValue;
   try {
-    input = registration.input === undefined ? parsed : registration.input.parse(parsed);
+    input =
+      registration.input === undefined
+        ? parsed
+        : registration.input.parse(parsed);
   } catch {
     if (context.signal.aborted)
       return respond({

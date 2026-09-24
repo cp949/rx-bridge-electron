@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import type { BridgeImpl, ErrorsFor, SchemasFor } from "../../src/contract/index.js";
+import type {
+  BridgeImpl,
+  ErrorsFor,
+  SchemasFor,
+} from "../../src/contract/index.js";
 import {
   createBridgeServer,
   type WireRpcRequest,
@@ -76,7 +80,9 @@ function setup(options: {
     schemas,
     errors,
     diagnostics,
-    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    ...(options.authorize === undefined
+      ? {}
+      : { authorize: options.authorize }),
     ...(options.resourceLimits === undefined
       ? {}
       : { resourceLimits: options.resourceLimits }),

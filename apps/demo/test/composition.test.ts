@@ -53,11 +53,7 @@ describe("demo composition", () => {
           "state:device/temperature",
           "state:relay/status",
         ],
-        event: [
-          "event:device/data",
-          "event:device/error",
-          "event:relay/fault",
-        ],
+        event: ["event:device/data", "event:device/error", "event:relay/fault"],
       });
     } finally {
       composition.dispose();

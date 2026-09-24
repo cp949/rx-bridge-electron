@@ -65,13 +65,13 @@ iframecall은 계약을 TS 타입 하나로 두고 payload를 structured clone�
 
 ## RD 분할
 
-| RD | 내용 | 의존 |
-|---|---|---|
-| RD-010 | 결정 문서화: 신규 ADR(타입 계약, 선택 스키마 map), ADR 0004 개정, ADR 0008 대체 | - |
-| RD-011 | 타입 계약과 `createBridgeServer<AppBridge>(impl)`, impl 기반 manifest, source buffer 옵션, `errors` 옵션 | RD-010 |
-| RD-012 | `schemas` map: `SchemasFor`, 평탄화 조회, dispatcher·stream-hub 적용 | RD-011 |
-| RD-013 | 기존 descriptor API 제거, demo·fixture·README 이전, 스키마 `main/` 이동, 코드량 목표 확인 | RD-011, RD-012 |
-| RD-014 | 배선 코드 축약(bind, attach, preload, Renderer 초기화). 착수 전 별도 그릴링 | RD-013 |
+| RD     | 내용                                                                                                     | 의존           |
+| ------ | -------------------------------------------------------------------------------------------------------- | -------------- |
+| RD-010 | 결정 문서화: 신규 ADR(타입 계약, 선택 스키마 map), ADR 0004 개정, ADR 0008 대체                          | -              |
+| RD-011 | 타입 계약과 `createBridgeServer<AppBridge>(impl)`, impl 기반 manifest, source buffer 옵션, `errors` 옵션 | RD-010         |
+| RD-012 | `schemas` map: `SchemasFor`, 평탄화 조회, dispatcher·stream-hub 적용                                     | RD-011         |
+| RD-013 | 기존 descriptor API 제거, demo·fixture·README 이전, 스키마 `main/` 이동, 코드량 목표 확인                | RD-011, RD-012 |
+| RD-014 | 배선 코드 축약(bind, attach, preload, Renderer 초기화). 착수 전 별도 그릴링                              | RD-013         |
 
 RD-012를 RD-013보다 먼저 둔다. 스키마 계층 없이 기존 API를 제거하면 demo가 검증을 잃는다.
 

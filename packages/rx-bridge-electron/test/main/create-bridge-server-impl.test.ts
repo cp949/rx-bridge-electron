@@ -235,7 +235,11 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
       { prototype: { rpc: { x: () => 1 } } },
       /reserved/i,
     ],
-    ["reserved 'dispose' segment", { dispose: { rpc: { x: () => 1 } } }, /reserved/i],
+    [
+      "reserved 'dispose' segment",
+      { dispose: { rpc: { x: () => 1 } } },
+      /reserved/i,
+    ],
     [
       "reserved 'dispose' segment nested",
       { "dispose/x": { rpc: { x: () => 1 } } },
@@ -256,9 +260,12 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
       { "device/event/log": { rpc: { x: () => 1 } } },
       /reserved/i,
     ],
-  ] as const)("%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)", (_label, impl, pattern) => {
-    expect(() => createBridgeServer(impl)).toThrow(pattern);
-  });
+  ] as const)(
+    "%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)",
+    (_label, impl, pattern) => {
+      expect(() => createBridgeServer(impl)).toThrow(pattern);
+    },
+  );
 
   test("카테고리 이름을 operation 이름으로 쓰는 것은 허용된다(DELTA-07: contract.test.ts의 'allows category names as operation names'에서 옮김)", () => {
     expect(() =>
@@ -346,7 +353,9 @@ describe("createBridgeServer(impl, options): schemas/errors 옵션 배선", () =
             });
           },
         },
-        state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+        state: {
+          connection: currentValueSource(new BehaviorSubject({ ok: true })),
+        },
         event: { data: broadcastEvent(new Subject<SerialLine>()) },
       },
     };
@@ -434,7 +443,9 @@ describe("createBridgeServer(impl, options): 세션 자원 한도", () => {
               resolvers.push(resolve);
             }),
         },
-        state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+        state: {
+          connection: currentValueSource(new BehaviorSubject({ ok: true })),
+        },
         event: { data: broadcastEvent(new Subject<SerialLine>()) },
       },
     };
@@ -468,8 +479,13 @@ describe("createBridgeServer(impl, options): event buffer 옵션", () => {
     const records: BridgeDiagnostic[] = [];
     const impl: BridgeImpl<AppBridge> = {
       device: {
-        rpc: { connect: () => ({ ok: true }), send: async (input) => ({ bytesWritten: input.command.length }) },
-        state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+        rpc: {
+          connect: () => ({ ok: true }),
+          send: async (input) => ({ bytesWritten: input.command.length }),
+        },
+        state: {
+          connection: currentValueSource(new BehaviorSubject({ ok: true })),
+        },
         event: { data: broadcastEvent(events) },
       },
     };
@@ -489,9 +505,12 @@ describe("createBridgeServer(impl, options): event buffer 옵션", () => {
       },
       (message) => messages.push(message),
     );
-    for (let index = 0; index < 5; index += 1) events.next({ text: `line-${index}` });
+    for (let index = 0; index < 5; index += 1)
+      events.next({ text: `line-${index}` });
 
-    expect(records.filter((record) => record.type === "stream-dropped")).toHaveLength(0);
+    expect(
+      records.filter((record) => record.type === "stream-dropped"),
+    ).toHaveLength(0);
   });
 
   test("buffer 옵션으로 낮춘 capacity는 ack 없이 이어지는 이벤트에서 곧바로 overflow를 기록한다", () => {
@@ -499,10 +518,17 @@ describe("createBridgeServer(impl, options): event buffer 옵션", () => {
     const records: BridgeDiagnostic[] = [];
     const impl: BridgeImpl<AppBridge> = {
       device: {
-        rpc: { connect: () => ({ ok: true }), send: async (input) => ({ bytesWritten: input.command.length }) },
-        state: { connection: currentValueSource(new BehaviorSubject({ ok: true })) },
+        rpc: {
+          connect: () => ({ ok: true }),
+          send: async (input) => ({ bytesWritten: input.command.length }),
+        },
+        state: {
+          connection: currentValueSource(new BehaviorSubject({ ok: true })),
+        },
         event: {
-          data: broadcastEvent(events, { buffer: { capacity: 1, overflow: "error" } }),
+          data: broadcastEvent(events, {
+            buffer: { capacity: 1, overflow: "error" },
+          }),
         },
       },
     };
@@ -528,7 +554,9 @@ describe("createBridgeServer(impl, options): event buffer 옵션", () => {
     events.next({ text: "b" });
     events.next({ text: "c" });
 
-    expect(records.filter((record) => record.type === "stream-dropped")).toHaveLength(1);
+    expect(
+      records.filter((record) => record.type === "stream-dropped"),
+    ).toHaveLength(1);
   });
 
   test("event() 규칙과 같은 capacity 검증을 broadcastEvent에도 적용한다", () => {

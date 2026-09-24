@@ -88,7 +88,9 @@ function harness(
   };
   const server: StreamBridgeServer = createBridgeServer(impl, {
     diagnostics: { record: (record) => records.push(record) },
-    ...(options.authorize === undefined ? {} : { authorize: options.authorize }),
+    ...(options.authorize === undefined
+      ? {}
+      : { authorize: options.authorize }),
     ...(options.resourceLimits === undefined
       ? {}
       : { resourceLimits: options.resourceLimits }),

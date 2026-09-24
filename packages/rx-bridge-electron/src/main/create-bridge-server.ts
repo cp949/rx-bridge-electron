@@ -2,7 +2,11 @@
 // tsup의 dts 번들러가 `contract`/`main` 두 entry가 같은 파일을 서로 다른
 // chunk에서 참조한다고 보고 순환 chunk 경고를 낸다 — 타입 전용 import라
 // 런타임 순환은 없지만, 경고 자체를 없애기 위해 원본 모듈을 직접 가리킨다).
-import type { BridgeImpl, ErrorsFor, SchemasFor } from "../contract/bridge-types.js";
+import type {
+  BridgeImpl,
+  ErrorsFor,
+  SchemasFor,
+} from "../contract/bridge-types.js";
 import type {
   HandshakeResponse,
   PayloadLimits,
