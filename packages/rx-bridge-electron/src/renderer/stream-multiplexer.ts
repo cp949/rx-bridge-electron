@@ -75,6 +75,11 @@ export class StreamMultiplexer implements Disposable {
       type: "subscription-opened",
       key,
     });
+    // sink가 `dispose`를 재진입시켰으면 generation은 이미 닫혔다(unsubscribe
+    // 전송 완료). 여기서 subscribe를 보내면 Main 구독이 남는다.
+    if (this.#generations.get(subscriptionId) !== generation) {
+      return;
+    }
 
     try {
       this.#transport.control({ type: "subscribe", subscriptionId, key });

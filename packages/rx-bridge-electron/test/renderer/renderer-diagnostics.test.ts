@@ -193,6 +193,61 @@ describe("sink exception isolation (ADR 0022 결정 11)", () => {
     });
   });
 
+  test("a throwing sink does not change RPC results", async () => {
+    const transport = new FakeTransport();
+    const api = await createRendererApi<AppBridge>({
+      transport,
+      diagnostics: {
+        record() {
+          throw new Error("sink boom");
+        },
+      },
+    });
+
+    const okPromise = api.hardware.rpc.connect({ deviceId: "d1" });
+    transport.resolveInvocation(
+      0,
+      success(transport.invocations[0]!.requestId),
+    );
+    await expect(okPromise).resolves.toEqual({ connected: true });
+
+    await expect(
+      api.hardware.rpc.connect({ deviceId: "d1" }, { timeoutMs: -1 }),
+    ).rejects.toMatchObject({ code: "INVALID_ARGUMENT" });
+  });
+
+  test("a throwing sink does not change subscription delivery or cleanup", async () => {
+    const transport = streamTransport();
+    const api = await createRendererApi<StreamBridge>({
+      transport,
+      diagnostics: {
+        record() {
+          throw new Error("sink boom");
+        },
+      },
+    });
+
+    const values: string[] = [];
+    const subscription = api.hardware.event.fault$.subscribe((value) => {
+      values.push(value);
+    });
+    const id = subscriptions(transport)[0]!.subscriptionId;
+    transport.emitStream(
+      streamMessage(id, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(id, { type: "batch", sequence: 1, values: ["overheat"] }),
+    );
+    subscription.unsubscribe();
+
+    expect(values).toEqual(["overheat"]);
+    expect(transport.controls.map((command) => command.type)).toEqual([
+      "subscribe",
+      "acknowledge",
+      "unsubscribe",
+    ]);
+  });
+
   test("without a sink, createRendererApi stays silent on the console", async () => {
     const transport = new FakeTransport();
     transport.handshake = Promise.reject(new Error("boom"));
@@ -647,6 +702,43 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
     api.hardware.event.fault$.subscribe(() => {});
     api.dispose();
 
+    expect(events).toEqual([
+      { type: "subscription-opened", key: "event:hardware/fault$" },
+      {
+        type: "subscription-closed",
+        key: "event:hardware/fault$",
+        cause: "disposed",
+      },
+    ]);
+  });
+
+  test("does not send subscribe when the sink disposes the API inside subscription-opened", async () => {
+    const transport = streamTransport();
+    const events: RendererDiagnostic[] = [];
+    let api: Awaited<ReturnType<typeof createRendererApi<StreamBridge>>>;
+    api = await createRendererApi<StreamBridge>({
+      transport,
+      diagnostics: {
+        record(event) {
+          events.push(event);
+          if (event.type === "subscription-opened") {
+            api.dispose();
+          }
+        },
+      },
+    });
+
+    let completed = false;
+    api.hardware.event.fault$.subscribe({
+      complete: () => {
+        completed = true;
+      },
+    });
+
+    expect(transport.controls.map((command) => command.type)).toEqual([
+      "unsubscribe",
+    ]);
+    expect(completed).toBe(true);
     expect(events).toEqual([
       { type: "subscription-opened", key: "event:hardware/fault$" },
       {
