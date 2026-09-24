@@ -918,6 +918,103 @@ describe("Main stream lifecycle and ordering", () => {
       expect.objectContaining({ type: "validation-failed" }),
     );
   });
+
+  test("unsubscribe during pending authorization silences a later deny", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const source = new Subject<number>();
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      { hardware: { event: { change$: broadcastEvent(source) } } },
+      { authorize: () => authorization, diagnostics },
+    );
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+    };
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    await server.controlStream(
+      sender(),
+      command("unsubscribe", testSubscriptionId(1)),
+      send,
+    );
+    allow(false);
+    await pending;
+    expect(messages).toEqual([]);
+    const rejections = diagnostics.record.mock.calls
+      .map(([event]) => event as { type: string })
+      .filter((event) => event.type === "rejected");
+    expect(rejections).toEqual([]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("detach during pending authorization silences a later authorize exception", async () => {
+    let fail!: (cause: unknown) => void;
+    const authorization = new Promise<boolean>((_resolve, reject) => {
+      fail = reject;
+    });
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      {
+        hardware: { event: { change$: broadcastEvent(new Subject<number>()) } },
+      },
+      { authorize: () => authorization, diagnostics },
+    );
+    const detach = server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => messages.push(message),
+    );
+    detach();
+    fail(new Error("authorize boom"));
+    await pending;
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    const rejections = diagnostics.record.mock.calls
+      .map(([event]) => event as { type: string })
+      .filter((event) => event.type === "rejected");
+    expect(rejections).toEqual([]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("subscribing without an authorize option delivers subscribed synchronously", async () => {
+    const { server } = harness();
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+    };
+    const pending = server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    expect(messages[0]).toMatchObject({ type: "subscribed", sequence: 0 });
+    await pending;
+  });
 });
 
 describe("Main stream terminal notify on retire", () => {
@@ -1308,5 +1405,49 @@ describe("Main stream terminal notify on retire", () => {
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("detach from the diagnostics sink during an authorize-denied rejection answers with CANCELLED", async () => {
+    const source = new BehaviorSubject(1);
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      { hardware: { state: { current$: currentValueSource(source) } } },
+      { authorize: () => false, diagnostics },
+    );
+    const detach = server.attach(new FakeTarget());
+    diagnostics.record.mockImplementation(
+      (event: { type: string; reason?: string }) => {
+        if (event.type === "rejected" && event.reason === "authorize-denied")
+          detach();
+      },
+    );
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+    };
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      sequence: 1,
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    const rejections = diagnostics.record.mock.calls
+      .map(([event]) => event as { type: string })
+      .filter((event) => event.type === "rejected");
+    expect(rejections).toEqual([
+      {
+        type: "rejected",
+        reason: "authorize-denied",
+        key: "state:hardware/current$",
+      },
+    ]);
   });
 });

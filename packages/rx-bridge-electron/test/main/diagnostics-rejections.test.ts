@@ -77,8 +77,8 @@ function setup(options: {
       : { resourceLimits: options.resourceLimits }),
   });
   const target = new FakeTarget();
-  server.attach(target);
-  return { server, diagnostics, target };
+  const detach = server.attach(target);
+  return { server, diagnostics, target, detach };
 }
 
 const rpcRequest = (
@@ -172,6 +172,37 @@ describe("rejected diagnostic reasons", () => {
         reason: "authorize-denied",
         key: "rpc:hardware/connect",
       },
+    ]);
+  });
+
+  test("RPC sink re-entrance: detach during an authorize-denied diagnostic still settles FORBIDDEN", async () => {
+    const { server, diagnostics, detach } = setup({ authorize: () => false });
+    diagnostics.record.mockImplementation(
+      (event: { type: string; reason?: string }) => {
+        if (event.type === "rejected" && event.reason === "authorize-denied")
+          detach();
+      },
+    );
+    const response = await server.dispatchRpc(sender(), rpcRequest());
+    expect(response).toMatchObject({
+      type: "error",
+      error: {
+        code: "FORBIDDEN",
+        message: "Bridge operation is forbidden.",
+      },
+    });
+    expect(
+      diagnostics.record.mock.calls.map(([event]) => [
+        event.type,
+        "reason" in event ? event.reason : undefined,
+        "outcome" in event ? event.outcome : undefined,
+      ]),
+    ).toEqual([
+      ["session-opened", undefined, undefined],
+      ["rejected", "authorize-denied", undefined],
+      ["session-closed", undefined, undefined],
+      ["rpc-cancelled", undefined, undefined],
+      ["rpc-finished", undefined, "error"],
     ]);
   });
 

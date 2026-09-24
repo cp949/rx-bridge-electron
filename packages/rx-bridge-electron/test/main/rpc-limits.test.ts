@@ -413,6 +413,46 @@ describe("RPC authorize 예외", () => {
     });
   });
 
+  test("취소된 뒤 authorize가 false를 반환해도 CANCELLED가 우선한다", async () => {
+    let allow!: (value: boolean) => void;
+    const authorize = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          allow = resolve;
+        }),
+    );
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const { server } = setup({ authorize, diagnostics });
+    const p1 = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(authorize).toHaveBeenCalledOnce());
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    allow(false);
+    await expect(p1).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    const rejections = diagnostics.record.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "rejected");
+    expect(rejections).toEqual([]);
+    const cancelled = diagnostics.record.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "rpc-cancelled");
+    expect(cancelled).toHaveLength(1);
+  });
+
+  test("authorize 옵션 없이 요청하면 같은 tick 안에서 handler가 호출된다", async () => {
+    const handler = vi.fn(async () => undefined);
+    const { server } = setup({ handler });
+    const pending = server.dispatchRpc(sender(), request());
+    expect(handler).toHaveBeenCalledOnce();
+    await pending;
+  });
+
   test("authorize 예외 뒤 RPC 슬롯이 반환된다", async () => {
     let calls = 0;
     const { server } = setup({
