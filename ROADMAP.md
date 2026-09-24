@@ -110,6 +110,26 @@
 
 - [x] **RD-028 — Renderer가 진단 이벤트로 RPC 확정 원인·구독 종료 원인·메시지 폐기·전송 실패를 관측 가능하게 한다.** 지금 Main만 `DiagnosticsSink`가 있고([ADR 0010](docs/adr/0010-operational-diagnostics.md)), Renderer의 `RpcClient`·`StreamMultiplexer`는 로컬 deadline·abort·dispose·transport 실패·응답 불일치·스트림 메시지 폐기·`cancel`/`control` 전송 실패를 조용히 처리한다. **구조:** `createRendererApi<B>(options?)`로 시그니처를 바꿔 `{ transport?, diagnostics? }`를 받는다(위치 인자 `transport` 제거). `RendererDiagnosticsSink.record(event)`에 닫힌 유니온 `RendererDiagnostic` 6종(`rpc-settled`·`subscription-opened`·`subscription-closed`·`handshake-failed`·`message-dropped`·`transport-failed`)을 기록한다. snapshot 없음. 기록 금지는 ADR 0010을 따르되 원격 에러 `code`는 싣는다. sink 예외 격리·기본 무출력. 결정은 ADR 0022. **완료 기준:** RPC 호출 1건당 `rpc-settled` 정확히 1회(원인 8종 각각 test), `subscription-opened`/`closed` 쌍 일치(원인 5종 각각 test), `message-dropped` 3종·`transport-failed` 2종·`handshake-failed` 4종 test, sink throw 격리 test, 기존 동작(reject 값·구독 결과) 불변, 호출 지점 전부 옵션 객체로 이전, 패키지 `xvfb-run -a pnpm verify`·루트 `pnpm lint`·`pnpm format:check`·demo `check-types`·`test:unit`·`test:electron` 통과, README·architecture·ADR 0013 개정 반영. **결과:** 완료 조건 전부 충족, 편차 없음. `createRendererApi<X>(transport)` 위치 인자 호출 grep 0건, 패키지 `test/renderer/renderer-diagnostics.test.ts`(36 test)로 원인 8종·5종·3종·2종·4종과 sink 격리·무출력·순서·필드 제한을 검증. 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`·`xvfb-run -a pnpm test:electron` 모두 통과. README·`docs/architecture.md`·ADR 0010·0013 반영, `.scratch/renderer-diagnostics/issues/01-renderer-diagnostics.md` closed.
 
+### Event source 등록 시 검증·정규화 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 01)
+
+- [ ] **RD-029 — Event source의 모양·buffer 규칙을 registration 한 곳이 소유하고, 등록 시 `broadcast`/`scoped`로 정규화한다.** 지금 registration은 event source의 `mode`만 판별한다. `buffer.capacity` 검증은 helper(`broadcastEvent`/`scopedEvent`)와 `BoundedQueue` 생성자에만 있고, `overflow`는 어디서도 검증하지 않는다(오타가 조용히 `drop-oldest`로 동작). source interface는 구조적이라 helper 없이 직접 작성한 source가 타입을 통과한다. capacity 0인 직접 작성 source를 구독하면 `Subscriptions.#start`가 `try` 밖에서 `BoundedQueue` 생성에 실패한다. 그 결과 terminal 없이 `controlStream`이 reject하고(adapter 두 개 모두 `void`라 unhandled rejection), 구독 slot이 세션 retire까지 샌다(ADR 0009 위반). **구조:**
+  - 먼저 `BoundedQueue` 생성을 `try` 안으로 옮겨 누수를 막는다.
+  - registration이 모양, broadcast `source` 타입, scoped `factory` 타입, `capacity`, `overflow`를 검증하고, `createBridgeServer` 시점에 경로를 포함한 `TypeError`를 던진다.
+  - helper는 검증 없는 순수 생성자가 된다(`currentValueSource` 제외).
+  - event entry를 `broadcast`(공유 upstream, plain `Observable` 포함)와 `scoped`(구독별 factory)로 정규화하고, `Subscriptions`에서 `isScopedSource`·`#broadcastSource`를 제거한다.
+  - `controlStream`에 "reject하지 않는다" 최종 방어 catch를 둔다.
+  - 새 ADR은 만들지 않는다(ADR 0012 보정 주석).
+
+  **완료 기준:**
+  - 누수 회귀 test와 scoped 전달(값·error·complete) test가 있다.
+  - 등록 검증 test(capacity·overflow·factory·source 각각)가 있다.
+  - 올바른 직접 작성 source가 helper로 만든 source와 같게 동작한다.
+  - 기존 단언 변경은 helper capacity test 1건(의도적 전환)뿐이다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - architecture·ADR 0012·README·`CONTEXT.md`에 반영한다.
+
+  계획: `_works/20260925-06-event-source-normalize/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
