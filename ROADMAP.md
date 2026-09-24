@@ -175,6 +175,25 @@
 
   계획: `_works/20260925-08-stream-generation-terminal/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(`next` 콜백 안 dispose 시나리오 RED 확보: control `["subscribe","unsubscribe","acknowledge"]`) → DELTA-02(acknowledge 전송 앞 `lifetime.disposed` 검사 추가로 GREEN 전환) → DELTA-03(`#terminate`·`#sendControl` 도입, terminal 5곳 이관, 관측 가능한 순서·진단 종류·control 전송 변화 0) → DELTA-04(ADR 0006 개정 note, ADR 0022 결정 8 교차 참조, `docs/architecture.md` 반영) → DELTA-05(전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/650 tests 통과(DELTA-01 test 1건, 리뷰 test 1건 추가로 648→650), 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `stream-multiplexer.ts`에서 `grep -c 'type: "subscription-closed"'`·`grep -c 'channel: "control"'` 각 1건, `git diff dev -- src/renderer/local-generation.ts` 빈 출력. 기존 test 단언 변경 0건(`git diff dev -- packages/rx-bridge-electron/test` 삭제·변경 줄 0). 범위 밖으로 둔 generation 레코드 2벌 병합, `LocalGeneration`의 closed·identity 검사 축소, envelope 대조 중복과 생성자 인자 전달은 계획대로 이 작업에 포함하지 않았다.
 
+### 구독 종료 통지 판정 한 곳으로 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 04)
+
+- [ ] **RD-032 — Main이 구독 종료를 Renderer에 알릴지·무엇을 보낼지 판정을 `Subscriptions` 한 곳의 표로 모으고, 거부 응답 전송 도중 retire의 누락 terminal을 막는다.** 지금 시작 전 구독의 `subscribed`(0)+`error`(1) 프레임 조립이 2벌이다(`sendSubscribeFailure`, `Subscriptions.#reject`). 통지 여부 규칙은 2 file 4곳에 서로 다르게 흩어져 있다: server admission 거부(항상 전송), `#reject`(session aborted면 사유와 무관하게 침묵, 두 프레임 사이 재검사), pending `onAbort`(`notifiesRenderer`일 때만), consumer `onSessionAbort`(`notifiesRenderer`일 때만, ack 우회). `notifiesRenderer`는 stream 전용 규칙인데 `document-sessions.ts`에 있다. 그래서 거부 응답의 `subscribed`(0) 전송 중 동기로 detach·dispose retire가 끼면 `error`가 생략되어 Renderer 구독에 terminal이 오지 않는다. 이는 ADR 0020 결정 5("detach·dispose는 통지")와 어긋난다. 실제 adapter 두 개는 stream 메시지를 비동기로 전달하므로 커스텀 `send`에서만 도달한다. **구조:**
+  - `Subscriptions` 안 private 판정 경로 하나가 `cause`(`admission` / `rejected(error)` / `retired`)와 `session.signal`만 보고 보낼 error(또는 없음)를 정한다. 규칙: `admission`은 항상 `FORBIDDEN "Bridge sender is not authorized."`; session이 살아 있으면 `cause`의 error; aborted이고 사유가 `detach`·`dispose`면 `CANCELLED "Bridge session ended."`; 그 외 사유면 침묵. retire가 앞선 거부를 이긴다(ADR 0020 결정 3과 같은 규칙).
+  - 프레임 방출은 두 모양이다: 미시작 구독(`subscribed`(0) 뒤 판정을 다시 해 `error`(1)), 시작된 구독(`error`(`++sequence`), ack 우회). 호출 경로가 모양을 고른다.
+  - server는 admission 거부 진단(`rejected` + sender 사유)을 유지하고, wire 응답은 `subscriptions.rejectAdmission(command, send)`에 위임한다. `sendSubscribeFailure`·`#reject`·`notifiesRenderer`를 제거한다. `subscriptions.ts:278`의 `"Internal bridge error."` 리터럴을 `internalError` 상수로 바꾼다.
+  - `#start`의 도달하지 않는 `session.signal.aborted` 검사는 그대로 둔다(후보 06 관심사). wire 모양·오류 코드·진단 종류는 바꾸지 않는다. 새 ADR은 만들지 않는다.
+
+  **범위 밖(보류):**
+  - 리뷰 후보 05(RPC·stream 공유 authorize 단계): 이 RD 뒤 별도 RD. `rpc-requests.ts` 등 다른 파일의 `"Internal bridge error."` 리터럴도 05 범위다.
+  - 리뷰 후보 06(consumer 전달 창 내부 seam): 활성 구독 통지의 `++sequence` ack 우회는 이 RD에서 위치만 유지한다.
+
+  **완료 기준:**
+  - 거부 응답 `subscribed` 전송 callback 안 동기 detach 시나리오 test가 수정 전 RED, 수정 후 GREEN이다(`subscribed`(0)+`error`(1) `CANCELLED`). 같은 조건의 비통지 사유(`destroyed`) test는 침묵을 고정한다.
+  - 기존 test 단언 변경 0건.
+  - `grep -rn "sendSubscribeFailure\|notifiesRenderer" packages/rx-bridge-electron/src` 0건.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0020 개정 note, `docs/architecture.md` 세션 정리 서술, 리뷰 02.html 카드 04 완료 표시를 반영한다.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
