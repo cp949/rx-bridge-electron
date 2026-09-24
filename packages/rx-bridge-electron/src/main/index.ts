@@ -1,14 +1,11 @@
 export { createBridgeServer } from "./create-bridge-server.js";
 export type { ImplServerOptions } from "./create-bridge-server.js";
-// bridge-types.ts에서 직접 재수출한다(barrel을 거치면 tsup dts 번들러가
-// contract/main 두 entry 간 순환 chunk 경고를 낸다 — create-bridge-server.ts
-// 참고).
 export type {
   BridgeApi,
   BridgeImpl,
   ErrorsFor,
   SchemasFor,
-} from "../contract/bridge-types.js";
+} from "../contract/index.js";
 export {
   bindElectronBridge,
   DEFAULT_ELECTRON_BRIDGE_NAMESPACE,

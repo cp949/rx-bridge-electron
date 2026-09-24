@@ -1,4 +1,4 @@
-Status: 후보
+Status: closed — 선택지 1(barrel import로 바꾸고 주석 삭제) 적용
 
 # 순환 chunk 경고 우회 주석의 전제가 재현되지 않는다
 
@@ -16,3 +16,4 @@ Status: 후보
 ## Comments
 
 - 2026-09-25: contract-main-type-dependency 작업 중 발견. 그 작업 범위 밖이라 등록만 했다.
+- 2026-09-25: 선택지 1로 해결. 세 곳을 `../contract/index.js` import로 바꾸고 주석을 삭제했다. 같은 계층의 `output-boundary.ts`·`registration.ts`·`local-generation.ts`는 이미 barrel을 쓰고 있어 예외를 남길 이유가 없다. `pnpm build` 경고 없음, 변경 전후 `dist/*/index.d.ts` 6개 entry의 export 목록 동일.

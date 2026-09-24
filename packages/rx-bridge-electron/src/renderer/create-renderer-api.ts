@@ -1,8 +1,4 @@
-// bridge-types.ts에서 직접 import한다(barrel `../contract/index.js`를 거치면
-// tsup의 dts 번들러가 `contract`/`renderer` 두 entry가 같은 파일을 서로 다른
-// chunk에서 참조한다고 보고 순환 chunk 경고를 낸다 — `main/create-bridge-server.ts`와
-// 같은 이유).
-import type { BridgeApi } from "../contract/bridge-types.js";
+import type { BridgeApi } from "../contract/index.js";
 import type { Observable } from "rxjs";
 import {
   BridgeProtocolError,
