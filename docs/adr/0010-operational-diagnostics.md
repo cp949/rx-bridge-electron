@@ -1,6 +1,6 @@
 # Main은 진단 이벤트와 스냅샷 조회로 세션·RPC·구독 수명주기와 거부 사유를 관측 가능하게 한다
 
-> [ADR 0014](0014-stream-lookup-before-authorize.md)가 stream 등록 조회 판정 시점을 `authorize` 앞으로 옮겼다. 아래 §6의 "등록 조회를 통과한 경우만 `key`를 넣는다" 규칙 자체는 바뀌지 않았지만, `subscription-limit`이 이제 그 규칙을 통과해 `key`를 포함한다(이전에는 등록 조회 전에 판정돼 `key`가 없었다). §9의 `StreamHub`는 `Subscriptions`로 이름이 바뀌었다. 이 문서의 다른 결정은 그대로 유효하다.
+> [ADR 0014](0014-stream-lookup-before-authorize.md)가 stream 등록 조회 판정 시점을 `authorize` 앞으로 옮겼다. 아래 §6의 "등록 조회를 통과한 경우만 `key`를 넣는다" 규칙 자체는 바뀌지 않았지만, `subscription-limit`이 이제 그 규칙을 통과해 `key`를 포함한다(이전에는 등록 조회 전에 판정돼 `key`가 없었다). §9의 `StreamHub`는 `Subscriptions`로 이름이 바뀌었다. [ADR 0015](0015-rpc-request-lifecycle.md)가 RPC 요청 수명주기를 `main/rpc-dispatcher.ts` → `main/rpc-requests.ts`의 `RpcRequests` 모듈로 옮겼다. §7이 가리키던 `rpc-dispatcher.ts`는 `rpc-requests.ts`로, §10이 가리키던 `tryAcquireRpc`/`releaseRpc`는 `RpcRequests` 내부 전역 카운터로 이름이 바뀌었다 — 판정 지점·계산 방식 등 결정 내용 자체는 바뀌지 않았다. 이 문서의 다른 결정은 그대로 유효하다.
 
 ## 상황
 
@@ -63,7 +63,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 
 6. **`key` 포함 규칙**: 등록 조회(RPC·stream key 존재 확인)를 통과한 경우만 `key`를 넣는다. `authorize-denied`, `invalid-input`(RPC 입력 스키마 검증 실패), `payload-too-large`, `rpc-limit`, `subscription-limit`은 key 있음([ADR 0014](0014-stream-lookup-before-authorize.md) 이후 stream 등록 조회가 slot 판정보다 먼저 실행되므로 `subscription-limit`도 이 규칙을 통과한다). subscriptionId 형식 오류의 `invalid-input`은 등록 조회 전에(ID 파싱 단계에서) 판정되므로 key 없음. `unknown-operation`, `version-mismatch`, `sender-unauthorized`, `frame-not-main`, `origin-not-allowed`, `malformed-envelope`은 key 없음.
 
-7. **`payload-too-large` / `invalid-input` 구분**: 메시지 문자열 매칭으로 판정하지 않는다. `src/protocol/bridge-value.ts`에 `PayloadLimitError extends BridgeProtocolError`를 추가해 `maxTotalBytes`·`maxStringBytes`·`maxDepth`·`maxEntries` 초과 지점만 이 서브클래스를 던지고, `rpc-dispatcher.ts`가 `instanceof PayloadLimitError`로 분기한다. 구조 오류(허용되지 않는 값 타입·symbol 키 등)는 기존 `BridgeProtocolError`를 그대로 던져 `invalid-input`으로 분류된다. 공개 `BridgeProtocolError`의 `name`·`code`(`INVALID_ARGUMENT`)·`message` 계약은 바뀌지 않는다 — `PayloadLimitError`는 내부 판정 표식일 뿐이며 `./protocol` 공개 entry에서 export하지 않는다. 요청이 이미 취소된 상태(aborted)면 기존대로 `CANCELLED`를 응답하고 이벤트는 기록하지 않는다.
+7. **`payload-too-large` / `invalid-input` 구분**: 메시지 문자열 매칭으로 판정하지 않는다. `src/protocol/bridge-value.ts`에 `PayloadLimitError extends BridgeProtocolError`를 추가해 `maxTotalBytes`·`maxStringBytes`·`maxDepth`·`maxEntries` 초과 지점만 이 서브클래스를 던지고, `rpc-requests.ts`(옛 `rpc-dispatcher.ts`, [ADR 0015](0015-rpc-request-lifecycle.md))가 `instanceof PayloadLimitError`로 분기한다. 구조 오류(허용되지 않는 값 타입·symbol 키 등)는 기존 `BridgeProtocolError`를 그대로 던져 `invalid-input`으로 분류된다. 공개 `BridgeProtocolError`의 `name`·`code`(`INVALID_ARGUMENT`)·`message` 계약은 바뀌지 않는다 — `PayloadLimitError`는 내부 판정 표식일 뿐이며 `./protocol` 공개 entry에서 export하지 않는다. 요청이 이미 취소된 상태(aborted)면 기존대로 `CANCELLED`를 응답하고 이벤트는 기록하지 않는다.
 
 8. **`rpc-timed-out`과 `outcome`**: Main deadline 만료는 `{ type: "rpc-timed-out", key }` 1회만 기록하고 `rpc-cancelled`는 기록하지 않는다(기존 동작 유지). 순서는 `rpc-timed-out` → (handler가 실제로 끝날 때) `rpc-finished`. `rpc-finished.outcome`은 handler work의 실제 응답이 성공(`RpcResponse`의 성공 타입)이면 `"ok"`, 그 외(도메인 에러, 출력 검증 실패, `authorize` false, 취소, `authorize` 예외 — [ADR 0011](0011-authorize-exception-internal.md) 이후 work가 `INTERNAL`로 응답)는 `"error"`다. deadline이 먼저 응답했어도 outcome은 handler 쪽 work의 실제 결과로 판정한다(deadline 응답 시점이 아니다).
 
@@ -71,7 +71,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 
 10. **스냅샷**: `server.getDiagnosticsSnapshot(): DiagnosticsSnapshot` 공개 메서드, `{ sessions, rpcInFlight, subscriptions, queuedEvents }`.
     - `sessions`: 현재 활성 attachment(현재 세션이 있는 attachment) 수.
-    - `rpcInFlight`: 서버 전역 카운터(`tryAcquireRpc` 성공 시 증가, `releaseRpc` 시 감소)로 계산한다 — handler가 실제로 끝날 때까지 센다. retire된 세션의 handler가 아직 끝나지 않았어도 계속 포함된다(세션별 상태 순회가 아니라 전역 카운터를 쓰는 이유다).
+    - `rpcInFlight`: `RpcRequests` 모듈 내부 전역 카운터(옛 `tryAcquireRpc`/`releaseRpc`, [ADR 0015](0015-rpc-request-lifecycle.md) 이후 slot 획득 시 증가, 반환 시 감소)로 계산한다 — handler가 실제로 끝날 때까지 센다. retire된 세션의 handler가 아직 끝나지 않았어도 계속 포함된다(세션별 상태 순회가 아니라 전역 카운터를 쓰는 이유다).
     - `subscriptions`: 한도 계산 기준과 같은 값(대기 + 활성)의 모든 세션 합. `subscription-opened`/`closed` 이벤트 쌍(활성만 센다)과 값이 다를 수 있다 — authorize 대기 중인 구독은 스냅샷에는 포함되지만 아직 `subscription-opened`를 내지 않는다.
     - `queuedEvents`: 모든 consumer의 대기열(`pendingEvents`) 현재 길이 합.
     - 반환은 매 호출 새 객체다. 누적 카운터는 두지 않는다(아래 "대안과 기각 사유"). 서버 dispose 후에는 `rpcInFlight`를 제외한 세 값이 0이고, 끝나지 않은 handler가 있으면 `rpcInFlight`는 실제 값을 반환한다.

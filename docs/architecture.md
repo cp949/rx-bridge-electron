@@ -90,6 +90,8 @@ stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 �
 
 stream 구독 요청은 ID 형식 → 세션별 워터마크 → 등록 조회 → 구독 슬롯 → `authorize` 순서로 판정한다(RPC와 같은 순서). 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`이고, `authorize`는 등록된 key만 받는다. 구독 슬롯 한도 초과(`subscription-limit`)는 등록 조회를 통과한 뒤 판정되므로 진단에 key를 포함한다. 이 수명주기(admission부터 terminal·slot 반환까지)는 Main의 `Subscriptions` 모듈 하나가 소유한다. 근거는 [ADR 0014](adr/0014-stream-lookup-before-authorize.md)에 있다.
 
+RPC 요청은 version 검사 → 세션 해석(`establish`) → 등록 조회 → RPC 슬롯 → `authorize` → pipeline(`parseBridgeValue` → 입력 스키마 → handler → 출력 경계) 순서로 판정한다. 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`다. 이 다섯 단계 경계(`authorize` 뒤, `parseBridgeValue` 실패, 입력 스키마 실패, handler 뒤, 출력 스키마 실패) 각각에서 요청이 이미 취소된 상태(signal aborted)면 `CANCELLED`가 그 단계의 원래 실패 분류보다 우선한다 — 이 규칙은 guard 함수 하나로 정의되고 다섯 지점에 적용된다(삭제하는 분기는 없다). 이 수명주기(등록 조회부터 handler 종료와 슬롯 반환까지)는 Main의 `RpcRequests` 모듈 하나가 소유한다. `authorize` 뒤에는 세션이 여전히 현재인지 별도로 재해석하지 않는다 — 요청 signal(세션 retire 시 abort)만 본다. 근거와 이 가설이 깨졌을 때의 위험은 [ADR 0015](adr/0015-rpc-request-lifecycle.md)에 있다.
+
 근거와 대안 비교는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다.
 
 ## 운영 진단
