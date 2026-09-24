@@ -1,7 +1,7 @@
 # TRP-002 preload 번들이 server 모듈과 `rxjs`를 끌어오는 값 import
 
-- 상태: ACTIVE
-- 적용 조건: `src/main/electron-adapter.ts` 또는 preload가 import하는 모듈(`src/preload/*`,
+- 상태: RESOLVED
+- 적용 조건(과거): `src/main/electron-adapter.ts` 또는 preload가 import하는 모듈(`src/preload/*`,
   `src/protocol/*`)에 다른 `src/main/*` 모듈의 **값** import를 추가할 때.
 
 ## 오해하기 쉬운 신호
@@ -25,11 +25,21 @@ preload chunk에 넣고, `dist/preload`가 `rxjs`를 require한다. sandbox prel
 RD-007(운영 진단)에서 adapter가 `create-bridge-server.ts`의 `recordAdapterRejection` Symbol을 값으로
 import해 발생했다. Symbol을 런타임 import가 없는 `src/main/diagnostics.ts`로 옮겨 해소했다(fceedf3).
 
+## 해소 경위 (RD-019 DELTA-01)
+
+근본 원인은 preload(`src/preload/expose-bridge.ts`)가 채널 정의(`ELECTRON_BRIDGE_CHANNELS`·
+`DEFAULT_ELECTRON_BRIDGE_NAMESPACE`·`ElectronBridgeChannels`)를 얻으려고 `src/main/electron-adapter.ts`를
+값으로 import해야 했다는 구조 자체다. 이 채널 정의를 런타임 import가 없는 leaf 모듈
+`src/protocol/electron-channels.ts`로 옮기고, preload는 거기서 직접 import한다. `src/main/electron-adapter.ts`는
+이제 같은 모듈에서 import해 재사용하고 세 심볼을 re-export만 한다(`/main`의 공개 표면은 그대로 유지).
+이제 preload는 `src/main/*`을 값으로 import할 경로가 없다.
+
 ## 탐지/회피
 
-- adapter·preload 경로에서 `src/main/*` 모듈은 `import type`으로만 가져온다. 값이 필요하면 런타임 import가
-  없는 모듈(`diagnostics.ts`, `types.ts` 등)에 둔다.
-- `pnpm build` 뒤 preload 번들과 그 chunk에 `rxjs`가 없는지 확인한다:
+- eslint `@typescript-eslint/no-restricted-imports`(루트 `eslint.config.js`)가
+  `src/{preload,protocol,renderer}/**`에서 `../main/*`·`../../main/*`의 **값** import를 에러로 잡는다
+  (`import type`은 허용). 이 guard가 재발을 구조적으로 막는 주 탐지 수단이다.
+- `pnpm build` 뒤 preload 번들과 그 chunk에 `rxjs`가 없는지 확인한다(보조 탐지):
 
   ```sh
   cd packages/rx-bridge-electron
