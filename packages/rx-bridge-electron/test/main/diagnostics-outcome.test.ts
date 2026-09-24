@@ -156,6 +156,44 @@ describe("rpc-timed-out 기록", () => {
     expect(finishedIndex).toBeGreaterThan(timedOutIndex);
   });
 
+  test("deadline 만료 뒤 handler가 끝나기 전에 cancel을 보내면 rpc-cancelled가 rpc-timed-out 뒤에 기록된다", async () => {
+    vi.useFakeTimers();
+    const controls: Array<(value: undefined) => void> = [];
+    const { server, diagnostics } = setup({
+      handlers: {
+        wait: vi.fn(
+          () => new Promise<undefined>((resolve) => controls.push(resolve)),
+        ),
+      },
+      resourceLimits: { maxRpcDurationMs: 1000 },
+    });
+    const pending = server.dispatchRpc(sender(), request());
+    await vi.advanceTimersByTimeAsync(1000);
+    await expect(pending).resolves.toMatchObject({
+      type: "error",
+      error: { code: "DEADLINE_EXCEEDED" },
+    });
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    expect(allEvents(diagnostics)).toContainEqual({
+      type: "rpc-cancelled",
+      key: "rpc:hardware/wait",
+    });
+    const timedOutIndex = allEvents(diagnostics).findIndex(
+      (event) => event.type === "rpc-timed-out",
+    );
+    const cancelledIndex = allEvents(diagnostics).findIndex(
+      (event) => event.type === "rpc-cancelled",
+    );
+    expect(timedOutIndex).toBeGreaterThanOrEqual(0);
+    expect(cancelledIndex).toBeGreaterThan(timedOutIndex);
+    controls[0]?.(undefined);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
   test("maxRpcDurationMs: Infinity면 rpc-timed-out을 기록하지 않는다", async () => {
     vi.useFakeTimers();
     const controls: Array<(value: undefined) => void> = [];

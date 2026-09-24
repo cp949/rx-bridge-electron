@@ -154,7 +154,21 @@ describe("Main RPC dispatch", () => {
     },
   );
 
-  test("enforces role authorization before schema parsing or handler lookup", async () => {
+  test("does not call authorize for an unregistered operation", async () => {
+    const authorize = vi.fn(() => true);
+    const { handler, server } = setup(vi.fn(), authorize);
+    await expect(
+      server.dispatchRpc(sender(), request({ key: "rpc:hardware/missing" })),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "NOT_FOUND", message: "Unknown bridge operation." },
+    });
+    expect(authorize).not.toHaveBeenCalled();
+    expect(handler).not.toHaveBeenCalled();
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(0);
+  });
+
+  test("authorizes after operation lookup and before schema parsing or handler invocation", async () => {
     const authorize = vi.fn(() => false);
     const { handler, server } = setup(vi.fn(), authorize);
     await expect(
@@ -234,6 +248,97 @@ describe("Main RPC dispatch", () => {
         error: { code: "INTERNAL", message: "Internal bridge error." },
       }),
     );
+  });
+});
+
+describe("Duplicate requestId handling", () => {
+  function setupDuplicate() {
+    const diagnostics = { record: vi.fn<(event: BridgeDiagnostic) => void>() };
+    const pending: Array<{ resolve: (value: string) => void }> = [];
+    const handler = vi.fn(
+      () =>
+        new Promise<string>((resolve) => {
+          pending.push({ resolve });
+        }),
+    );
+    const impl: BridgeImpl<HardwareBridge> = {
+      hardware: { rpc: { connect: handler } },
+    };
+    const server: StreamBridgeServer = createBridgeServer(impl, {
+      payloadLimits: limits,
+      schemas: {
+        hardware: { rpc: { connect: { input: object, output: string } } },
+      },
+      errors: { hardware: { rpc: { connect: ["DEVICE_GONE"] } } },
+      diagnostics,
+    });
+    server.attach(new FakeTarget());
+    return { server, diagnostics, pending };
+  }
+
+  const cancelledEvents = (diagnostics: {
+    record: ReturnType<typeof vi.fn<(event: BridgeDiagnostic) => void>>;
+  }) =>
+    diagnostics.record.mock.calls
+      .map(([event]) => event)
+      .filter((event) => event.type === "rpc-cancelled");
+
+  test("a second request with the same session and requestId cancels the first and proceeds normally", async () => {
+    const { server, diagnostics, pending } = setupDuplicate();
+    const first = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(1);
+
+    const second = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(cancelledEvents(diagnostics)).toEqual([
+      { type: "rpc-cancelled", key: "rpc:hardware/connect" },
+    ]);
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(2);
+
+    pending[1]?.resolve("second-connected");
+    await expect(second).resolves.toMatchObject({
+      type: "success",
+      result: "second-connected",
+    });
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(1);
+
+    pending[0]?.resolve("first-connected");
+    await expect(first).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(0);
+  });
+
+  test("cancel with a reused requestId only cancels the currently active request", async () => {
+    const { server, diagnostics, pending } = setupDuplicate();
+    const first = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(pending).toHaveLength(1));
+
+    const second = server.dispatchRpc(sender(), request());
+    await vi.waitFor(() => expect(pending).toHaveLength(2));
+    expect(cancelledEvents(diagnostics)).toHaveLength(1);
+
+    server.cancel(sender(), {
+      protocolVersion: 1,
+      clientId: "document-1",
+      requestId: "request-1",
+    });
+    expect(cancelledEvents(diagnostics)).toHaveLength(2);
+
+    pending[1]?.resolve("second-connected");
+    await expect(second).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+
+    pending[0]?.resolve("first-connected");
+    await expect(first).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(0);
   });
 });
 

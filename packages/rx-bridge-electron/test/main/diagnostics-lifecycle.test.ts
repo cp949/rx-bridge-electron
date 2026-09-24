@@ -154,6 +154,36 @@ describe("세션 수명주기 진단", () => {
   });
 });
 
+describe("RPC 수명주기 진단", () => {
+  test("진행 중인 RPC 2건이 있는 세션을 retire하면 두 요청 모두 취소되고 rpc-cancelled 2회, session-closed 1회를 남긴다", async () => {
+    const { server, records, handlers } = harness();
+    const target = new FakeTarget();
+    server.attach(target);
+    const first = server.dispatchRpc(
+      sender(),
+      request({ requestId: "request-1" }),
+    );
+    const second = server.dispatchRpc(
+      sender(),
+      request({ requestId: "request-2" }),
+    );
+    await vi.waitFor(() => expect(handlers).toHaveLength(2));
+    target.endDocument();
+    expect(opened(records, "rpc-cancelled")).toBe(2);
+    expect(opened(records, "session-closed")).toBe(1);
+    handlers[0]?.(undefined);
+    handlers[1]?.(undefined);
+    await expect(first).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED" },
+    });
+    await expect(second).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED" },
+    });
+  });
+});
+
 describe("구독 수명주기 진단", () => {
   test("subscribe는 subscription-opened 1을 남긴다", async () => {
     const { server, records } = harness();
