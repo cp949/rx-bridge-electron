@@ -2,6 +2,7 @@ import {
   parseStreamMessage,
   type BridgeValue,
   type ProtocolEnvelope,
+  type RendererStreamCommand,
   type RpcErrorPayload,
   type StreamMessage,
 } from "../protocol/index.js";
@@ -16,7 +17,12 @@ import type { BridgeTransport } from "./transport.js";
 
 export interface StreamGenerationHandlers {
   next(value: BridgeValue): void;
+  /**
+   * generation당 최대 1회만 호출된다. `#terminate`가 이미 이 generation을
+   * 닫았으면(handler 통지가 없는 cause 포함) 다시 호출되지 않는다.
+   */
   error(error: RemoteError): void;
+  /** `error`와 배타적으로 generation당 최대 1회만 호출된다. 위 계약과 동일하다. */
   complete(): void;
 }
 
@@ -26,6 +32,18 @@ interface StreamGeneration {
   active: boolean;
   lastSequence: number;
 }
+
+/**
+ * generation 종료 원인의 판별 유니온(모듈 내부 전용). cause 문자열은
+ * `diagnostics.ts`의 `SubscriptionCloseCause`와 같은 값을 쓴다. `remote-error`만
+ * 원격 오류 payload를 싣는다.
+ */
+type GenerationEnd =
+  | {
+      readonly cause:
+        "unsubscribed" | "disposed" | "completed" | "transport-failed";
+    }
+  | { readonly cause: "remote-error"; readonly error: RpcErrorPayload };
 
 function remoteError(payload: RpcErrorPayload): RemoteError {
   return new RemoteError(payload.code, payload.message, payload.details);
@@ -54,8 +72,9 @@ export class StreamMultiplexer {
     });
   }
 
-  // 종료 여부는 호출자(`LocalGeneration.subscribe`)가 먼저 확인한다. 종료 뒤
-  // 호출하면 generation이 등록된 채 남고 subscribe control이 전송된다.
+  // 종료 검사는 호출자(`LocalGeneration.subscribe`) 한 곳이 한다. 그 검사를
+  // 우회해 종료 뒤 호출하면 generation이 map에 등록된 채 남고 subscribe control이
+  // 전송된다.
   public open(
     key: string,
     handlers: StreamGenerationHandlers,
@@ -83,15 +102,12 @@ export class StreamMultiplexer {
     try {
       this.#transport.control({ type: "subscribe", subscriptionId, key });
     } catch {
-      if (this.#generations.get(subscriptionId) === generation) {
-        this.#generations.delete(subscriptionId);
-        recordRendererDiagnostic(this.#diagnostics, {
-          type: "subscription-closed",
-          key,
-          cause: "transport-failed",
-        });
-        handlers.error(localError("INTERNAL", "Stream transport failed."));
-      }
+      // ADR 0022 결정 8: subscribe 실패는 `subscription-closed(transport-failed)`
+      // 만 기록한다 — `#sendControl`을 거치면 `transport-failed(control)`까지
+      // 이중 기록되므로 여기서는 쓰지 않는다.
+      this.#terminate(subscriptionId, generation, {
+        cause: "transport-failed",
+      });
     }
   }
 
@@ -102,46 +118,71 @@ export class StreamMultiplexer {
     if (generation === undefined || this.#lifetime.disposed) {
       return;
     }
+    this.#terminate(subscriptionId, generation, { cause: "unsubscribed" });
+  }
+
+  /**
+   * 멱등 guard 없이 listener 제거와 남은 generation 전체의 `#terminate(disposed)`
+   * 만 수행한다. 멱등성은 `ApiLifetime`이 보장한다.
+   */
+  public closeAll(): void {
+    this.#removeListener();
+    const generations = [...this.#generations.entries()];
+    for (const [subscriptionId, generation] of generations) {
+      this.#terminate(subscriptionId, generation, { cause: "disposed" });
+    }
+  }
+
+  /**
+   * generation 종료 경로 하나. 순서 고정: (1) identity guard(1회 보장) →
+   * (2) `#generations.delete` → (3) `subscription-closed` 진단 → (4) cause별
+   * unsubscribe 전송 → (5) cause별 handler 통지.
+   */
+  #terminate(
+    subscriptionId: string,
+    generation: StreamGeneration,
+    end: GenerationEnd,
+  ): void {
+    if (this.#generations.get(subscriptionId) !== generation) {
+      return;
+    }
     this.#generations.delete(subscriptionId);
     recordRendererDiagnostic(this.#diagnostics, {
       type: "subscription-closed",
       key: generation.key,
-      cause: "unsubscribed",
+      cause: end.cause,
+      ...(end.cause === "remote-error" ? { code: end.error.code } : {}),
     });
+    if (end.cause === "unsubscribed" || end.cause === "disposed") {
+      this.#sendControl({ type: "unsubscribe", subscriptionId });
+    }
+    switch (end.cause) {
+      case "transport-failed":
+        generation.handlers.error(
+          localError("INTERNAL", "Stream transport failed."),
+        );
+        break;
+      case "remote-error":
+        generation.handlers.error(remoteError(end.error));
+        break;
+      case "disposed":
+      case "completed":
+        generation.handlers.complete();
+        break;
+      case "unsubscribed":
+        break;
+    }
+  }
+
+  /** control 전송 하나. throw를 삼키고 `transport-failed(control)`을 기록한다. */
+  #sendControl(message: RendererStreamCommand): void {
     try {
-      this.#transport.control({ type: "unsubscribe", subscriptionId });
+      this.#transport.control(message);
     } catch {
       recordRendererDiagnostic(this.#diagnostics, {
         type: "transport-failed",
         channel: "control",
       });
-    }
-  }
-
-  /**
-   * 멱등 guard 없이 listener 제거와 generation 정리(진단 기록 → unsubscribe
-   * control 전송 → `handlers.complete()`)만 수행한다. 멱등성은 `ApiLifetime`이
-   * 보장한다.
-   */
-  public closeAll(): void {
-    this.#removeListener();
-    const generations = [...this.#generations.entries()];
-    this.#generations.clear();
-    for (const [subscriptionId, generation] of generations) {
-      recordRendererDiagnostic(this.#diagnostics, {
-        type: "subscription-closed",
-        key: generation.key,
-        cause: "disposed",
-      });
-      try {
-        this.#transport.control({ type: "unsubscribe", subscriptionId });
-      } catch {
-        recordRendererDiagnostic(this.#diagnostics, {
-          type: "transport-failed",
-          channel: "control",
-        });
-      }
-      generation.handlers.complete();
     }
   }
 
@@ -209,37 +250,21 @@ export class StreamMultiplexer {
       if (this.#lifetime.disposed) {
         return;
       }
-      try {
-        this.#transport.control({
-          type: "acknowledge",
-          subscriptionId: message.subscriptionId,
-          sequence: message.sequence,
-        });
-      } catch {
-        recordRendererDiagnostic(this.#diagnostics, {
-          type: "transport-failed",
-          channel: "control",
-        });
-      }
+      this.#sendControl({
+        type: "acknowledge",
+        subscriptionId: message.subscriptionId,
+        sequence: message.sequence,
+      });
       return;
     }
 
-    this.#generations.delete(message.subscriptionId);
     if (message.type === "error") {
-      recordRendererDiagnostic(this.#diagnostics, {
-        type: "subscription-closed",
-        key: generation.key,
+      this.#terminate(message.subscriptionId, generation, {
         cause: "remote-error",
-        code: message.error.code,
+        error: message.error,
       });
-      generation.handlers.error(remoteError(message.error));
       return;
     }
-    recordRendererDiagnostic(this.#diagnostics, {
-      type: "subscription-closed",
-      key: generation.key,
-      cause: "completed",
-    });
-    generation.handlers.complete();
+    this.#terminate(message.subscriptionId, generation, { cause: "completed" });
   }
 }
