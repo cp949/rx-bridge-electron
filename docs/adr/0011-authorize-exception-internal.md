@@ -17,6 +17,10 @@
 4. **진단**: `authorize` 예외는 `rejected` 이벤트를 기록하지 않는다(ADR 0010 결정 유지). RPC는 `rpc-finished`를 `outcome: "error"`로 1회 기록한다. `Error` 객체와 message는 어떤 이벤트에도 싣지 않는다.
 5. **자원**: 예외 응답 뒤 RPC 슬롯과 구독 슬롯을 반환한다.
 
+_(개정: RD-033 — 결정 1·2·4의 규칙(예외 → `INTERNAL`, 취소 우선, 예외는 `rejected` 미기록)과 `authorize-denied` 진단이 RPC·stream 공유 authorize 단계(`src/main/authorization.ts`) 한 곳에 모였다. 두 경로(`RpcRequests`·`Subscriptions`)는 이 단계가 돌려준 판정(`allowed`/`rejected(error)`/`cancelled`)을 RPC 응답이나 stream 프레임으로 번역만 한다.
+`authorize`를 생략하면 판정은 동기다 — 요청은 같은 tick 안에서 진행한다(이전 두 경로 각각의 동작을 그대로 보존).
+stream 거부 진단(`authorize-denied`)은 이제 slot 반환 전에 기록된다(RPC와 같은 순서). sink가 이 진단을 받는 중에 동기로 detach·dispose하면, 이전에는 재평가된 `#endUnstarted(rejected)`가 통지를 냈지만 지금은 아직 등록된 pending `onAbort`가 `#endUnstarted(retired)`로 같은 통지를 낸다([ADR 0020](0020-stream-terminal-on-retire.md) 결정 2의 RD-032 note가 서술하는 창과 같다 — wire 출력(`subscribed`(0)+`CANCELLED`(1))은 바뀌지 않는다). 유일하게 달라지는 것은 sink 안에서 `getDiagnosticsSnapshot().subscriptions`를 읽으면 이 구독이 아직 pending으로 남아 있어 값이 1 더 크다는 점이다.)_
+
 ## 대안과 기각 사유
 
 - **둘 다 `INVALID_ARGUMENT`**: 호스트 코드 실패를 요청 오류로 보고한다. Renderer가 입력을 고쳐 재시도해도 결과가 바뀌지 않는다.

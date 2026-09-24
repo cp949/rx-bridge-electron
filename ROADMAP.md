@@ -198,7 +198,7 @@
 
 ### RPC·stream 공유 authorize 단계 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 05)
 
-- [ ] **RD-033 — RPC와 stream에 복제된 authorize 구간을 공유 판정 단계 하나로 모으고, 두 경로는 판정을 응답·프레임으로 번역만 하게 한다.** 지금 `RpcRequests.dispatch`와 `Subscriptions.subscribe`가 같은 구간을 각자 반복한다: context 조립, `authorize` 호출("생략 시 전부 허용" 포함), 예외 → `INTERNAL`(진단 없음), abort 시 취소 우선, `authorize-denied` 진단 → `FORBIDDEN`. `BridgeContext` 조립은 scoped factory까지 3곳, `"Internal bridge error."` 정의는 5곳(상수 2, 리터럴 3)이다. **구조:**
+- [x] **RD-033 — RPC와 stream에 복제된 authorize 구간을 공유 판정 단계 하나로 모으고, 두 경로는 판정을 응답·프레임으로 번역만 하게 한다.** 지금 `RpcRequests.dispatch`와 `Subscriptions.subscribe`가 같은 구간을 각자 반복한다: context 조립, `authorize` 호출("생략 시 전부 허용" 포함), 예외 → `INTERNAL`(진단 없음), abort 시 취소 우선, `authorize-denied` 진단 → `FORBIDDEN`. `BridgeContext` 조립은 scoped factory까지 3곳, `"Internal bridge error."` 정의는 5곳(상수 2, 리터럴 3)이다. **구조:**
   - 신규 `src/main/authorization.ts`는 `bridgeContext(...)`와 순수 함수 `authorizeOperation(authorize, diagnostics, context, operation)`을 둔다. 판정은 `allowed` / `rejected(error)` / `cancelled` 중 하나다.
   - 판정 규칙: authorize가 settle한 뒤 signal이 aborted면 `cancelled`. 아니면 throw는 `INTERNAL`(진단 없음), deny는 `authorize-denied` 진단 뒤 `FORBIDDEN`이다.
   - `authorize`를 생략하면 판정을 동기로 돌려줘 같은 tick 진행을 보존한다.
@@ -211,6 +211,8 @@
   - 등록 조회·slot·한도 거부 공유와 `unknown-operation` 문구 차이: slot·취소 의미가 달라 합치면 shallow해진다. 문구는 wire에서 관찰된다.
   - 두 module 생성자 5-인자 동일성.
   - 리뷰 후보 06·07·08.
+
+  계획: `_works/20260925-10-authorize-step/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(characterization test 7건 추가 — 수정 전 코드에서 36 files/653→660 tests GREEN 확인) → DELTA-02(`error-serializer.ts`의 `internalError`를 동결 상수로 export, `subscriptions.ts`·`rpc-requests.ts` 리터럴 통합) → DELTA-03(`authorization.ts` 도입, RPC 경로가 `authorizeOperation`의 판정을 응답으로 번역만 하도록 전환) → DELTA-04(stream 경로 전환, authorize 거부 진단을 slot 반환 전으로 옮겨 RPC와 순서를 맞춤) → DELTA-05(문서 반영·전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/660 tests 통과(기준 653+7), 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: `"Internal bridge error."` 1건(`error-serializer.ts`), `"Bridge operation is forbidden."` 1건(`authorization.ts`), `reason: "authorize-denied"` 1건(`authorization.ts`), `windowRole:` 1건(`authorization.ts`), `#authorize(` 0건(`rpc-requests.ts`·`subscriptions.ts`). `git diff dev -- create-bridge-server.ts` 빈 출력, 생성자 시그니처 불변. `git diff dev -- test` 실제 삭제 줄은 `diagnostics-rejections.test.ts`의 `setup()` 반환값에 `detach` 필드를 더한 2줄뿐(단언 불변), 나머지는 추가. ADR 0011 개정 note·`docs/architecture.md`(:112·:114 부근)에 반영. 리뷰 `02.html` 카드 05 완료 표시. **발견:** DELTA-01 ②(RPC sink 재진입) test의 진단 순서는 계획 시점 추정과 달랐다 — `detach()`가 session을 abort시켜 `#begin`의 `onSessionAbort` 리스너가 동기로 `#cancelActive`를 불러 `rpc-cancelled`가 끼어든다(실측: `session-opened`→`rejected(authorize-denied)`→`session-closed`→`rpc-cancelled`→`rpc-finished`). 실측값으로 test를 고정했다(`_works/_completed/20260925-10-authorize-step/DELTA-01.md` "## 결과").
 
   **완료 기준:**
   - refactor 전에 characterization test 7건을 추가하고 GREEN을 확인한다. 대상:
