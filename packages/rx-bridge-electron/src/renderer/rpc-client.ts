@@ -1,18 +1,11 @@
 import {
   parseRpcResponse,
   type BridgeValue,
-  type PayloadLimits,
   type ProtocolEnvelope,
 } from "../protocol/index.js";
 import { createOpaqueId } from "./ids.js";
 import { createDisposedError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport, CallOptions } from "./transport.js";
-
-const envelopeLimits: PayloadLimits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
@@ -162,7 +155,7 @@ export class RpcClient {
             return;
           }
           try {
-            const response = parseRpcResponse(rawResponse, envelopeLimits);
+            const response = parseRpcResponse(rawResponse);
             if (
               response.protocolVersion !== this.#session.protocolVersion ||
               response.clientId !== this.#session.clientId ||

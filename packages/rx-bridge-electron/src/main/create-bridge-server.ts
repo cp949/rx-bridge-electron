@@ -50,17 +50,6 @@ const defaultLimits: PayloadLimits = {
 };
 
 /**
- * envelope parse(version 포함) 단계의 한도. 옛 adapter가 쓰던 값과 같다 —
- * `options.payloadLimits`(contract 단계)와는 별개다. 여기서
- * `payload-too-large`가 나면 안 되므로 넉넉하게 둔다(ADR 0016 결정 2).
- */
-const envelopeLimits: PayloadLimits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
-
-/**
  * envelope parse 실패를 사유로 분류한다. `BridgeProtocolError`이고
  * `VERSION_MISMATCH`면 `version-mismatch`, 그 외 모든 throw는
  * `malformed-envelope`다(ADR 0016 결정 2).
@@ -191,7 +180,7 @@ function buildBridgeServer(
     handshake(sender: SenderIdentity, value: unknown) {
       let envelope;
       try {
-        envelope = parseHandshakeRequest(value, envelopeLimits);
+        envelope = parseHandshakeRequest(value);
       } catch (cause) {
         reject(classifyParseFailure(cause));
         return invalidRequest(value);
@@ -212,7 +201,7 @@ function buildBridgeServer(
     ): Promise<RpcResponse> {
       let envelope;
       try {
-        envelope = parseWireRpcRequest(value, envelopeLimits);
+        envelope = parseWireRpcRequest(value);
       } catch (cause) {
         const reason = classifyParseFailure(cause);
         reject(reason);
@@ -238,7 +227,7 @@ function buildBridgeServer(
     cancel(sender: SenderIdentity, value: unknown): void {
       let envelope;
       try {
-        envelope = parseWireCancelRequest(value, envelopeLimits);
+        envelope = parseWireCancelRequest(value);
       } catch (cause) {
         reject(classifyParseFailure(cause));
         return;
@@ -257,7 +246,7 @@ function buildBridgeServer(
     ): Promise<void> {
       let command;
       try {
-        command = parseWireStreamCommand(value, envelopeLimits);
+        command = parseWireStreamCommand(value);
       } catch (cause) {
         reject(classifyParseFailure(cause));
         return;

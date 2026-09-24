@@ -28,12 +28,6 @@ import {
   type BridgeTransport,
 } from "../renderer/transport.js";
 
-const limits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
-
 export interface ExposeBridgeOptions {
   readonly contextBridge?: ContextBridge;
   readonly ipcRenderer?: IpcRenderer;
@@ -81,14 +75,12 @@ export function exposeBridgeInMainWorld(
           channels.handshake,
           withEnvelope(clientId, {}),
         ),
-        limits,
       );
     },
     async invoke(request: RendererRpcRequest): Promise<RpcResponse> {
-      const parsed = parseRendererRpcRequest(request, limits);
+      const parsed = parseRendererRpcRequest(request);
       return parseRpcResponse(
         await ipcRenderer.invoke(channels.rpc, withEnvelope(clientId, parsed)),
-        limits,
       );
     },
     cancel(requestId: string): void {
@@ -97,13 +89,13 @@ export function exposeBridgeInMainWorld(
     control(command: RendererStreamCommand): void {
       ipcRenderer.send(
         channels.control,
-        withEnvelope(clientId, parseRendererStreamCommand(command, limits)),
+        withEnvelope(clientId, parseRendererStreamCommand(command)),
       );
     },
     onStreamMessage(listener: (message: StreamMessage) => void): () => void {
       const wrapped = (_event: IpcRendererEvent, value: unknown) => {
         try {
-          listener(parseStreamMessage(value, limits));
+          listener(parseStreamMessage(value));
         } catch {}
       };
       ipcRenderer.on(channels.stream, wrapped);

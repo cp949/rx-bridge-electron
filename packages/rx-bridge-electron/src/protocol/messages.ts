@@ -117,12 +117,23 @@ export type StreamMessage = ProtocolEnvelope &
 
 type RecordValue = Record<string, BridgeValue>;
 
+/**
+ * envelope parse(version 포함) 단계의 한도. 옛 adapter가 쓰던 값과 같다 —
+ * `options.payloadLimits`(contract 단계)와는 별개다. 여기서
+ * `payload-too-large`가 나면 안 되므로 넉넉하게 둔다(ADR 0016 결정 2).
+ */
+const ENVELOPE_LIMITS: PayloadLimits = {
+  maxDepth: Number.MAX_SAFE_INTEGER,
+  maxEntries: Number.MAX_SAFE_INTEGER,
+  maxStringBytes: Number.MAX_SAFE_INTEGER,
+};
+
 function invalidArgument(message: string): never {
   throw new BridgeProtocolError("INVALID_ARGUMENT", message);
 }
 
-function parseRecord(value: unknown, limits: PayloadLimits): RecordValue {
-  const parsed = parseBridgeValue(value, limits);
+function parseRecord(value: unknown): RecordValue {
+  const parsed = parseBridgeValue(value, ENVELOPE_LIMITS);
   if (parsed === null || Array.isArray(parsed) || typeof parsed !== "object") {
     invalidArgument("Protocol message must be a plain object.");
   }
@@ -176,38 +187,32 @@ function readEnvelope(record: RecordValue): ProtocolEnvelope {
   return { protocolVersion, clientId: readId(record, "clientId") };
 }
 
-function readErrorPayload(
-  value: BridgeValue,
-  limits: PayloadLimits,
-): RpcErrorPayload {
-  const record = parseRecord(value, limits);
+function readErrorPayload(value: BridgeValue): RpcErrorPayload {
+  const record = parseRecord(value);
   assertKeys(record, ["code", "message"], ["details"]);
   const error: RpcErrorPayload = {
     code: readId(record, "code"),
     message: readId(record, "message"),
   };
   if (Object.hasOwn(record, "details")) {
-    return { ...error, details: parseBridgeValue(record.details, limits) };
+    return {
+      ...error,
+      details: parseBridgeValue(record.details, ENVELOPE_LIMITS),
+    };
   }
   return error;
 }
 
-export function parseHandshakeRequest(
-  value: unknown,
-  limits: PayloadLimits,
-): HandshakeRequest {
-  const record = parseRecord(value, limits);
+export function parseHandshakeRequest(value: unknown): HandshakeRequest {
+  const record = parseRecord(value);
   assertKeys(record, ["protocolVersion", "clientId"]);
   return readEnvelope(record);
 }
 
-export function parseHandshakeResponse(
-  value: unknown,
-  limits: PayloadLimits,
-): HandshakeResponse {
-  const record = parseRecord(value, limits);
+export function parseHandshakeResponse(value: unknown): HandshakeResponse {
+  const record = parseRecord(value);
   assertKeys(record, ["protocolVersion", "clientId", "manifest"]);
-  const manifest = parseRecord(record.manifest, limits);
+  const manifest = parseRecord(record.manifest);
   assertKeys(manifest, OPERATION_CATEGORIES);
   for (const category of OPERATION_CATEGORIES) {
     const values = manifest[category];
@@ -228,24 +233,18 @@ export function parseHandshakeResponse(
   };
 }
 
-export function parseRendererRpcRequest(
-  value: unknown,
-  limits: PayloadLimits,
-): RendererRpcRequest {
-  const record = parseRecord(value, limits);
+export function parseRendererRpcRequest(value: unknown): RendererRpcRequest {
+  const record = parseRecord(value);
   assertKeys(record, ["requestId", "key", "input"]);
   return {
     requestId: readId(record, "requestId"),
     key: readId(record, "key"),
-    input: parseBridgeValue(record.input, limits),
+    input: parseBridgeValue(record.input, ENVELOPE_LIMITS),
   };
 }
 
-export function parseWireRpcRequest(
-  value: unknown,
-  limits: PayloadLimits,
-): WireRpcRequest {
-  const record = parseRecord(value, limits);
+export function parseWireRpcRequest(value: unknown): WireRpcRequest {
+  const record = parseRecord(value);
   assertKeys(record, [
     "protocolVersion",
     "clientId",
@@ -255,18 +254,16 @@ export function parseWireRpcRequest(
   ]);
   return {
     ...readEnvelope(record),
-    ...parseRendererRpcRequest(
-      { requestId: record.requestId, key: record.key, input: record.input },
-      limits,
-    ),
+    ...parseRendererRpcRequest({
+      requestId: record.requestId,
+      key: record.key,
+      input: record.input,
+    }),
   };
 }
 
-export function parseRpcResponse(
-  value: unknown,
-  limits: PayloadLimits,
-): RpcResponse {
-  const record = parseRecord(value, limits);
+export function parseRpcResponse(value: unknown): RpcResponse {
+  const record = parseRecord(value);
   const envelope = readEnvelope(record);
   const type = record.type;
   if (type === "success") {
@@ -281,7 +278,7 @@ export function parseRpcResponse(
       ...envelope,
       type,
       requestId: readId(record, "requestId"),
-      result: parseBridgeValue(record.result, limits),
+      result: parseBridgeValue(record.result, ENVELOPE_LIMITS),
     };
   }
   if (type === "error") {
@@ -296,26 +293,22 @@ export function parseRpcResponse(
       ...envelope,
       type,
       requestId: readId(record, "requestId"),
-      error: readErrorPayload(record.error, limits),
+      error: readErrorPayload(record.error),
     };
   }
   invalidArgument("Unknown RPC response type.");
 }
 
-export function parseWireCancelRequest(
-  value: unknown,
-  limits: PayloadLimits,
-): WireCancelRequest {
-  const record = parseRecord(value, limits);
+export function parseWireCancelRequest(value: unknown): WireCancelRequest {
+  const record = parseRecord(value);
   assertKeys(record, ["protocolVersion", "clientId", "requestId"]);
   return { ...readEnvelope(record), requestId: readId(record, "requestId") };
 }
 
 export function parseRendererStreamCommand(
   value: unknown,
-  limits: PayloadLimits,
 ): RendererStreamCommand {
-  const record = parseRecord(value, limits);
+  const record = parseRecord(value);
   const type = record.type;
   if (type === "subscribe") {
     assertKeys(record, ["type", "subscriptionId", "key"]);
@@ -340,11 +333,8 @@ export function parseRendererStreamCommand(
   invalidArgument("Unknown stream command type.");
 }
 
-export function parseWireStreamCommand(
-  value: unknown,
-  limits: PayloadLimits,
-): WireStreamCommand {
-  const record = parseRecord(value, limits);
+export function parseWireStreamCommand(value: unknown): WireStreamCommand {
+  const record = parseRecord(value);
   const envelope = readEnvelope(record);
   const command = parseRendererStreamCommand(
     Object.fromEntries(
@@ -352,7 +342,6 @@ export function parseWireStreamCommand(
         ([key]) => key !== "protocolVersion" && key !== "clientId",
       ),
     ),
-    limits,
   );
   assertKeys(
     record,
@@ -366,11 +355,8 @@ export function parseWireStreamCommand(
   return { ...envelope, ...command };
 }
 
-export function parseStreamMessage(
-  value: unknown,
-  limits: PayloadLimits,
-): StreamMessage {
-  const record = parseRecord(value, limits);
+export function parseStreamMessage(value: unknown): StreamMessage {
+  const record = parseRecord(value);
   const envelope = readEnvelope(record);
   const type = record.type;
   if (type === "subscribed" || type === "complete") {
@@ -422,7 +408,7 @@ export function parseStreamMessage(
       type,
       subscriptionId: readId(record, "subscriptionId"),
       sequence: readSequence(record),
-      error: readErrorPayload(record.error, limits),
+      error: readErrorPayload(record.error),
     };
   }
   invalidArgument("Unknown stream message type.");

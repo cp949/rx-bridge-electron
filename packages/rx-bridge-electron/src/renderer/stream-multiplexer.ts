@@ -1,7 +1,6 @@
 import {
   parseStreamMessage,
   type BridgeValue,
-  type PayloadLimits,
   type ProtocolEnvelope,
   type RpcErrorPayload,
   type StreamMessage,
@@ -9,12 +8,6 @@ import {
 import { createOpaqueId } from "./ids.js";
 import { createDisposedError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
-
-const envelopeLimits: PayloadLimits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
 
 export interface StreamGenerationHandlers {
   next(value: BridgeValue): void;
@@ -121,7 +114,7 @@ export class StreamMultiplexer implements Disposable {
 
     let message: StreamMessage;
     try {
-      message = parseStreamMessage(rawMessage, envelopeLimits);
+      message = parseStreamMessage(rawMessage);
     } catch {
       return;
     }

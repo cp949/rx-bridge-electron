@@ -6,10 +6,9 @@ import type { PublicManifest } from "../contract/index.js";
 import type { BridgeApi } from "../contract/bridge-types.js";
 import type { Observable } from "rxjs";
 import {
-  parseBridgeValue,
   parseHandshakeResponse,
   type BridgeValue,
-  type PayloadLimits,
+  type HandshakeResponse,
   type ProtocolEnvelope,
 } from "../protocol/index.js";
 // 비공개 모듈이라 `../protocol/index.js`가 아니라 파일 경로로 import한다.
@@ -36,12 +35,6 @@ declare global {
     readonly rxBridge: BridgeTransport;
   }
 }
-
-const handshakeLimits: PayloadLimits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
 
 type AddCallOptions<Value> =
   Value extends Observable<unknown>
@@ -78,26 +71,6 @@ type ManifestNode = PathNode<ManifestLeaf>;
 
 function internal(message: string): RemoteError {
   return new RemoteError("INTERNAL", message);
-}
-
-function asRecord(value: BridgeValue): Record<string, BridgeValue> {
-  if (value === null || Array.isArray(value) || typeof value !== "object") {
-    throw internal("Malformed bridge handshake.");
-  }
-  return value as Record<string, BridgeValue>;
-}
-
-function assertExactKeys(
-  value: Record<string, BridgeValue>,
-  expected: readonly string[],
-): void {
-  const keys = Object.keys(value);
-  if (
-    keys.length !== expected.length ||
-    expected.some((key) => !Object.hasOwn(value, key))
-  ) {
-    throw internal("Malformed bridge handshake.");
-  }
 }
 
 /**
@@ -184,41 +157,30 @@ function parseHandshake(value: unknown): {
   readonly manifest: PublicManifest;
   readonly tree: ManifestNode;
 } {
-  let record: Record<string, BridgeValue>;
+  // envelope 파싱 한도는 protocol 내부 `ENVELOPE_LIMITS`가 결정한다(DELTA-03).
+  // 여기서는 더 이상 별도 한도를 넘기지 않으므로, 예전에 있던 얕은 구조 사전
+  // 검사(정확히 3개 키)와 `parseHandshakeResponse`의 검사가 완전히 중복이었다
+  // — 하나로 합친다. 실패 사유(malformed·unsupported version 등)는 하나의
+  // 메시지로 합쳐진다: 문구는 계약이 아니다 — 계약은 code `INTERNAL`이다
+  // (`rejectManifestEntry` 주석과 같은 원칙).
+  let response: HandshakeResponse;
   try {
-    record = asRecord(parseBridgeValue(value, handshakeLimits));
+    response = parseHandshakeResponse(value);
   } catch {
     throw internal("Malformed bridge handshake.");
   }
-  assertExactKeys(record, ["protocolVersion", "clientId", "manifest"]);
+  const session: ProtocolEnvelope = {
+    protocolVersion: response.protocolVersion,
+    clientId: response.clientId,
+  };
 
-  let session: ProtocolEnvelope;
-  try {
-    const response = parseHandshakeResponse(value, handshakeLimits);
-    session = {
-      protocolVersion: response.protocolVersion,
-      clientId: response.clientId,
-    };
-  } catch {
-    throw internal("Unsupported bridge handshake.");
-  }
-
-  const manifestRecord = asRecord(record.manifest);
-  assertExactKeys(manifestRecord, OPERATION_CATEGORIES);
   const manifest = {} as Record<OperationCategory, readonly string[]>;
   const tree: ManifestNode = { children: new Map() };
   const paths = new OperationPathTrie();
 
   for (const category of OPERATION_CATEGORIES) {
-    const entries = manifestRecord[category];
-    if (!Array.isArray(entries)) {
-      throw internal("Manifest categories must be arrays.");
-    }
     const copied: string[] = [];
-    for (const entry of entries) {
-      if (typeof entry !== "string") {
-        throw internal("Manifest entries must be strings.");
-      }
+    for (const entry of response.manifest[category]) {
       addManifestPath(paths, tree, category, entry);
       copied.push(entry);
     }
