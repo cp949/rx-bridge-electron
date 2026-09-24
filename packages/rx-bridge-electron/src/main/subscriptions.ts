@@ -418,13 +418,13 @@ export class Subscriptions {
     }
     this.#send(consumer, { type: "subscribed", sequence: 0 });
     if (consumer.closed) return;
-    if (registration.kind === "event") {
-      consumer.pendingEvents = new BoundedQueue(
-        registration.buffer.capacity,
-        registration.buffer.overflow,
-      );
-    }
     try {
+      if (registration.kind === "event") {
+        consumer.pendingEvents = new BoundedQueue(
+          registration.buffer.capacity,
+          registration.buffer.overflow,
+        );
+      }
       if (registration.kind === "state") {
         this.#startShared(consumer, command.key, registration.source);
       } else if (isScopedSource(registration.source)) {
