@@ -16,7 +16,7 @@ import type {
   WireStreamCommand,
 } from "../protocol/index.js";
 import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
-import { dispatchRegistered, findRpc } from "./rpc-dispatcher.js";
+import { RpcRequests } from "./rpc-requests.js";
 import { DocumentSessions } from "./document-sessions.js";
 import {
   buildRegistrationTableFromImpl,
@@ -31,7 +31,6 @@ import { Subscriptions, type StreamSender } from "./subscriptions.js";
 import type {
   AttachedTarget,
   Authorize,
-  BridgeContext,
   BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
@@ -150,8 +149,13 @@ function buildBridgeServer(
     options.diagnostics,
     options.authorize,
   );
-  const keyOf = (sender: SenderIdentity, clientId: string, requestId: string) =>
-    JSON.stringify([sender.webContentsId, sender.frameId, clientId, requestId]);
+  const rpcRequests = new RpcRequests(
+    table,
+    limits,
+    resourceLimits,
+    options.diagnostics,
+    options.authorize,
+  );
   const error = (
     envelope: WireRpcRequest,
     code: string,
@@ -203,121 +207,17 @@ function buildBridgeServer(
         });
         return error(envelope, "FORBIDDEN", "Bridge sender is not authorized.");
       }
-      const registration = findRpc(table, envelope.key);
-      if (registration === undefined) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "unknown-operation",
-        });
-        return error(envelope, "NOT_FOUND", "Unknown bridge operation.");
-      }
-      if (!sessions.tryAcquireRpc(session)) {
-        recordDiagnostic(options.diagnostics, {
-          type: "rejected",
-          reason: "rpc-limit",
-          key: envelope.key,
-        });
-        return error(
-          envelope,
-          "RESOURCE_EXHAUSTED",
-          "Too many concurrent bridge requests.",
-        );
-      }
-      const id = keyOf(sender, envelope.clientId, envelope.requestId);
-      const controller = sessions.beginRpc(session, id, envelope.key);
-      const context: BridgeContext = {
-        requestId: envelope.requestId,
-        clientId: envelope.clientId,
-        windowRole: session.target.role,
+      return rpcRequests.dispatch(
+        session,
         sender,
-        signal: controller.signal,
-      };
-      const started = performance.now();
-      const work = (async (): Promise<RpcResponse> => {
-        let response: RpcResponse | undefined;
-        try {
-          let allowed: boolean;
-          try {
-            allowed =
-              options.authorize === undefined
-                ? true
-                : await options.authorize(context, envelope.key);
-          } catch {
-            response = controller.signal.aborted
-              ? error(envelope, "CANCELLED", "Request cancelled.")
-              : error(envelope, "INTERNAL", "Internal bridge error.");
-            return response;
-          }
-          if (
-            controller.signal.aborted ||
-            sessions.current(sender, envelope.clientId) !== session
-          ) {
-            response = error(envelope, "CANCELLED", "Request cancelled.");
-            return response;
-          }
-          if (!allowed) {
-            recordDiagnostic(options.diagnostics, {
-              type: "rejected",
-              reason: "authorize-denied",
-              key: envelope.key,
-            });
-            response = error(
-              envelope,
-              "FORBIDDEN",
-              "Bridge operation is forbidden.",
-            );
-            return response;
-          }
-          response = await dispatchRegistered(
-            registration,
-            envelope,
-            context,
-            limits,
-            options.diagnostics,
-          );
-          return response;
-        } finally {
-          sessions.finishRpc(session, id, controller);
-          sessions.releaseRpc(session);
-          recordDiagnostic(options.diagnostics, {
-            type: "rpc-finished",
-            key: envelope.key,
-            durationMs: performance.now() - started,
-            outcome: response?.type === "success" ? "ok" : "error",
-          });
-        }
-      })();
-      if (!Number.isFinite(resourceLimits.maxRpcDurationMs)) return await work;
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const deadline = new Promise<RpcResponse>((resolve) => {
-        timer = setTimeout(() => {
-          controller.abort();
-          recordDiagnostic(options.diagnostics, {
-            type: "rpc-timed-out",
-            key: envelope.key,
-          });
-          resolve(
-            error(
-              envelope,
-              "DEADLINE_EXCEEDED",
-              "Request exceeded the server deadline.",
-            ),
-          );
-        }, resourceLimits.maxRpcDurationMs);
-      });
-      try {
-        return await Promise.race([work, deadline]);
-      } finally {
-        clearTimeout(timer);
-      }
+        envelope,
+        () => sessions.current(sender, envelope.clientId) === session,
+      );
     },
     cancel(sender: SenderIdentity, envelope: WireCancelRequest): void {
       const session = sessions.current(sender, envelope.clientId);
       if (session !== undefined)
-        sessions.cancelRpc(
-          session,
-          keyOf(sender, envelope.clientId, envelope.requestId),
-        );
+        rpcRequests.cancel(session, envelope.requestId);
     },
     async controlStream(
       sender: SenderIdentity,
@@ -362,7 +262,7 @@ function buildBridgeServer(
     getDiagnosticsSnapshot(): DiagnosticsSnapshot {
       return {
         sessions: sessions.sessionCount(),
-        rpcInFlight: sessions.rpcInFlightCount(),
+        rpcInFlight: rpcRequests.inFlightCount(),
         subscriptions: subscriptions.subscriptionCount(),
         queuedEvents: subscriptions.queuedEventsCount(),
       };

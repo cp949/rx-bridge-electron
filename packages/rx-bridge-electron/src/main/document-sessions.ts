@@ -16,15 +16,6 @@ export interface DocumentSession {
 type LifecycleReason =
   "main-frame-navigation" | "render-process-gone" | "destroyed";
 
-interface SessionState {
-  readonly controller: AbortController;
-  readonly active: Map<
-    string,
-    { readonly key: string; readonly controller: AbortController }
-  >;
-  runningRpc: number;
-}
-
 interface Attachment {
   readonly target: AttachedTarget;
   readonly removeLifecycle: () => void;
@@ -34,11 +25,10 @@ interface Attachment {
 export class DocumentSessions {
   readonly #attachments = new Map<number, Attachment>();
   readonly #retiredClients = new Map<number, Set<string>>();
-  readonly #states = new WeakMap<DocumentSession, SessionState>();
+  readonly #controllers = new WeakMap<DocumentSession, AbortController>();
   readonly #diagnostics: DiagnosticsSink | undefined;
   readonly #resourceLimits: ResourceLimits;
   #disposed = false;
-  #globalRunningRpc = 0;
 
   public constructor(
     resourceLimits: ResourceLimits,
@@ -96,11 +86,7 @@ export class DocumentSessions {
       clientId,
       signal: controller.signal,
     };
-    this.#states.set(session, {
-      controller,
-      active: new Map(),
-      runningRpc: 0,
-    });
+    this.#controllers.set(session, controller);
     attachment.current = session;
     recordDiagnostic(this.#diagnostics, { type: "session-opened" });
     return session;
@@ -125,64 +111,11 @@ export class DocumentSessions {
       : undefined;
   }
 
-  public tryAcquireRpc(session: DocumentSession): boolean {
-    const state = this.#states.get(session);
-    if (state === undefined) return false;
-    if (state.runningRpc >= this.#resourceLimits.maxConcurrentRpc) return false;
-    state.runningRpc += 1;
-    this.#globalRunningRpc += 1;
-    return true;
-  }
-
-  public releaseRpc(session: DocumentSession): void {
-    const state = this.#states.get(session);
-    if (state !== undefined)
-      state.runningRpc = Math.max(0, state.runningRpc - 1);
-    this.#globalRunningRpc = Math.max(0, this.#globalRunningRpc - 1);
-  }
-
   public sessionCount(): number {
     let count = 0;
     for (const attachment of this.#attachments.values())
       if (attachment.current !== undefined) count += 1;
     return count;
-  }
-
-  public rpcInFlightCount(): number {
-    return this.#globalRunningRpc;
-  }
-
-  public beginRpc(
-    session: DocumentSession,
-    id: string,
-    key: string,
-  ): AbortController {
-    this.cancelRpc(session, id);
-    const controller = new AbortController();
-    this.#states.get(session)?.active.set(id, { key, controller });
-    return controller;
-  }
-
-  public finishRpc(
-    session: DocumentSession,
-    id: string,
-    controller: AbortController,
-  ): void {
-    const state = this.#states.get(session);
-    if (state?.active.get(id)?.controller === controller)
-      state.active.delete(id);
-  }
-
-  public cancelRpc(session: DocumentSession, id: string): void {
-    const state = this.#states.get(session);
-    const work = state?.active.get(id);
-    if (work === undefined) return;
-    state?.active.delete(id);
-    work.controller.abort();
-    recordDiagnostic(this.#diagnostics, {
-      type: "rpc-cancelled",
-      key: work.key,
-    });
   }
 
   public retiredClientCount(webContentsId: number): number {
@@ -222,10 +155,7 @@ export class DocumentSessions {
         if (oldest === undefined) break;
         retired.delete(oldest);
       }
-      const state = this.#states.get(session);
-      state?.controller.abort();
-      for (const id of [...(state?.active.keys() ?? [])])
-        this.cancelRpc(session, id);
+      this.#controllers.get(session)?.abort();
     }
     if (reason === "destroyed") this.#retiredClients.delete(webContentsId);
   }
