@@ -51,3 +51,5 @@ Main이 스트림을 닫을 때 Renderer에 terminal 메시지를 통지하는 �
 - Main에서 `server.dispose()` 또는 `bindElectronBridge(...).dispose()` 호출 뒤 같은 인스턴스를 다시 `attach()`해 재사용하던 코드는 없어야 한다 — 종료는 되돌릴 수 없으므로, 다시 연결하려면 새 `createBridgeServer`와 새 `bindElectronBridge`를 만든다.
 
 이 결정과 근거는 이 문서와 README의 dispose 절에 반영한다. `docs/adr/0005-renderer-api-shape.md`는 수정하지 않는다 — 그 문서가 결정한 "이름과 존재"는 이 문서가 다루는 "의미"와 층이 다르다.
+
+`dispose()`를 호출하지 않아도 navigation·창 파괴 시 Main이 세션을 이미 retire하므로, hello-world 배선에서 `dispose()`를 자동 호출하는 `pagehide` 등록은 불필요하다 — `dispose()`는 브리지 생존 중 SPA teardown 용도로 쓴다. 근거는 [ADR 0013](0013-wiring-defaults.md)에 있다.
