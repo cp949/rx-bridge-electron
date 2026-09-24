@@ -40,6 +40,14 @@ Event buffer(용량과 overflow 정책)는 계약이 값을 가질 수 없으므
 
 Electron 어댑터는 `allowedOrigins`를 받고 현재 main frame과 허용 origin을 검사한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
+## 배선 기본값
+
+`bindElectronBridge({ ipcMain?, server, namespace?, allowedOrigins })`가 반환하는 `attach(contents, role?)`으로 Electron IPC 채널을 연결한다. `ipcMain`을 생략하면 호출 시점에 `import * as electron from "electron"`(네임스페이스 import)으로 얻은 `electron.ipcMain`을 읽고, 주입값이 있으면 항상 그 값이 우선한다. `namespace`를 생략하면 Main·preload 공통 기본값 `"default"`를 쓰며 채널은 `rx-bridge-electron:v1:default:*`가 된다. `role`을 생략하면 `"default"`다 — `allowedOrigins`와 달리 보안 검사에 쓰이지 않는 세션 구분 라벨이므로 선택값으로 둔다.
+
+preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBridge`·`ipcRenderer`를 호출 시점에 `electron.*`에서 해석하고(주입 우선), `namespace` 기본값은 Main과 같은 상수를 공유한다. `globalName` 기본값은 `"rxBridge"`다. Renderer의 `createRendererApi<B>(transport?)`는 `transport`를 생략하면 `globalThis.rxBridge`를 읽는다 — `globalName`을 기본값과 다르게 바꾼 소비자는 transport를 직접 만들어 넘겨야 하며, 그 경로에서만 `declare global`이 다시 필요하다. 두 기본값(`globalName`과 `createRendererApi`가 읽는 전역 이름)이 어긋나면 축약형 배선이 항상 실패하므로 반드시 같은 문자열 상수를 공유한다.
+
+이 기본값들은 기존 함수의 인자를 선택화한 것이며 별도의 API를 추가하지 않는다 — 모든 인자를 명시하는 기존 호출은 동작이 바뀌지 않는다. `pagehide`에서 `api.dispose()`를 자동 호출하던 hello-world 예제는 이제 그 등록을 두지 않는다: navigation·창 파괴 시 Main이 이미 문서 세션을 retire하므로(위 "문서 세션과 정리" 참고) 불필요했다. `dispose()`는 브리지가 살아있는 동안 Renderer가 스스로 정리를 끝내려 할 때(SPA teardown) 쓰는 용도로 남는다. 근거와 기각한 대안은 [ADR 0013](adr/0013-wiring-defaults.md)에 있다.
+
 ## 문서 세션과 정리
 
 Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. handshake에서 sender가 현재 main frame이고 허용 origin인지 확인한다. main-frame navigation, renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
