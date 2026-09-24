@@ -36,7 +36,8 @@ _Avoid_: table key(`domain/op`, category 없는 조회 전용 표기 — 더는 
 _Avoid_: 계약을 런타임 descriptor 트리로 조합하던 옛 함수들(제거됨, 근거·이전 방법은 ADR 0012)
 
 **`BridgeApi<B>` / `BridgeImpl<B>`**:
-계약 타입 `B`에서 파생하는 타입. `BridgeApi<B>`는 Renderer 공개 타입(RPC→`Promise`, State→`RemoteState`, Event→`Observable`)이고, `BridgeImpl<B>`는 Main이 `createBridgeServer<B>(impl, options)`에 넘기는 구현 타입(RPC handler, `CurrentValueSource`, `EventSource`)이다. 계약과 구현의 일치는 이 두 타입이 같은 `B`에서 파생한다는 사실 자체로 컴파일 타임에 보장된다.
+계약 타입 `B`에서 파생하는 타입. `BridgeApi<B>`는 Renderer 호출 트리의 기본 모양(RPC→`Promise`, State→`RemoteState`, Event→`Observable`)이고, `BridgeImpl<B>`는 Main이 `createBridgeServer<B>(impl, options)`에 넘기는 구현 타입(RPC handler, `CurrentValueSource`, `EventSource`)이다. 계약과 구현의 일치는 이 두 타입이 같은 `B`에서 파생한다는 사실 자체로 컴파일 타임에 보장된다.
+Renderer 소비자가 `createRendererApi<B>()`로 받는 공개 타입은 `RendererApi<B>`다 — `BridgeApi<B>`의 RPC마다 `CallOptions`(취소·타임아웃) 인자를 더하고 루트에 `dispose()`를 붙인 것이다.
 _Avoid_: 계약에서 Renderer 타입을 추론하던 옛 타입, 도메인 조합 함수가 반환하던 구현 객체(모두 제거됨, 근거·이전 방법은 ADR 0012)
 
 **`SchemasFor<B>` / `ErrorsFor<B>`**:
