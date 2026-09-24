@@ -162,15 +162,47 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
-  test("stream authorize-denied omits the key for an unregistered stream", async () => {
-    const { server, diagnostics } = setup({ authorize: () => false });
+  test("stream unknown-operation NOT_FOUND regardless of authorize decision (deny)", async () => {
+    const authorize = vi.fn(() => false);
+    const { server, diagnostics } = setup({ authorize });
+    const messages: unknown[] = [];
     await server.controlStream(
       sender(),
       subscribeCommand({ key: "state:hardware/missing$" }),
-      () => {},
+      (message) => messages.push(message),
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "authorize-denied" },
+      { type: "rejected", reason: "unknown-operation" },
+    ]);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed" }),
+      expect.objectContaining({
+        type: "error",
+        error: { code: "NOT_FOUND", message: "Unknown bridge stream." },
+      }),
+    ]);
+  });
+
+  test("stream unknown-operation NOT_FOUND regardless of authorize decision (allow)", async () => {
+    const authorize = vi.fn(() => true);
+    const { server, diagnostics } = setup({ authorize });
+    const messages: unknown[] = [];
+    await server.controlStream(
+      sender(),
+      subscribeCommand({ key: "state:hardware/missing$" }),
+      (message) => messages.push(message),
+    );
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "unknown-operation" },
+    ]);
+    expect(authorize).not.toHaveBeenCalled();
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed" }),
+      expect.objectContaining({
+        type: "error",
+        error: { code: "NOT_FOUND", message: "Unknown bridge stream." },
+      }),
     ]);
   });
 
@@ -368,7 +400,7 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
-  test("stream subscription-limit omits the key", async () => {
+  test("stream subscription-limit includes the key", async () => {
     const { server, diagnostics } = setup({
       resourceLimits: { maxSubscriptions: 1 },
     });
@@ -383,7 +415,61 @@ describe("rejected diagnostic reasons", () => {
       () => {},
     );
     expect(rejections(diagnostics)).toEqual([
-      { type: "rejected", reason: "subscription-limit" },
+      {
+        type: "rejected",
+        reason: "subscription-limit",
+        key: "state:hardware/current$",
+      },
+    ]);
+  });
+
+  test("unregistered stream key rejection does not occupy a slot", async () => {
+    const { server, diagnostics } = setup({
+      resourceLimits: { maxSubscriptions: 1 },
+    });
+    await server.controlStream(
+      sender(),
+      subscribeCommand({
+        subscriptionId: testSubscriptionId(1),
+        key: "state:hardware/missing$",
+      }),
+      () => {},
+    );
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    const send = vi.fn();
+    await server.controlStream(
+      sender(),
+      subscribeCommand({ subscriptionId: testSubscriptionId(2) }),
+      send,
+    );
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "unknown-operation" },
+    ]);
+    expect(send).toHaveBeenCalledWith(
+      expect.objectContaining({ type: "subscribed" }),
+    );
+  });
+
+  test("unregistered stream key still advances the watermark", async () => {
+    const { server, diagnostics } = setup({});
+    const first = vi.fn();
+    await server.controlStream(
+      sender(),
+      subscribeCommand({
+        subscriptionId: testSubscriptionId(1),
+        key: "state:hardware/missing$",
+      }),
+      first,
+    );
+    const second = vi.fn();
+    await server.controlStream(
+      sender(),
+      subscribeCommand({ subscriptionId: testSubscriptionId(1) }),
+      second,
+    );
+    expect(second).not.toHaveBeenCalled();
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "unknown-operation" },
     ]);
   });
 

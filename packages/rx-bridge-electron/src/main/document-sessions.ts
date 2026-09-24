@@ -28,11 +28,6 @@ interface SessionState {
   runningRpc: number;
 }
 
-export type BeginStreamResult =
-  | { readonly kind: "ok"; readonly controller: AbortController }
-  | { readonly kind: "duplicate" }
-  | { readonly kind: "exhausted" };
-
 interface Attachment {
   readonly target: AttachedTarget;
   readonly removeLifecycle: () => void;
@@ -207,21 +202,30 @@ export class DocumentSessions {
     });
   }
 
-  public beginStream(
+  public advanceStreamWatermark(
+    session: DocumentSession,
+    sequence: number,
+  ): boolean {
+    const state = this.#states.get(session);
+    if (state === undefined || sequence <= state.streamWatermark) return false;
+    state.streamWatermark = sequence;
+    return true;
+  }
+
+  public acquireStreamSlot(
     session: DocumentSession,
     id: string,
-    sequence: number,
-  ): BeginStreamResult {
+  ): AbortController | undefined {
     const state = this.#states.get(session);
-    if (state === undefined || sequence <= state.streamWatermark)
-      return { kind: "duplicate" };
-    state.streamWatermark = sequence;
-    if (state.subscriptions.size >= this.#resourceLimits.maxSubscriptions)
-      return { kind: "exhausted" };
+    if (
+      state === undefined ||
+      state.subscriptions.size >= this.#resourceLimits.maxSubscriptions
+    )
+      return undefined;
     state.subscriptions.add(id);
     const controller = new AbortController();
     state.pendingStreams.set(id, controller);
-    return { kind: "ok", controller };
+    return controller;
   }
 
   public releaseStream(session: DocumentSession, id: string): void {

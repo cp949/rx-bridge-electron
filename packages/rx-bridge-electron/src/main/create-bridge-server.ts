@@ -370,12 +370,30 @@ function buildBridgeServer(
         return;
       }
       const id = keyOf(sender, command.clientId, command.subscriptionId);
-      const begin = sessions.beginStream(session, id, sequence);
-      if (begin.kind === "duplicate") return;
-      if (begin.kind === "exhausted") {
+      if (!sessions.advanceStreamWatermark(session, sequence)) return;
+      if (!streams.isRegistered(command.key)) {
+        recordDiagnostic(options.diagnostics, {
+          type: "rejected",
+          reason: "unknown-operation",
+        });
+        streams.reject(
+          sender,
+          command,
+          send,
+          {
+            code: "NOT_FOUND",
+            message: "Unknown bridge stream.",
+          },
+          session.signal,
+        );
+        return;
+      }
+      const controller = sessions.acquireStreamSlot(session, id);
+      if (controller === undefined) {
         recordDiagnostic(options.diagnostics, {
           type: "rejected",
           reason: "subscription-limit",
+          key: command.key,
         });
         streams.reject(
           sender,
@@ -389,7 +407,6 @@ function buildBridgeServer(
         );
         return;
       }
-      const controller = begin.controller;
       const context: BridgeContext = {
         requestId: command.subscriptionId,
         clientId: command.clientId,
@@ -432,7 +449,7 @@ function buildBridgeServer(
         recordDiagnostic(options.diagnostics, {
           type: "rejected",
           reason: "authorize-denied",
-          ...(streams.isRegistered(command.key) ? { key: command.key } : {}),
+          key: command.key,
         });
         streams.reject(
           sender,
