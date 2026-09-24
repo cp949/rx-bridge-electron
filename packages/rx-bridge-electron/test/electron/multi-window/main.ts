@@ -63,6 +63,8 @@ type Role = "editor" | "viewer";
 const windows = new Map<Role, BrowserWindow>();
 const navigationBlockers = new Map<Role, (event: Electron.Event) => void>();
 const navigationAttempts = new Map<Role, number>();
+const windowDetach = new Map<Role, () => void>();
+let bridgeHandle: { dispose(): void } | undefined;
 
 const impl: BridgeImpl<LabBridge> = {
   lab: {
@@ -154,6 +156,15 @@ const probe = {
     }
   },
   navigationAttempts: (role: Role) => navigationAttempts.get(role) ?? 0,
+  // RD-026: 살아 있는 창을 detach하거나 서버 전체를 dispose했을 때 Renderer가
+  // 스트림 종료 통지를 실제로 받는지 확인하는 acceptance 시나리오 전용 제어.
+  detachWindow: (role: Role) => {
+    windowDetach.get(role)?.();
+    windowDetach.delete(role);
+  },
+  disposeServer: () => {
+    bridgeHandle?.dispose();
+  },
 };
 Object.assign(globalThis, { __rxBridgeProbe: probe });
 export type MultiWindowProbe = typeof probe;
@@ -166,6 +177,7 @@ async function start(): Promise<void> {
     namespace: "fixture",
     allowedOrigins: ["file://"],
   });
+  bridgeHandle = bridge;
   const renderer =
     process.env.RX_BRIDGE_RENDERER ??
     fileURLToPath(new URL("./renderer.html", import.meta.url));
@@ -182,7 +194,7 @@ async function start(): Promise<void> {
       },
     });
     windows.set(role, window);
-    bridge.attach(window.webContents, role);
+    windowDetach.set(role, bridge.attach(window.webContents, role));
     await window.loadFile(renderer, { query: { role } });
   }
   app.on("window-all-closed", () => bridge.dispose());

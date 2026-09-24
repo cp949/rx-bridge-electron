@@ -3,6 +3,7 @@ import {
   createRendererApi,
   RemoteError,
   type BridgeTransport,
+  type RemoteState,
 } from "../../../src/renderer/index.js";
 import type { LabBridge } from "./contract.js";
 
@@ -66,6 +67,7 @@ interface Received {
   readonly values: string[];
   error?: string;
   readonly subscription: { unsubscribe(): void };
+  readonly source: RemoteState<string> | undefined;
 }
 const streams = new Map<string, Received>();
 
@@ -87,7 +89,18 @@ export async function subscribe(
       entry.error = error instanceof RemoteError ? error.code : String(error);
     },
   });
-  streams.set(tag, Object.assign(entry, { subscription }));
+  streams.set(
+    tag,
+    Object.assign(entry, {
+      subscription,
+      source: kind === "state" ? (source as RemoteState<string>) : undefined,
+    }),
+  );
+}
+
+/** `RemoteState`의 현재 snapshot 상태(`"uninitialized"|"connecting"|"current"|"stale"`)만 읽는다. */
+export function snapshotStatus(tag: string): string | undefined {
+  return streams.get(tag)?.source?.snapshot.status;
 }
 
 export function received(tag: string): {

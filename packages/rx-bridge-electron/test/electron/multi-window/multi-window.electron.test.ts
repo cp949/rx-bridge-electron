@@ -446,6 +446,114 @@ describe("Electron multi-window bridge", () => {
       .toEqual([1, 1]);
   });
 
+  test("notifies subscribers when a live window is detached (RD-026)", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+    const viewer = await windowFor(app, "viewer");
+
+    for (const page of [editor, viewer]) {
+      await page.evaluate(async () => {
+        await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+        await globalThis.fixtureRenderer.subscribe("notice", "event", "notice");
+      });
+    }
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+
+    await app.evaluate(() => globalThis.__rxBridgeProbe.detachWindow("editor"));
+
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toMatchObject({ error: "CANCELLED" });
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("notice")),
+      )
+      .toMatchObject({ error: "CANCELLED" });
+    await expect(
+      editor.evaluate(() =>
+        globalThis.fixtureRenderer.snapshotStatus("status"),
+      ),
+    ).resolves.toBe("stale");
+
+    // detach된 창의 새 subscribe·RPC는 RPC와 같은 FORBIDDEN을 받는다.
+    await editor.evaluate(async () => {
+      await globalThis.fixtureRenderer.subscribe(
+        "status-after",
+        "state",
+        "status",
+      );
+    });
+    await expect
+      .poll(() =>
+        editor.evaluate(() =>
+          globalThis.fixtureRenderer.received("status-after"),
+        ),
+      )
+      .toMatchObject({ error: "FORBIDDEN" });
+    await expect(
+      editor.evaluate(() =>
+        globalThis.fixtureRenderer.call("ping", "after-detach"),
+      ),
+    ).resolves.toEqual({ ok: false, code: "FORBIDDEN" });
+
+    // 다른 창(viewer)은 영향 없이 계속 State·Event를 수신한다.
+    await app.evaluate(() => {
+      globalThis.__rxBridgeProbe.setStatus("after-detach");
+      globalThis.__rxBridgeProbe.emit("notice", ["after-detach"]);
+    });
+    await expect
+      .poll(() =>
+        viewer.evaluate(() => [
+          globalThis.fixtureRenderer.received("status").values.at(-1),
+          globalThis.fixtureRenderer.received("notice").values,
+        ]),
+      )
+      .toEqual(["after-detach", ["after-detach"]]);
+  });
+
+  test("notifies every window's subscribers when the whole server is disposed (RD-026)", async () => {
+    app = await launch(fixture);
+    const editor = await windowFor(app, "editor");
+    const viewer = await windowFor(app, "viewer");
+
+    for (const page of [editor, viewer]) {
+      await page.evaluate(async () => {
+        await globalThis.fixtureRenderer.subscribe("status", "state", "status");
+      });
+    }
+    await expect
+      .poll(() =>
+        editor.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+    await expect
+      .poll(() =>
+        viewer.evaluate(() => globalThis.fixtureRenderer.received("status")),
+      )
+      .toEqual({ values: ["ready"] });
+
+    await app.evaluate(() => globalThis.__rxBridgeProbe.disposeServer());
+
+    for (const page of [editor, viewer]) {
+      await expect
+        .poll(() =>
+          page.evaluate(() => globalThis.fixtureRenderer.received("status")),
+        )
+        .toMatchObject({ error: "CANCELLED" });
+      await expect(
+        page.evaluate(() =>
+          globalThis.fixtureRenderer.snapshotStatus("status"),
+        ),
+      ).resolves.toBe("stale");
+    }
+  });
+
   // DELTA-01 (RD-025 결함 재현): main frame `did-start-navigation`은 문서가
   // 실제로 안 바뀌는 이동(pushState·hash·`will-navigate` 차단)에서도 발생하는데,
   // `electron-adapter.ts`의 `onLifecycle`이 `_inPlace` 인자를 무시하고 매번
