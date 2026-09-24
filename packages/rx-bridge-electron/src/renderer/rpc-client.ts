@@ -61,7 +61,6 @@ export class RpcClient {
     const requestId = createOpaqueId("request");
     let settled = false;
     let sent = false;
-    let cancellationSent = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let abortListener: (() => void) | undefined;
     let disposeListener: (() => void) | undefined;
@@ -87,19 +86,21 @@ export class RpcClient {
         }
       };
 
+      // 확정을 cancel 전송보다 먼저 선점한다. `transport.cancel`이 이 호출의
+      // abort·dispose를 동기로 재진입시켜도 먼저 발생한 원인이 이기고 cancel은
+      // 한 번만 나간다.
       const cancelOnce = (error: RemoteError): void => {
-        if (settled) {
+        if (!beginSettlement()) {
           return;
         }
-        if (sent && !cancellationSent) {
-          cancellationSent = true;
+        if (sent) {
           try {
             this.#transport.cancel(requestId);
           } catch {
             // Local settlement must not depend on cancellation delivery.
           }
         }
-        rejectOnce(error);
+        reject(error);
       };
 
       disposeListener = () => {

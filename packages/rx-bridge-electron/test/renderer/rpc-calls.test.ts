@@ -188,7 +188,7 @@ describe("renderer RPC races", () => {
     await Promise.resolve();
   });
 
-  test("sends cancel once when transport.cancel re-enters the call's abort", async () => {
+  test("keeps the first cancellation cause and sends cancel once when transport.cancel re-enters the call's abort", async () => {
     vi.useFakeTimers();
     const transport = new FakeTransport();
     const controller = new AbortController();
@@ -212,7 +212,7 @@ describe("renderer RPC races", () => {
     await vi.advanceTimersByTimeAsync(25);
     await observed;
 
-    expect(settlements).toHaveLength(1);
+    expect(settlements).toEqual(["DEADLINE_EXCEEDED"]);
     expect(transport.cancellations).toEqual([requestId]);
   });
 
@@ -447,6 +447,31 @@ describe("renderer RPC dispose", () => {
     transport.resolveInvocation(0, success(requestId));
 
     await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
+  });
+
+  test("keeps the dispose cause when transport.cancel re-enters the call's abort", async () => {
+    const transport = new FakeTransport();
+    const controller = new AbortController();
+    const recordCancel = transport.cancel.bind(transport);
+    transport.cancel = (requestId) => {
+      recordCancel(requestId);
+      controller.abort();
+    };
+    const api = await createRendererApi<AppBridge>(transport);
+
+    const resultPromise = api.hardware.rpc.connect(
+      { deviceId: "d1" },
+      { signal: controller.signal },
+    );
+    const requestId = transport.invocations[0]!.requestId;
+
+    api.dispose();
+
+    await expect(resultPromise).rejects.toMatchObject({
+      code: "CANCELLED",
+      message: "Renderer API is disposed.",
+    });
+    expect(transport.cancellations).toEqual([requestId]);
   });
 
   test("settles as CANCELLED even when the transport cancel call throws", async () => {

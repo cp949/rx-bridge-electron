@@ -282,7 +282,7 @@ const scopedDataEvent = scopedEvent(
 
 루트 API는 `api.dispose()`와 `api[Symbol.dispose]`를 같은 함수로 노출하며, 호출은 되돌릴 수 없는 최종 종료입니다(근거: [ADR 0006](../../docs/adr/0006-shutdown-contract.md)). 진행 중인 RPC는 `RemoteError("CANCELLED", "Renderer API is disposed.")`로 즉시 reject되고, 이미 Main에 전송된 요청에는 best-effort cancel을 보냅니다. 활성 State/Event 구독은 `unsubscribe` 전송 후 `complete()`됩니다(`error`가 아닙니다). 종료 후 호출한 RPC·subscribe는 전송 없이 같은 `CANCELLED` 오류로 끝납니다. 반복 `dispose()` 호출은 no-op입니다. `dispose`는 루트 도메인 이름으로 예약되어 있어 최상위 도메인 이름이 `dispose`인 계약(`{ dispose: {...} }`, `{ dispose: { x: {...} } }`)은 거부됩니다. 하위 segment나 operation 이름으로는 계속 쓸 수 있습니다(예: `device/dispose` 도메인, `api.device.rpc.dispose`).
 
-각 RPC는 structured clone이 가능한 입력값 하나를 받습니다. `AbortSignal`과 `timeoutMs`는 별도 `CallOptions`로 전달합니다. 취소, timeout, 응답 중 하나만 최종 결과가 됩니다. 원격 실패는 `FORBIDDEN`, `INVALID_ARGUMENT`, `CANCELLED`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED` 같은 프로토콜 코드를 가진 `RemoteError` 값으로 전달됩니다. `DEADLINE_EXCEEDED`는 Renderer의 로컬 `timeoutMs`뿐 아니라 Main이 `resourceLimits.maxRpcDurationMs`로 스스로 설정한 서버 deadline에서도 올 수 있습니다 — 둘 중 먼저 확정되는 쪽이 최종 결과입니다.
+각 RPC는 structured clone이 가능한 입력값 하나를 받습니다. `AbortSignal`과 `timeoutMs`는 별도 `CallOptions`로 전달합니다. 취소, timeout, 응답 중 먼저 일어난 하나만 최종 결과가 됩니다. 원격 실패는 `FORBIDDEN`, `INVALID_ARGUMENT`, `CANCELLED`, `DEADLINE_EXCEEDED`, `RESOURCE_EXHAUSTED` 같은 프로토콜 코드를 가진 `RemoteError` 값으로 전달됩니다. `DEADLINE_EXCEEDED`는 Renderer의 로컬 `timeoutMs`뿐 아니라 Main이 `resourceLimits.maxRpcDurationMs`로 스스로 설정한 서버 deadline에서도 올 수 있습니다 — 둘 중 먼저 확정되는 쪽이 최종 결과입니다.
 
 `RemoteState<T>`는 읽기 전용 Observable이며 `.snapshot`을 제공합니다.
 
