@@ -572,6 +572,48 @@ describe("api.dispose() root shutdown", () => {
     ).toHaveLength(0);
   });
 
+  test("재진입: 구독 해제 중 subscription-closed sink에서 dispose해도 그 구독의 unsubscribe는 1회 보낸다", async () => {
+    const transport = bridgeTransport();
+    const sinkEvents: RendererDiagnostic[] = [];
+    let api!: RendererApi<AppBridge>;
+    api = await createRendererApi<AppBridge>({
+      transport,
+      diagnostics: {
+        record(event: RendererDiagnostic): void {
+          sinkEvents.push(event);
+          if (event.type === "subscription-closed") {
+            api.dispose();
+          }
+        },
+      },
+    });
+
+    let completed = 0;
+    const subscription = api.hardware.event.log$.subscribe({
+      complete: () => {
+        completed += 1;
+      },
+    });
+    subscription.unsubscribe();
+
+    // dispose보다 먼저 시작된 종료라 closeAll이 다시 닫지 않는다. Main 구독을
+    // 해제하려면 이 unsubscribe가 dispose 뒤에도 나가야 한다.
+    expect(transport.controls.map((command) => command.type)).toEqual([
+      "subscribe",
+      "unsubscribe",
+    ]);
+    expect(completed).toBe(0);
+    expect(
+      sinkEvents.filter((event) => event.type === "subscription-closed"),
+    ).toEqual([
+      {
+        type: "subscription-closed",
+        key: "event:hardware/log$",
+        cause: "unsubscribed",
+      },
+    ]);
+  });
+
   test.each(REENTRY_MATRIX)(
     "재진입 매트릭스: %s 지점에서 %s 재진입은 ADR 0006 종료 계약을 지킨다",
     async (point, action) => {

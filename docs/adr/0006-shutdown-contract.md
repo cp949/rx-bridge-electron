@@ -29,7 +29,7 @@
 
 _(개정: RD-030 — 종료 플래그는 수명 객체(`src/renderer/api-lifetime.ts`) 하나가 소유하고, 모든 부작용(RPC 확정, stream 정리) 전에 한 번 확정한다. 위 "사용자 코드가 동기로 실행되는 지점은 4번의 `complete()` 콜백 하나뿐이다"라는 서술은 ADR 0022가 `rpc-settled`·`subscription-closed` 진단 sink를 추가하면서 깨졌다 — 두 sink도 부작용 도중 동기로 호출되는 사용자 코드 지점이다. 세 지점(`rpc-settled` sink, `subscription-closed` sink, `complete()` 콜백) 중 어디서 재진입해도 종료 뒤 규칙(RPC·subscribe는 전송 없이 동기 `CANCELLED`, `dispose()`는 no-op)을 따른다. "루트 dispose가 `rpcClient.dispose()` 다음 `streams[Symbol.dispose]()`를 호출한다"는 서술은 수명 객체가 ② RPC 확정 → ③ stream 정리를 실행하는 것으로 대체됐다 — 순서 자체는 같다.)_
 
-_(개정: RD-031 — `dispose()` 뒤에는 해당 인스턴스가 그 어떤 control 메시지도 보내지 않는다. `closeAll`이 generation마다 보내는 unsubscribe 1회는 이 규칙의 예외다 — 이것은 종료 뒤에 벌어지는 부작용이 아니라 종료 절차 자체가 하는 일이다. `next` 콜백 안에서 `api.dispose()`가 호출되어 batch 전달이 아직 진행 중이던 경우의 acknowledge 전송도 이 금지 대상에 포함된다. 반면 로컬에서 마지막 구독자가 해제된 뒤 보내는 acknowledge는 그대로 유지한다 — 이것은 받아들인 batch에 대한 확인이지 종료 계약이 아니다. 억제한 acknowledge는 진단으로 기록하지 않는다. 근거는 ROADMAP.md#RD-031에 있다.)_
+_(개정: RD-031 — `dispose()` 뒤에는 해당 인스턴스가 그 어떤 control 메시지도 보내지 않는다. generation 종료가 보내는 unsubscribe 1회는 이 규칙의 예외다 — `closeAll`이 남은 generation마다 보내는 것, 그리고 dispose보다 먼저 시작된 구독 해제가 `subscription-closed` sink 재진입으로 dispose된 뒤 마저 보내는 것이다. 둘 다 종료 뒤에 새로 시작하는 부작용이 아니라 Main 구독을 해제하는 종료 절차의 일부다. `next` 콜백 안에서 `api.dispose()`가 호출되어 batch 전달이 아직 진행 중이던 경우의 acknowledge 전송도 이 금지 대상에 포함된다. 반면 로컬에서 마지막 구독자가 해제된 뒤 보내는 acknowledge는 그대로 유지한다 — 이것은 받아들인 batch에 대한 확인이지 종료 계약이 아니다. 억제한 acknowledge는 진단으로 기록하지 않는다. 근거는 ROADMAP.md#RD-031에 있다.)_
 
 ## Main: `server.dispose()`와 bind `dispose()`
 

@@ -10,19 +10,20 @@ import type { ApiLifetime } from "./api-lifetime.js";
 import {
   recordRendererDiagnostic,
   type RendererDiagnosticsSink,
+  type SubscriptionCloseCause,
 } from "./diagnostics.js";
 import { createOpaqueId } from "./ids.js";
 import { localError, RemoteError } from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
+/**
+ * generation 하나의 통지 대상. `error`와 `complete`는 둘 중 하나만 generation당
+ * 최대 1회 호출된다. generation이 닫힌 뒤에는(통지 없이 닫히는 `unsubscribed`
+ * 포함) `next`를 포함해 어떤 handler도 호출되지 않는다.
+ */
 export interface StreamGenerationHandlers {
   next(value: BridgeValue): void;
-  /**
-   * generation당 최대 1회만 호출된다. `#terminate`가 이미 이 generation을
-   * 닫았으면(handler 통지가 없는 cause 포함) 다시 호출되지 않는다.
-   */
   error(error: RemoteError): void;
-  /** `error`와 배타적으로 generation당 최대 1회만 호출된다. 위 계약과 동일하다. */
   complete(): void;
 }
 
@@ -34,15 +35,12 @@ interface StreamGeneration {
 }
 
 /**
- * generation 종료 원인의 판별 유니온(모듈 내부 전용). cause 문자열은
- * `diagnostics.ts`의 `SubscriptionCloseCause`와 같은 값을 쓴다. `remote-error`만
- * 원격 오류 payload를 싣는다.
+ * generation 종료 원인의 판별 유니온(모듈 내부 전용). cause는
+ * `subscription-closed` 진단의 cause와 같고, `remote-error`만 원격 오류
+ * payload를 싣는다.
  */
 type GenerationEnd =
-  | {
-      readonly cause:
-        "unsubscribed" | "disposed" | "completed" | "transport-failed";
-    }
+  | { readonly cause: Exclude<SubscriptionCloseCause, "remote-error"> }
   | { readonly cause: "remote-error"; readonly error: RpcErrorPayload };
 
 function remoteError(payload: RpcErrorPayload): RemoteError {
@@ -153,23 +151,25 @@ export class StreamMultiplexer {
       cause: end.cause,
       ...(end.cause === "remote-error" ? { code: end.error.code } : {}),
     });
-    if (end.cause === "unsubscribed" || end.cause === "disposed") {
-      this.#sendControl({ type: "unsubscribe", subscriptionId });
-    }
+    // cause → (unsubscribe 전송, handler 통지) 표. 전송이 있으면 통지보다 먼저다.
     switch (end.cause) {
-      case "transport-failed":
-        generation.handlers.error(
-          localError("INTERNAL", "Stream transport failed."),
-        );
+      case "unsubscribed":
+        this.#sendControl({ type: "unsubscribe", subscriptionId });
+        break;
+      case "disposed":
+        this.#sendControl({ type: "unsubscribe", subscriptionId });
+        generation.handlers.complete();
+        break;
+      case "completed":
+        generation.handlers.complete();
         break;
       case "remote-error":
         generation.handlers.error(remoteError(end.error));
         break;
-      case "disposed":
-      case "completed":
-        generation.handlers.complete();
-        break;
-      case "unsubscribed":
+      case "transport-failed":
+        generation.handlers.error(
+          localError("INTERNAL", "Stream transport failed."),
+        );
         break;
     }
   }
@@ -245,8 +245,8 @@ export class StreamMultiplexer {
         }
         generation.handlers.next(value);
       }
-      // dispose 뒤에는 ack를 포함한 어떤 control도 보내지 않는다(ADR 0006).
-      // 로컬 마지막 구독자 해제로 인한 ack는 받아들인 batch의 확인이므로 이 조건과 무관하다.
+      // `next` 콜백 안에서 dispose됐으면 ack를 보내지 않는다(ADR 0006 RD-031 개정).
+      // 로컬 마지막 구독자 해제 뒤의 ack는 받아들인 batch의 확인이라 보낸다.
       if (this.#lifetime.disposed) {
         return;
       }
