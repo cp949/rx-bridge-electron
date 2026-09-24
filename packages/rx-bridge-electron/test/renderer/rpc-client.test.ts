@@ -147,6 +147,33 @@ describe("renderer handshake and API proxy", () => {
     },
   );
 
+  test.each([
+    [
+      "malformed",
+      { protocolVersion: 1, clientId: "client-1" },
+      "Malformed bridge handshake.",
+    ],
+    [
+      "unsupported version",
+      {
+        protocolVersion: 2,
+        clientId: "client-1",
+        manifest: { rpc: [], state: [], event: [] },
+      },
+      "Unsupported bridge handshake.",
+    ],
+  ])(
+    "names the handshake failure in the INTERNAL message: %s",
+    async (_label, value, message) => {
+      const transport = new FakeTransport();
+      transport.handshake = Promise.resolve(value);
+
+      await expect(
+        createRendererApi<AppBridge>(transport),
+      ).rejects.toMatchObject({ code: "INTERNAL", message });
+    },
+  );
+
   test("maps a handshake transport failure to a safe INTERNAL error", async () => {
     const transport = new FakeTransport();
     transport.handshake = Promise.reject(

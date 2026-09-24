@@ -24,12 +24,15 @@ export interface ProtocolEnvelope {
   readonly clientId: string;
 }
 
-/** `protocolVersion`·`clientId`를 채운 envelope에 `body`를 합친다. */
+/**
+ * `body`에 `protocolVersion`·`clientId`를 붙인다. envelope 필드는 `body`의 같은
+ * 이름 필드보다 우선한다 — `clientId`는 신뢰 경계 값이라 body가 덮어쓸 수 없다.
+ */
 export function withEnvelope<T extends object>(
   clientId: string,
   body: T,
 ): ProtocolEnvelope & T {
-  return { protocolVersion: PROTOCOL_VERSION, clientId, ...body };
+  return { ...body, protocolVersion: PROTOCOL_VERSION, clientId };
 }
 
 export type HandshakeRequest = ProtocolEnvelope;

@@ -55,7 +55,7 @@ RPC 거부는 사유와 무관하게 `FORBIDDEN "Bridge sender is not authorized
 
 이 helper를 별도 파일에 둔 이유는 preload 번들 제약 때문이다: preload는 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들하고, adapter의 fallback도 이 helper를 쓴다. `create-bridge-server.ts`(값으로 `rxjs`와 서버 구현을 가져온다)에 두면 preload 번들에 server와 `rxjs`가 끌려온다(ADR 0010 §14가 기록한 것과 같은 제약, TRP-002). `protocol-error.ts`는 `RpcResponse` 타입 전용 import 하나만 가지며 런타임 import가 없다.
 
-_(개정: RD-019 — 채널 상수(`ELECTRON_BRIDGE_CHANNELS` 등)의 정의가 `src/protocol/electron-channels.ts`로 옮겨져 `electron-adapter.ts`는 그 상수를 재수출만 한다. preload도 이제 `src/protocol/electron-channels.ts`에서 직접 import하므로, 이 문단이 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 더 이상 성립하지 않는다. 그렇다고 `protocol-error.ts`를 `create-bridge-server.ts`에 합칠 이유가 생기는 것은 아니다 — 이 파일이 런타임 import 없는 leaf로 남아야 preload가 `create-bridge-server.ts`(`rxjs`)를 값으로 끌어들일 경로 자체가 없다는 성질은 채널 상수 이동과 무관하게 유지된다. 파일 분리는 그대로 둔다.)_
+_(개정: RD-019 — 채널 상수(`ELECTRON_BRIDGE_CHANNELS` 등)의 정의가 `src/protocol/electron-channels.ts`로 옮겨져 `electron-adapter.ts`는 그 상수를 재수출만 한다. preload도 이제 `src/protocol/electron-channels.ts`에서 직접 import하므로, 이 문단이 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 더 이상 성립하지 않는다. `protocol-error.ts`는 이제 envelope 조립을 위해 `../protocol/index.js`에서 `withEnvelope`를 값으로 import한다 — "런타임 import가 없다"는 위 서술도 더 이상 사실이 아니다. preload·protocol·Renderer 어느 쪽도 이 파일을 import하지 않으므로 preload 번들에는 영향이 없다. 파일 분리는 그대로 둔다 — adapter fallback이 이 helper를 쓰려고 `create-bridge-server.ts`를 값으로 import할 필요가 없게 한다.)_
 
 cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(void, 기존과 동일) — 대신 진단에 기록한다(결정 4).
 

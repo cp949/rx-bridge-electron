@@ -6,6 +6,7 @@ import type { PublicManifest } from "../contract/index.js";
 import type { BridgeApi } from "../contract/bridge-types.js";
 import type { Observable } from "rxjs";
 import {
+  BridgeProtocolError,
   parseHandshakeResponse,
   type BridgeValue,
   type HandshakeResponse,
@@ -157,17 +158,17 @@ function parseHandshake(value: unknown): {
   readonly manifest: PublicManifest;
   readonly tree: ManifestNode;
 } {
-  // envelope 파싱 한도는 protocol 내부 `ENVELOPE_LIMITS`가 결정한다(DELTA-03).
-  // 여기서는 더 이상 별도 한도를 넘기지 않으므로, 예전에 있던 얕은 구조 사전
-  // 검사(정확히 3개 키)와 `parseHandshakeResponse`의 검사가 완전히 중복이었다
-  // — 하나로 합친다. 실패 사유(malformed·unsupported version 등)는 하나의
-  // 메시지로 합쳐진다: 문구는 계약이 아니다 — 계약은 code `INTERNAL`이다
-  // (`rejectManifestEntry` 주석과 같은 원칙).
+  // 버전 불일치만 별도 문구로 구분한다(Main·preload 버전이 어긋난 배포를
+  // 알아보게). 문구는 계약이 아니다 — 계약은 code `INTERNAL`이다.
   let response: HandshakeResponse;
   try {
     response = parseHandshakeResponse(value);
-  } catch {
-    throw internal("Malformed bridge handshake.");
+  } catch (cause) {
+    throw internal(
+      cause instanceof BridgeProtocolError && cause.code === "VERSION_MISMATCH"
+        ? "Unsupported bridge handshake."
+        : "Malformed bridge handshake.",
+    );
   }
   const session: ProtocolEnvelope = {
     protocolVersion: response.protocolVersion,

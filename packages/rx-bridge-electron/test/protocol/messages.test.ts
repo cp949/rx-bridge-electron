@@ -9,6 +9,7 @@ import {
   parseWireCancelRequest,
   parseWireRpcRequest,
   parseWireStreamCommand,
+  withEnvelope,
 } from "../../src/protocol/messages.js";
 
 describe("protocol envelope parsers", () => {
@@ -135,5 +136,21 @@ describe("protocol envelope parsers", () => {
         result: undefined,
       }),
     ).toThrowError(expect.objectContaining({ code: "VERSION_MISMATCH" }));
+  });
+});
+
+describe("withEnvelope", () => {
+  test("keeps the envelope fields authoritative over body fields", () => {
+    expect(
+      withEnvelope("client-1", {
+        protocolVersion: 2,
+        clientId: "forged-client",
+        requestId: "request-1",
+      }),
+    ).toEqual({
+      protocolVersion: 1,
+      clientId: "client-1",
+      requestId: "request-1",
+    });
   });
 });
