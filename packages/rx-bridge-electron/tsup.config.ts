@@ -9,6 +9,7 @@ export default defineConfig({
     "src/renderer/index.ts",
     "src/main/index.ts",
     "src/preload/index.ts",
+    "src/testing/index.ts",
   ],
   format: ["esm"],
   sourcemap: true,

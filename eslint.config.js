@@ -43,7 +43,9 @@ export default tseslint.config(
     },
   },
   {
-    files: ["packages/rx-bridge-electron/src/{preload,protocol,renderer}/**/*.ts"],
+    files: [
+      "packages/rx-bridge-electron/src/{preload,protocol,renderer,testing}/**/*.ts",
+    ],
     rules: {
       "@typescript-eslint/no-restricted-imports": [
         "error",
@@ -53,8 +55,8 @@ export default tseslint.config(
               group: ["../main/*", "../../main/*"],
               allowTypeImports: true,
               message:
-                "preload/protocol/renderer는 src/main/*을 값으로 import할 수 없다 " +
-                "(TRP-002: docs/traps/TRP-002-preload-bundle-server-import.md). " +
+                "preload/protocol/renderer/testing은 src/main/*을 값으로 import할 수 " +
+                "없다(TRP-002: docs/traps/TRP-002-preload-bundle-server-import.md). " +
                 "타입만 필요하면 `import type`을 쓴다.",
             },
           ],
