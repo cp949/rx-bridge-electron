@@ -321,7 +321,22 @@ describe("Main session lifecycle", () => {
       },
       send,
     );
-    expect(send).not.toHaveBeenCalled();
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ type: "subscribed", sequence: 0 }),
+    );
+    expect(send).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
+    );
   });
 
   test("repeated server.dispose() calls are no-ops", async () => {

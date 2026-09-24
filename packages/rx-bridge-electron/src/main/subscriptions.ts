@@ -11,7 +11,7 @@ import {
 } from "../protocol/index.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import { recordDiagnostic } from "./diagnostics.js";
-import type { DocumentSession } from "./document-sessions.js";
+import { notifiesRenderer, type DocumentSession } from "./document-sessions.js";
 import { serializeError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import {
@@ -86,6 +86,11 @@ const internalError: RpcErrorPayload = {
 const overflowError: RpcErrorPayload = {
   code: "STREAM_OVERFLOW",
   message: "Event buffer capacity exceeded.",
+};
+/** detach·`server.dispose()`로 살아 있는 문서의 세션이 끝날 때 스트림에 보내는 종료 사유. */
+const sessionEndedError: RpcErrorPayload = {
+  code: "CANCELLED",
+  message: "Bridge session ended.",
 };
 
 /**
@@ -210,6 +215,8 @@ export class Subscriptions {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
         controller.abort();
+        if (notifiesRenderer(session.signal))
+          this.#pendingCancelled(command, send);
       },
     };
     state.pending.set(command.subscriptionId, entry);
@@ -349,7 +356,15 @@ export class Subscriptions {
       send,
       registration,
       controller,
-      onSessionAbort: () => this.#close(consumer),
+      onSessionAbort: () => {
+        if (notifiesRenderer(session.signal))
+          this.#send(consumer, {
+            type: "error",
+            sequence: ++consumer.sequence,
+            error: sessionEndedError,
+          });
+        this.#close(consumer);
+      },
       sourceDetached: false,
       pendingState: undefined,
       hasPendingState: false,
@@ -431,6 +446,32 @@ export class Subscriptions {
           type: "error" as const,
           sequence: 1,
           error,
+        }),
+      );
+    } catch {
+      // A closed renderer route has no subscriber to notify.
+    }
+  }
+
+  /**
+   * `authorize` 대기 중 detach·dispose retire. `#reject`와 달리 session이 이미
+   * abort된 상태에서 보낸다(트리거 자체가 그 abort) — 전송 실패는 삼킨다(결정 6).
+   */
+  #pendingCancelled(command: SubscribeCommand, send: StreamSender): void {
+    try {
+      send(
+        withEnvelope(command.clientId, {
+          subscriptionId: command.subscriptionId,
+          type: "subscribed" as const,
+          sequence: 0,
+        }),
+      );
+      send(
+        withEnvelope(command.clientId, {
+          subscriptionId: command.subscriptionId,
+          type: "error" as const,
+          sequence: 1,
+          error: sessionEndedError,
         }),
       );
     } catch {

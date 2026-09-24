@@ -34,6 +34,9 @@ import type {
   SenderIdentity,
 } from "./types.js";
 
+/** RPC·stream subscribe admission 거부가 함께 쓰는 `FORBIDDEN` 문구. */
+const SENDER_UNAUTHORIZED_MESSAGE = "Bridge sender is not authorized.";
+
 const defaultLimits: PayloadLimits = {
   maxDepth: 32,
   maxEntries: 10_000,
@@ -211,7 +214,7 @@ function buildBridgeServer(
         return protocolError(
           envelope,
           "FORBIDDEN",
-          "Bridge sender is not authorized.",
+          SENDER_UNAUTHORIZED_MESSAGE,
         );
       }
       return rpcRequests.dispatch(admission.session, sender, envelope);
@@ -255,6 +258,28 @@ function buildBridgeServer(
       const admission = sessions.establish(sender, command.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
+        try {
+          send(
+            withEnvelope(command.clientId, {
+              subscriptionId: command.subscriptionId,
+              type: "subscribed" as const,
+              sequence: 0,
+            }),
+          );
+          send(
+            withEnvelope(command.clientId, {
+              subscriptionId: command.subscriptionId,
+              type: "error" as const,
+              sequence: 1,
+              error: {
+                code: "FORBIDDEN",
+                message: SENDER_UNAUTHORIZED_MESSAGE,
+              },
+            }),
+          );
+        } catch {
+          // 닫힌 renderer route는 통지 대상이 없다(best-effort).
+        }
         return;
       }
       await subscriptions.subscribe(admission.session, sender, command, send);

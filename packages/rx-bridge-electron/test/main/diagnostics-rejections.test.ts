@@ -139,6 +139,30 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
+  test("stream sender-unauthorized: subscribe with unattached webContents", async () => {
+    const { server, diagnostics } = setup({});
+    const messages: unknown[] = [];
+    await server.controlStream(
+      sender({ webContentsId: 99 }),
+      subscribeCommand(),
+      (message) => messages.push(message),
+    );
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed", sequence: 0 }),
+      expect.objectContaining({
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
+    ]);
+  });
+
   test("RPC authorize-denied includes the registered key", async () => {
     const { server, diagnostics } = setup({ authorize: () => false });
     await server.dispatchRpc(sender(), rpcRequest());
@@ -498,12 +522,61 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
+  test("stream sender-unauthorized: subscribe with retired clientId", async () => {
+    const { server, diagnostics } = setup({});
+    await server.controlStream(sender(), subscribeCommand(), () => {});
+    server.attach(new FakeTarget());
+    const messages: unknown[] = [];
+    await server.controlStream(
+      sender(),
+      subscribeCommand({ subscriptionId: testSubscriptionId(2) }),
+      (message) => messages.push(message),
+    );
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed", sequence: 0 }),
+      expect.objectContaining({
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
+    ]);
+  });
+
   test("RPC sender-unauthorized: server disposed", async () => {
     const { server, diagnostics } = setup({});
     server.dispose();
     await server.dispatchRpc(sender(), rpcRequest());
     expect(rejections(diagnostics)).toEqual([
       { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+  });
+
+  test("stream sender-unauthorized: subscribe after server disposed", async () => {
+    const { server, diagnostics } = setup({});
+    server.dispose();
+    const messages: unknown[] = [];
+    await server.controlStream(sender(), subscribeCommand(), (message) =>
+      messages.push(message),
+    );
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed", sequence: 0 }),
+      expect.objectContaining({
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
     ]);
   });
 
@@ -543,8 +616,22 @@ describe.each([
 
   test("subscribe", async () => {
     const { server, diagnostics } = setup({});
-    await server.controlStream(badSender, subscribeCommand(), () => {});
+    const messages: unknown[] = [];
+    await server.controlStream(badSender, subscribeCommand(), (message) =>
+      messages.push(message),
+    );
     expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
+    expect(messages).toEqual([
+      expect.objectContaining({ type: "subscribed", sequence: 0 }),
+      expect.objectContaining({
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
+    ]);
   });
 
   test("unsubscribe", async () => {

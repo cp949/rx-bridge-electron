@@ -456,7 +456,17 @@ describe("Main stream lifecycle and ordering", () => {
       command("subscribe", testSubscriptionId(1)),
       (message) => replay.push(message),
     );
-    expect(replay).toEqual([]);
+    expect(replay.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(replay.at(-1)).toMatchObject({
+      type: "error",
+      error: {
+        code: "FORBIDDEN",
+        message: "Bridge sender is not authorized.",
+      },
+    });
     const replacement: StreamMessage[] = [];
     await server.controlStream(
       sender(),
@@ -763,5 +773,257 @@ describe("Main stream lifecycle and ordering", () => {
     expect(diagnostics.record).toHaveBeenCalledWith(
       expect.objectContaining({ type: "validation-failed" }),
     );
+  });
+});
+
+describe("Main stream terminal notify on retire", () => {
+  test("detach retires an active State subscriber with CANCELLED, discarding an unacked pending value", async () => {
+    const { server, source, messages, send } = harness();
+    const detach = server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    source.next(2);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    detach();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("server.dispose() retires an active broadcast Event subscriber with CANCELLED", async () => {
+    const { server, messages, send } = harness();
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    server.dispose();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+  });
+
+  test("detach retires an active scoped Event subscriber with CANCELLED", async () => {
+    const upstream = new Subject<number>();
+    const server = createBridgeServer({
+      hardware: {
+        event: { change$: scopedEvent(() => upstream) },
+      },
+    });
+    const detach = server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => messages.push(message),
+    );
+    detach();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(upstream.observed).toBe(false);
+  });
+
+  test.each([
+    ["main-frame-navigation"],
+    ["render-process-gone"],
+    ["destroyed"],
+  ] as const)(
+    "%s retires an active subscriber without a stream termination",
+    async (reason) => {
+      const target = new FakeTarget();
+      const { server, messages, send } = harness();
+      server.attach(target);
+      await server.controlStream(
+        sender(),
+        command("subscribe", testSubscriptionId(1)),
+        send,
+      );
+      const before = messages.length;
+      target.fireLifecycle(reason);
+      expect(messages.slice(before)).toEqual([]);
+      expect(messages.slice(0, before).map((message) => message.type)).toEqual([
+        "subscribed",
+        "batch",
+      ]);
+      expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    },
+  );
+
+  test("a replacing clientId retires the previous active subscriber without a stream termination", async () => {
+    const { server, messages, send } = harness();
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1), "client-1"),
+      send,
+    );
+    const before = messages.length;
+    const replacement: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1), "client-2"),
+      (message) => replacement.push(message),
+    );
+    expect(messages.slice(before)).toEqual([]);
+    expect(replacement.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+  });
+
+  test("a send failure while notifying an active subscriber still closes it", async () => {
+    const source = new BehaviorSubject(1);
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(source) } },
+    });
+    const detach = server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    let calls = 0;
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      (message) => {
+        calls += 1;
+        if (calls === 3) throw new Error("closed frame");
+        messages.push(message);
+      },
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    expect(() => detach()).not.toThrow();
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("detach during pending authorization sends subscribed then CANCELLED", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const server = createBridgeServer(
+      {
+        hardware: { event: { change$: broadcastEvent(new Subject<number>()) } },
+      },
+      { authorize: () => authorization },
+    );
+    const detach = server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => messages.push(message),
+    );
+    detach();
+    allow(true);
+    await pending;
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+  });
+
+  test("server.dispose() during pending authorization sends subscribed then CANCELLED", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const server = createBridgeServer(
+      {
+        hardware: { event: { change$: broadcastEvent(new Subject<number>()) } },
+      },
+      { authorize: () => authorization },
+    );
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => messages.push(message),
+    );
+    server.dispose();
+    allow(true);
+    await pending;
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages[1]).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+  });
+
+  test("navigation during pending authorization sends nothing", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const target = new FakeTarget();
+    const server = createBridgeServer(
+      {
+        hardware: { event: { change$: broadcastEvent(new Subject<number>()) } },
+      },
+      { authorize: () => authorization },
+    );
+    server.attach(target);
+    const messages: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => messages.push(message),
+    );
+    target.endDocument();
+    allow(true);
+    await pending;
+    expect(messages).toEqual([]);
   });
 });
