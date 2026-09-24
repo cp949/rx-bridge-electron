@@ -94,7 +94,7 @@ const overflowError: RpcErrorPayload = {
  * consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
  */
 export class Subscriptions {
-  readonly #registrations = new Map<string, Registration>();
+  readonly #table: RegistrationTable;
   readonly #shared = new Map<string, SharedSource>();
   readonly #sessions = new WeakMap<DocumentSession, SessionState>();
   /**
@@ -115,20 +115,11 @@ export class Subscriptions {
     diagnostics?: DiagnosticsSink,
     authorize?: Authorize,
   ) {
+    this.#table = table;
     this.#limits = limits;
     this.#resourceLimits = resourceLimits;
     this.#diagnostics = diagnostics;
     this.#authorize = authorize;
-    for (const entry of table.state.values())
-      this.#registrations.set(
-        `state:${entry.domainName}/${entry.operation}`,
-        entry,
-      );
-    for (const entry of table.event.values())
-      this.#registrations.set(
-        `event:${entry.domainName}/${entry.operation}`,
-        entry,
-      );
   }
 
   public subscriptionCount(): number {
@@ -173,7 +164,8 @@ export class Subscriptions {
     if (sequence <= state.watermark) return;
     state.watermark = sequence;
 
-    const registration = this.#registrations.get(command.key);
+    const registration =
+      this.#table.state.get(command.key) ?? this.#table.event.get(command.key);
     if (registration === undefined) {
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",

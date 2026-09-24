@@ -221,8 +221,7 @@ export class RpcRequests {
   }
 
   #lookupRegistration(key: string): RpcRegistrationEntry | undefined {
-    if (!key.startsWith("rpc:")) return undefined;
-    return this.#table.rpc.get(key.slice(4));
+    return this.#table.rpc.get(key);
   }
 
   #stateFor(session: DocumentSession): SessionState {

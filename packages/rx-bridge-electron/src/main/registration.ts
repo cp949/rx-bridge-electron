@@ -2,6 +2,15 @@ import { Observable } from "rxjs";
 
 import type { PublicManifest, Schema } from "../contract/index.js";
 import type { BridgeValue } from "../protocol/index.js";
+import {
+  checkDomainSegments,
+  checkOperationName,
+  formatWireKey,
+  isOperationCategory,
+  OPERATION_CATEGORIES,
+  OperationPathTrie,
+  type OperationCategory,
+} from "../protocol/operation-key.js";
 import type {
   BroadcastEventSource,
   CurrentValueSource,
@@ -10,13 +19,6 @@ import type {
   ScopedEventSource,
 } from "./sources.js";
 import type { RpcHandler } from "./types.js";
-
-const reservedSegments = new Set([
-  "__proto__",
-  "prototype",
-  "constructor",
-  "then",
-]);
 
 /**
  * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
@@ -53,81 +55,95 @@ function assertOwnDataRecord(
   }
 }
 
-/** "domain/operation" 경로를 `/`로 나누고 예약어·빈 segment·dotted segment를 거부한다. */
+/**
+ * "domain/operation" 경로를 `/`로 나누고 예약어·빈 segment·dotted segment를
+ * 거부한다. 코어 `checkOperationName`(단일 segment 기본 검사)을 조각별로
+ * 돌린다 — `checkDomainSegments`를 쓰지 않는 이유: 이 함수는 impl namespace
+ * key(`walkImplNode`의 `"a/b"` 형태 key, 결정 8) 하나만 검사하는 자리라
+ * "루트 `dispose` 금지"·"카테고리 이름 금지"를 적용하면 안 된다(그 두 규칙은
+ * 도메인 전체 경로 기준이며 `assertDomainName`이 전체 이름에 따로 적용한다).
+ */
 function assertPathSegments(path: string, label: string): readonly string[] {
   const segments = path.split("/");
   for (const segment of segments) {
-    if (segment.length === 0) {
-      throw new TypeError(`${label} cannot contain an empty segment.`);
-    }
-    if (segment.includes(".")) {
-      throw new TypeError(`${label} cannot contain dotted segments.`);
-    }
-    if (reservedSegments.has(segment)) {
-      throw new TypeError(`${label} contains reserved segment '${segment}'.`);
+    const verdict = checkOperationName(segment);
+    if (verdict.ok) continue;
+    switch (verdict.reason) {
+      case "empty-segment":
+        throw new TypeError(`${label} cannot contain an empty segment.`);
+      case "dotted-segment":
+        throw new TypeError(`${label} cannot contain dotted segments.`);
+      case "reserved-segment":
+        throw new TypeError(
+          `${label} contains reserved segment '${verdict.segment}'.`,
+        );
+      default:
+        // segment는 이미 "/" 없이 쪼갠 조각이라 nested-operation·
+        // unknown-category는 checkOperationName에서 나올 수 없다.
+        throw new TypeError(`${label} is invalid.`);
     }
   }
   return segments;
 }
 
-const categorySegments = new Set(["rpc", "state", "event"]);
-
 /** 도메인 이름의 segment 규칙(예약어 금지)에 더해 루트 `dispose`·`rpc`/`state`/`event`를 거부한다. */
 function assertDomainName(name: string): void {
-  const segments = assertPathSegments(name, "Domain name");
-  if (segments[0] === "dispose") {
-    throw new TypeError("Domain name contains reserved segment 'dispose'.");
-  }
-  for (const segment of segments) {
-    if (categorySegments.has(segment)) {
+  const verdict = checkDomainSegments(name.split("/"));
+  if (verdict.ok) return;
+  switch (verdict.reason) {
+    case "empty-segment":
+      throw new TypeError("Domain name cannot contain an empty segment.");
+    case "dotted-segment":
+      throw new TypeError("Domain name cannot contain dotted segments.");
+    case "reserved-segment":
       throw new TypeError(
-        `Domain name contains reserved segment '${segment}'.`,
+        `Domain name contains reserved segment '${verdict.segment}'.`,
       );
-    }
+    default:
+      // checkDomainSegments는 nested-operation·unknown-category를 반환하지 않는다.
+      throw new TypeError("Domain name is invalid.");
   }
 }
 
 /** operation 이름은 단일 segment여야 한다(중첩 경로 금지). */
 function assertOperationName(name: string, label: string): void {
-  if (assertPathSegments(name, label).length !== 1) {
-    throw new TypeError(`${label} '${name}' cannot be a nested path.`);
+  const verdict = checkOperationName(name);
+  if (verdict.ok) return;
+  switch (verdict.reason) {
+    case "empty-segment":
+      throw new TypeError(`${label} cannot contain an empty segment.`);
+    case "dotted-segment":
+      throw new TypeError(`${label} cannot contain dotted segments.`);
+    case "reserved-segment":
+      throw new TypeError(
+        `${label} contains reserved segment '${verdict.segment}'.`,
+      );
+    case "nested-operation":
+      throw new TypeError(`${label} '${name}' cannot be a nested path.`);
+    default:
+      // checkOperationName은 unknown-category를 반환하지 않는다.
+      throw new TypeError(`${label} is invalid.`);
   }
 }
 
 /**
- * "domain/operation" 전체 경로들을 하나의 trie에 누적하며 leaf/namespace
- * 충돌과 중복 경로를 검출한다. impl 트리 순회(`walkImplNode`)가 등록 경로를
- * 쌓을 때 쓴다.
+ * trie 실패 reason을 Main의 현재 두 메시지로 번역한다. 코어
+ * `OperationPathTrie.add`(`src/protocol/operation-key.ts`)가 실제 충돌 검출
+ * 알고리즘을 소유하고, 이 함수는 메시지 조립만 한다.
  */
-interface PathNode {
-  leaf: boolean;
-  readonly children: Map<string, PathNode>;
-}
-
-function createPathTree(): PathNode {
-  return { leaf: false, children: new Map() };
-}
-
-function addPath(root: PathNode, path: string): void {
-  const segments = assertPathSegments(path, "Operation path");
-  let node = root;
-  for (const segment of segments) {
-    if (node.leaf) {
-      throw new TypeError(`Leaf/namespace collision at '${path}'.`);
-    }
-    let child = node.children.get(segment);
-    if (child === undefined) {
-      child = { leaf: false, children: new Map() };
-      node.children.set(segment, child);
-    }
-    node = child;
+function assertNoPathCollision(
+  trie: OperationPathTrie,
+  segments: readonly string[],
+  path: string,
+): void {
+  const verdict = trie.add(segments);
+  if (verdict.ok) return;
+  if (verdict.reason === "leaf-namespace-collision") {
+    throw new TypeError(`Leaf/namespace collision at '${path}'.`);
   }
-  if (node.leaf || node.children.size > 0) {
-    throw new TypeError(
-      `Duplicate path or leaf/namespace collision at '${path}'.`,
-    );
-  }
-  node.leaf = true;
+  throw new TypeError(
+    `Duplicate path or leaf/namespace collision at '${path}'.`,
+  );
 }
 
 /**
@@ -202,7 +218,7 @@ function manifestCategoryList(
   const list: string[] = [];
   for (const domainName of [...byDomain.keys()].sort())
     for (const operation of byDomain.get(domainName)!.slice().sort())
-      list.push(`${category}:${domainName}/${operation}`);
+      list.push(formatWireKey(category, domainName.split("/"), operation));
   return list;
 }
 
@@ -225,13 +241,6 @@ export function manifestFromTable(table: RegistrationTable): PublicManifest {
 // 제거했다). `options.schemas`/`options.errors`도 impl 트리와 같은 모양으로
 // 병렬 순회한다.
 // ---------------------------------------------------------------------------
-
-const CATEGORY_KEYS = ["rpc", "state", "event"] as const;
-type CategoryKey = (typeof CATEGORY_KEYS)[number];
-
-function isCategoryKey(key: string): key is CategoryKey {
-  return (CATEGORY_KEYS as readonly string[]).includes(key);
-}
 
 /** 경량 계약 event source의 기본 버퍼(확정 결정 4: capacity 100, overflow "error"). */
 const DEFAULT_EVENT_BUFFER = Object.freeze({
@@ -302,7 +311,7 @@ function walkImplNode(
   domainSegments: readonly string[],
   schemasNode: unknown,
   errorsNode: unknown,
-  pathTree: PathNode,
+  pathTrie: OperationPathTrie,
   rpcTable: Map<string, RpcRegistrationEntry>,
   stateTable: Map<string, StateRegistrationEntry>,
   eventTable: Map<string, EventRegistrationEntry>,
@@ -316,7 +325,7 @@ function walkImplNode(
   const schemasRecord = asOptionalRecord(schemasNode, "Schema entry");
   const errorsRecord = asOptionalRecord(errorsNode, "Errors entry");
 
-  for (const category of CATEGORY_KEYS) {
+  for (const category of OPERATION_CATEGORIES) {
     if (!Object.hasOwn(record, category)) continue;
     const domainName = domainSegments.join("/");
     assertDomainName(domainName);
@@ -335,7 +344,8 @@ function walkImplNode(
     for (const operation of Object.keys(categoryRecord)) {
       assertOperationName(operation, `${category} operation`);
       const path = `${domainName}/${operation}`;
-      addPath(pathTree, path);
+      assertNoPathCollision(pathTrie, path.split("/"), path);
+      const key = formatWireKey(category, domainSegments, operation);
       const value = categoryRecord[operation];
 
       if (category === "rpc") {
@@ -352,7 +362,7 @@ function walkImplNode(
             `Declared errors for 'rpc:${path}' must be an array of error codes.`,
           );
         }
-        rpcTable.set(path, {
+        rpcTable.set(key, {
           kind: "rpc",
           domainName,
           operation,
@@ -379,7 +389,7 @@ function walkImplNode(
         }
         const stateOutput = categorySchemas?.[operation] as
           Schema<BridgeValue> | undefined;
-        stateTable.set(path, {
+        stateTable.set(key, {
           kind: "state",
           domainName,
           operation,
@@ -408,7 +418,7 @@ function walkImplNode(
             : (source.buffer ?? DEFAULT_EVENT_BUFFER);
         const eventOutput = categorySchemas?.[operation] as
           Schema<BridgeValue> | undefined;
-        eventTable.set(path, {
+        eventTable.set(key, {
           kind: "event",
           domainName,
           operation,
@@ -422,14 +432,14 @@ function walkImplNode(
   }
 
   for (const key of Object.keys(record)) {
-    if (isCategoryKey(key)) continue;
+    if (isOperationCategory(key)) continue;
     assertPathSegments(key, "Domain name segment");
     walkImplNode(
       record[key],
       [...domainSegments, key],
       schemasRecord?.[key],
       errorsRecord?.[key],
-      pathTree,
+      pathTrie,
       rpcTable,
       stateTable,
       eventTable,
@@ -441,29 +451,30 @@ function walkImplNode(
  * `options.schemas`/`options.errors`에 impl에 없는 경로가 있으면 생성 시
  * `TypeError`로 거부한다(계획 항목 4의 마지막 요구사항). impl 트리 순회
  * (`walkImplNode`)는 impl에 실제로 있는 경로만 옵션에서 읽으므로, 옵션 쪽에만
- * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다.
+ * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다. `hasPath`는 wire
+ * key(`formatWireKey` 결과) 기준으로 조회한다(DELTA-03: table이 wire key로
+ * keyed).
  */
 function assertNoExtraOptionPaths(
   node: unknown,
   domainSegments: readonly string[],
   label: string,
-  hasPath: (category: CategoryKey, path: string) => boolean,
+  hasPath: (category: OperationCategory, key: string) => boolean,
 ): void {
   const record = asOptionalRecord(node, `${label} entry`);
   if (record === undefined) return;
   for (const key of Object.keys(record)) {
-    if (isCategoryKey(key)) {
-      const domainName = domainSegments.join("/");
+    if (isOperationCategory(key)) {
       const categoryRecord = asOptionalRecord(
         record[key],
         `${label} category entries`,
       );
       if (categoryRecord === undefined) continue;
       for (const operation of Object.keys(categoryRecord)) {
-        const path = `${domainName}/${operation}`;
-        if (!hasPath(key, path)) {
+        const wireKey = formatWireKey(key, domainSegments, operation);
+        if (!hasPath(key, wireKey)) {
           throw new TypeError(
-            `${label} path '${key}:${path}' has no matching implementation.`,
+            `${label} path '${wireKey}' has no matching implementation.`,
           );
         }
       }
@@ -489,7 +500,7 @@ export function buildRegistrationTableFromImpl(
   schemas: unknown,
   errors: unknown,
 ): RegistrationTable {
-  const pathTree = createPathTree();
+  const pathTrie = new OperationPathTrie();
   const rpcTable = new Map<string, RpcRegistrationEntry>();
   const stateTable = new Map<string, StateRegistrationEntry>();
   const eventTable = new Map<string, EventRegistrationEntry>();
@@ -498,17 +509,17 @@ export function buildRegistrationTableFromImpl(
     [],
     schemas,
     errors,
-    pathTree,
+    pathTrie,
     rpcTable,
     stateTable,
     eventTable,
   );
-  const hasPath = (category: CategoryKey, path: string): boolean =>
+  const hasPath = (category: OperationCategory, key: string): boolean =>
     category === "rpc"
-      ? rpcTable.has(path)
+      ? rpcTable.has(key)
       : category === "state"
-        ? stateTable.has(path)
-        : eventTable.has(path);
+        ? stateTable.has(key)
+        : eventTable.has(key);
   assertNoExtraOptionPaths(schemas, [], "options.schemas", hasPath);
   assertNoExtraOptionPaths(errors, [], "options.errors", hasPath);
   return {

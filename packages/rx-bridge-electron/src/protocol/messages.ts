@@ -4,6 +4,7 @@ import {
   type PayloadLimits,
   parseBridgeValue,
 } from "./bridge-value.js";
+import { OPERATION_CATEGORIES } from "./operation-key.js";
 
 export type TransportErrorCode =
   | "INVALID_ARGUMENT"
@@ -197,8 +198,7 @@ export function parseHandshakeResponse(
   assertKeys(record, ["protocolVersion", "clientId", "manifest"]);
   const manifest = parseRecord(record.manifest, limits);
   assertKeys(manifest, ["rpc", "state", "event"]);
-  const categories = ["rpc", "state", "event"] as const;
-  for (const category of categories) {
+  for (const category of OPERATION_CATEGORIES) {
     const values = manifest[category];
     if (
       !Array.isArray(values) ||
