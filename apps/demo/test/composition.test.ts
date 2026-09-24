@@ -30,8 +30,12 @@ describe("demo composition", () => {
     const composition = createDemoComposition();
     try {
       composition.server.attach(attachTarget(1, "main"));
-      const handshake = composition.server.handshake(sender(1), "client-1");
-      expect(handshake?.manifest).toEqual({
+      const handshake = composition.server.handshake(sender(1), {
+        protocolVersion: 1,
+        clientId: "client-1",
+      });
+      if (!("manifest" in handshake)) throw new Error("expected a handshake");
+      expect(handshake.manifest).toEqual({
         rpc: [
           "rpc:device/connect",
           "rpc:device/disconnect",

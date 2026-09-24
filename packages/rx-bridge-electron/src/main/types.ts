@@ -1,9 +1,4 @@
-import type {
-  BridgeValue,
-  RpcResponse,
-  WireCancelRequest,
-  WireRpcRequest,
-} from "../protocol/index.js";
+import type { BridgeValue, RpcResponse } from "../protocol/index.js";
 
 export interface SenderIdentity {
   readonly webContentsId: number;
@@ -91,11 +86,8 @@ export interface DiagnosticsSink {
 
 export interface BridgeServer {
   attach(target: AttachedTarget): () => void;
-  dispatchRpc(
-    sender: SenderIdentity,
-    envelope: WireRpcRequest,
-  ): Promise<RpcResponse>;
-  cancel(sender: SenderIdentity, envelope: WireCancelRequest): void;
+  dispatchRpc(sender: SenderIdentity, value: unknown): Promise<RpcResponse>;
+  cancel(sender: SenderIdentity, value: unknown): void;
   dispose(): void;
 }
 

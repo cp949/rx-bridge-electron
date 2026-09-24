@@ -12,25 +12,11 @@ import type {
 // ADR 0013 참고.
 import * as electron from "electron";
 
-import {
-  BridgeProtocolError,
-  parseHandshakeRequest,
-  parseWireCancelRequest,
-  parseWireRpcRequest,
-  parseWireStreamCommand,
-  type RpcResponse,
-  type StreamMessage,
-} from "../protocol/index.js";
+import { BridgeProtocolError, type StreamMessage } from "../protocol/index.js";
 import type { StreamSender } from "./subscriptions.js";
 import type { StreamBridgeServer } from "./create-bridge-server.js";
-import { recordAdapterRejection } from "./diagnostics.js";
-import type { AttachedTarget, RejectReason, SenderIdentity } from "./types.js";
-
-const limits = {
-  maxDepth: Number.MAX_SAFE_INTEGER,
-  maxEntries: Number.MAX_SAFE_INTEGER,
-  maxStringBytes: Number.MAX_SAFE_INTEGER,
-};
+import { protocolError } from "./protocol-error.js";
+import type { AttachedTarget, SenderIdentity } from "./types.js";
 
 export interface ElectronBridgeChannels {
   readonly handshake: string;
@@ -90,30 +76,6 @@ function senderIdentity(
     frameId: frame.routingId,
     isMainFrame: event.sender.mainFrame === frame,
     origin: originOf(frame),
-  };
-}
-
-function recordRejection(
-  server: StreamBridgeServer,
-  reason: RejectReason,
-): void {
-  server[recordAdapterRejection]?.(reason);
-}
-
-function protocolError(value: unknown): RpcResponse {
-  const record = value !== null && typeof value === "object" ? value : {};
-  const clientValue = (record as Record<string, unknown>).clientId;
-  const requestValue = (record as Record<string, unknown>).requestId;
-  const clientId =
-    typeof clientValue === "string" ? clientValue : "invalid-client";
-  const requestId =
-    typeof requestValue === "string" ? requestValue : "invalid-request";
-  return {
-    protocolVersion: 1,
-    clientId,
-    requestId,
-    type: "error",
-    error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
   };
 }
 
@@ -179,71 +141,37 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       event.senderFrame?.send(channels.stream, message);
     };
   ipcMain.handle(channels.handshake, (event, value: unknown) => {
-    let request;
     try {
-      request = parseHandshakeRequest(value, limits);
+      return options.server.handshake(senderIdentity(event), value);
     } catch {
-      recordRejection(options.server, "malformed-envelope");
-      return protocolError(value);
-    }
-    try {
-      const identity = senderIdentity(event);
-      if (!identity.isMainFrame) {
-        recordRejection(options.server, "frame-not-main");
-        return protocolError(value);
-      }
-      if (!options.allowedOrigins.includes(identity.origin)) {
-        recordRejection(options.server, "origin-not-allowed");
-        return protocolError(value);
-      }
-      const response = options.server.handshake(identity, request.clientId);
-      if (response === undefined) {
-        // server already recorded `sender-unauthorized` for this rejection.
-        return protocolError(value);
-      }
-      return response;
-    } catch {
-      return protocolError(value);
+      return protocolError(
+        value,
+        "INVALID_ARGUMENT",
+        "Invalid bridge request.",
+      );
     }
   });
   ipcMain.handle(channels.rpc, async (event, value: unknown) => {
-    let request;
     try {
-      request = parseWireRpcRequest(value, limits);
+      return await options.server.dispatchRpc(senderIdentity(event), value);
     } catch {
-      recordRejection(options.server, "malformed-envelope");
-      return protocolError(value);
-    }
-    try {
-      return await options.server.dispatchRpc(senderIdentity(event), request);
-    } catch {
-      return protocolError(value);
+      return protocolError(
+        value,
+        "INVALID_ARGUMENT",
+        "Invalid bridge request.",
+      );
     }
   });
   const onCancel = (event: IpcMainEvent, value: unknown) => {
-    let request;
     try {
-      request = parseWireCancelRequest(value, limits);
-    } catch {
-      recordRejection(options.server, "malformed-envelope");
-      return;
-    }
-    try {
-      options.server.cancel(senderIdentity(event), request);
+      options.server.cancel(senderIdentity(event), value);
     } catch {}
   };
   const onControl = (event: IpcMainEvent, value: unknown) => {
-    let command;
-    try {
-      command = parseWireStreamCommand(value, limits);
-    } catch {
-      recordRejection(options.server, "malformed-envelope");
-      return;
-    }
     try {
       void options.server.controlStream(
         senderIdentity(event),
-        command,
+        value,
         streamSender(event),
       );
     } catch {}

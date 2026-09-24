@@ -7,15 +7,18 @@ import type {
   ErrorsFor,
   SchemasFor,
 } from "../contract/bridge-types.js";
-import type {
-  HandshakeResponse,
-  PayloadLimits,
-  RpcResponse,
-  WireCancelRequest,
-  WireRpcRequest,
-  WireStreamCommand,
+import {
+  BridgeProtocolError,
+  parseHandshakeRequest,
+  parseWireCancelRequest,
+  parseWireRpcRequest,
+  parseWireStreamCommand,
+  type HandshakeResponse,
+  type PayloadLimits,
+  type RpcResponse,
 } from "../protocol/index.js";
-import { recordAdapterRejection, recordDiagnostic } from "./diagnostics.js";
+import { recordDiagnostic } from "./diagnostics.js";
+import { protocolError } from "./protocol-error.js";
 import { RpcRequests } from "./rpc-requests.js";
 import { DocumentSessions } from "./document-sessions.js";
 import {
@@ -44,6 +47,31 @@ const defaultLimits: PayloadLimits = {
   maxStringBytes: 1_000_000,
   maxTotalBytes: 16_777_216,
 };
+
+/**
+ * envelope parse(version 포함) 단계의 한도. 옛 adapter가 쓰던 값과 같다
+ * (P4) — `options.payloadLimits`(contract 단계)와는 별개다. 여기서
+ * `payload-too-large`가 나면 안 되므로 넉넉하게 둔다.
+ */
+const envelopeLimits: PayloadLimits = {
+  maxDepth: Number.MAX_SAFE_INTEGER,
+  maxEntries: Number.MAX_SAFE_INTEGER,
+  maxStringBytes: Number.MAX_SAFE_INTEGER,
+};
+
+/**
+ * envelope parse 실패를 사유로 분류한다. `BridgeProtocolError`이고
+ * `VERSION_MISMATCH`면 `version-mismatch`, 그 외 모든 throw는
+ * `malformed-envelope`다(결정 6·7).
+ */
+function classifyParseFailure(
+  error: unknown,
+): "version-mismatch" | "malformed-envelope" {
+  return error instanceof BridgeProtocolError &&
+    error.code === "VERSION_MISMATCH"
+    ? "version-mismatch"
+    : "malformed-envelope";
+}
 
 const PAYLOAD_LIMIT_KEYS = [
   "maxDepth",
@@ -87,15 +115,14 @@ function assertPartialPayloadLimits(
 export interface StreamBridgeServer extends BridgeServer {
   handshake(
     sender: SenderIdentity,
-    clientId: string,
-  ): HandshakeResponse | undefined;
+    value: unknown,
+  ): HandshakeResponse | RpcResponse;
   controlStream(
     sender: SenderIdentity,
-    command: WireStreamCommand,
+    value: unknown,
     send: StreamSender,
   ): Promise<void>;
   getDiagnosticsSnapshot(): DiagnosticsSnapshot;
-  [recordAdapterRejection]?(reason: RejectReason): void;
 }
 
 interface CommonServerOptions {
@@ -157,7 +184,7 @@ function buildBridgeServer(
     options.authorize,
   );
   const error = (
-    envelope: WireRpcRequest,
+    envelope: { readonly clientId: string; readonly requestId: string },
     code: string,
     message: string,
   ): RpcResponse => ({
@@ -171,31 +198,49 @@ function buildBridgeServer(
     recordDiagnostic(options.diagnostics, { type: "rejected", reason });
   };
   return {
-    [recordAdapterRejection](reason: RejectReason): void {
-      recordDiagnostic(options.diagnostics, { type: "rejected", reason });
-    },
-    handshake(sender, clientId) {
-      const admission = sessions.establish(sender, clientId);
+    handshake(sender: SenderIdentity, value: unknown) {
+      let envelope;
+      try {
+        envelope = parseHandshakeRequest(value, envelopeLimits);
+      } catch (cause) {
+        reject(classifyParseFailure(cause));
+        return protocolError(
+          value,
+          "INVALID_ARGUMENT",
+          "Invalid bridge request.",
+        );
+      }
+      const admission = sessions.establish(sender, envelope.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
-        return undefined;
+        return protocolError(
+          value,
+          "INVALID_ARGUMENT",
+          "Invalid bridge request.",
+        );
       }
-      return { protocolVersion: 1, clientId, manifest };
+      return { protocolVersion: 1, clientId: envelope.clientId, manifest };
     },
     attach(target: AttachedTarget): () => void {
       return sessions.attach(target);
     },
     async dispatchRpc(
       sender: SenderIdentity,
-      envelope: WireRpcRequest,
+      value: unknown,
     ): Promise<RpcResponse> {
-      if (envelope.protocolVersion !== 1) {
-        reject("version-mismatch");
-        return error(
-          envelope,
-          "VERSION_MISMATCH",
-          "Unsupported protocol version.",
-        );
+      let envelope;
+      try {
+        envelope = parseWireRpcRequest(value, envelopeLimits);
+      } catch (cause) {
+        const reason = classifyParseFailure(cause);
+        reject(reason);
+        return reason === "version-mismatch"
+          ? protocolError(
+              value,
+              "VERSION_MISMATCH",
+              "Unsupported protocol version.",
+            )
+          : protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.");
       }
       const admission = sessions.establish(sender, envelope.clientId);
       if ("reason" in admission) {
@@ -204,7 +249,14 @@ function buildBridgeServer(
       }
       return rpcRequests.dispatch(admission.session, sender, envelope);
     },
-    cancel(sender: SenderIdentity, envelope: WireCancelRequest): void {
+    cancel(sender: SenderIdentity, value: unknown): void {
+      let envelope;
+      try {
+        envelope = parseWireCancelRequest(value, envelopeLimits);
+      } catch (cause) {
+        reject(classifyParseFailure(cause));
+        return;
+      }
       const admission = sessions.current(sender, envelope.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
@@ -214,11 +266,14 @@ function buildBridgeServer(
     },
     async controlStream(
       sender: SenderIdentity,
-      command: WireStreamCommand,
+      value: unknown,
       send: StreamSender,
     ): Promise<void> {
-      if (command.protocolVersion !== 1) {
-        reject("version-mismatch");
+      let command;
+      try {
+        command = parseWireStreamCommand(value, envelopeLimits);
+      } catch (cause) {
+        reject(classifyParseFailure(cause));
         return;
       }
       if (command.type !== "subscribe") {

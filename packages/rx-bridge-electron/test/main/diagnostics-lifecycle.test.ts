@@ -17,7 +17,7 @@ import type {
   WireRpcRequest,
   WireStreamCommand,
 } from "../../src/protocol/index.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
+import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
 type HardwareBridge = {
@@ -106,7 +106,7 @@ describe("세션 수명주기 진단", () => {
     const { server, records } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    server.handshake(sender(), "client-1");
+    server.handshake(sender(), handshakeRequest("client-1"));
     expect(opened(records, "session-opened")).toBe(1);
     expect(opened(records, "session-closed")).toBe(0);
   });
@@ -115,8 +115,8 @@ describe("세션 수명주기 진단", () => {
     const { server, records } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    server.handshake(sender(), "client-1");
-    server.handshake(sender(), "client-2");
+    server.handshake(sender(), handshakeRequest("client-1"));
+    server.handshake(sender(), handshakeRequest("client-2"));
     expect(opened(records, "session-opened")).toBe(2);
     expect(opened(records, "session-closed")).toBe(1);
   });
@@ -125,7 +125,7 @@ describe("세션 수명주기 진단", () => {
     const { server, records } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    server.handshake(sender(), "client-1");
+    server.handshake(sender(), handshakeRequest("client-1"));
     target.endDocument();
     expect(opened(records, "session-closed")).toBe(1);
   });
@@ -134,7 +134,7 @@ describe("세션 수명주기 진단", () => {
     const { server, records } = harness();
     const target = new FakeTarget();
     const detach = server.attach(target);
-    server.handshake(sender(), "client-1");
+    server.handshake(sender(), handshakeRequest("client-1"));
     detach();
     expect(opened(records, "session-closed")).toBe(1);
   });
@@ -143,8 +143,14 @@ describe("세션 수명주기 진단", () => {
     const { server, records } = harness();
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
-    server.handshake(sender({ webContentsId: 1 }), "client-1");
-    server.handshake(sender({ webContentsId: 2 }), "client-1");
+    server.handshake(
+      sender({ webContentsId: 1 }),
+      handshakeRequest("client-1"),
+    );
+    server.handshake(
+      sender({ webContentsId: 2 }),
+      handshakeRequest("client-1"),
+    );
     server.dispose();
     expect(opened(records, "session-closed")).toBe(2);
     const afterFirstDispose = records.length;
@@ -373,7 +379,7 @@ describe("getDiagnosticsSnapshot", () => {
     const { server } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    server.handshake(sender(), "client-1");
+    server.handshake(sender(), handshakeRequest("client-1"));
     expect(server.getDiagnosticsSnapshot().sessions).toBe(1);
 
     await server.controlStream(
@@ -457,7 +463,7 @@ describe("getDiagnosticsSnapshot", () => {
     const { server, handlers } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    server.handshake(sender(), "client-1");
+    server.handshake(sender(), handshakeRequest("client-1"));
     void server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handlers).toHaveLength(1));
     await server.controlStream(

@@ -169,13 +169,17 @@ describe("Main RPC dispatch", () => {
   });
 
   test("authorizes after operation lookup and before schema parsing or handler invocation", async () => {
+    // input은 server의 envelope parse(관대한 한도)는 통과하지만 이 파일의
+    // 좁은 contract 한도(maxDepth: 3)에서는 걸리는 깊이다. authorize가 먼저
+    // FORBIDDEN을 내면 스키마 단계(payload 한도 포함)에 닿지 않는다는 걸
+    // 증명한다 — 순서가 바뀌면 이 값이 INVALID_ARGUMENT를 냈을 것이다(F1).
     const authorize = vi.fn(() => false);
     const { handler, server } = setup(vi.fn(), authorize);
     await expect(
       server.dispatchRpc(
         sender(),
         request({
-          input: { id: "x", extra: Symbol("unsafe") } as unknown as BridgeValue,
+          input: { id: "x", a: { b: { c: { d: true } } } } as BridgeValue,
         }),
       ),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });

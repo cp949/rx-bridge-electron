@@ -15,7 +15,7 @@ import {
 } from "../../src/main/index.js";
 import { currentValueSource } from "../../src/main/sources.js";
 import type { WireStreamCommand } from "../../src/protocol/index.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
+import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
 type HardwareBridge = {
@@ -367,18 +367,17 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
-  test("RPC invalid-input for a structural error, not payload-too-large", async () => {
+  test("RPC malformed-envelope for a structural error, not payload-too-large", async () => {
+    // server가 envelope parse(input 포함)를 admission보다 먼저 하므로(결정 7),
+    // 구조 오류 input은 등록 조회 전에 malformed-envelope로 거부된다(key 없음,
+    // checklist F1).
     const { server, diagnostics } = setup({});
     await server.dispatchRpc(
       sender(),
       rpcRequest({ input: { id: Symbol("bad") } as never }),
     );
     expect(rejections(diagnostics)).toEqual([
-      {
-        type: "rejected",
-        reason: "invalid-input",
-        key: "rpc:hardware/connect",
-      },
+      { type: "rejected", reason: "malformed-envelope" },
     ]);
   });
 
@@ -594,7 +593,9 @@ describe.each([
 
   test("server handshake", () => {
     const { server, diagnostics } = setup({});
-    expect(server.handshake(badSender, "client-1")).toBeUndefined();
+    expect(
+      server.handshake(badSender, handshakeRequest("client-1")),
+    ).toMatchObject({ type: "error" });
     expect(rejections(diagnostics)).toEqual([{ type: "rejected", reason }]);
   });
 });

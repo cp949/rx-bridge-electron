@@ -4,7 +4,7 @@ import type { BridgeValue } from "../../src/protocol/index.js";
 import { createBridgeServer } from "../../src/main/index.js";
 import { DocumentSessions } from "../../src/main/document-sessions.js";
 import { resolveResourceLimits } from "../../src/main/resource-limits.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
+import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 
 type HardwareBridge = { hardware: { rpc: { wait(): undefined } } };
 
@@ -113,7 +113,9 @@ describe("Main session lifecycle", () => {
       (_input: BridgeValue, context: { signal: AbortSignal }) =>
         new Promise<undefined>(() => {
           context.signal.addEventListener("abort", () => {
-            expect(server.handshake(sender(), "document-3")).toBeDefined();
+            expect(
+              server.handshake(sender(), handshakeRequest("document-3")),
+            ).toHaveProperty("manifest");
           });
         }),
     );
@@ -124,7 +126,9 @@ describe("Main session lifecycle", () => {
     server.attach(new FakeTarget());
     void server.dispatchRpc(sender(), request());
     await Promise.resolve();
-    expect(server.handshake(sender(), "document-2")).toBeUndefined();
+    expect(
+      server.handshake(sender(), handshakeRequest("document-2")),
+    ).toMatchObject({ type: "error" });
   });
 
   test("a reentrant attachment keeps the replacement target", async () => {
@@ -272,7 +276,9 @@ describe("Main session lifecycle", () => {
     await expect(Promise.all(reentrantDispatches)).resolves.toMatchObject([
       { type: "error", error: { code: "FORBIDDEN" } },
     ]);
-    expect(server.handshake(sender(), "document-3")).toBeUndefined();
+    expect(
+      server.handshake(sender(), handshakeRequest("document-3")),
+    ).toMatchObject({ type: "error" });
     await expect(
       server.dispatchRpc(sender(), request("document-3", "request-3")),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
@@ -293,7 +299,9 @@ describe("Main session lifecycle", () => {
         message: "Bridge server is disposed.",
       }),
     );
-    expect(server.handshake(sender(), "document-9")).toBeUndefined();
+    expect(
+      server.handshake(sender(), handshakeRequest("document-9")),
+    ).toMatchObject({ type: "error" });
     await expect(
       server.dispatchRpc(sender(), request("document-9", "request-9")),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });
@@ -375,10 +383,14 @@ describe("Main session lifecycle", () => {
     };
     const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
-    expect(server.handshake(sender(), "document-1")).toBeDefined();
+    expect(
+      server.handshake(sender(), handshakeRequest("document-1")),
+    ).toHaveProperty("manifest");
     server.attach(new FakeTarget());
 
-    expect(server.handshake(sender(), "document-1")).toBeUndefined();
+    expect(
+      server.handshake(sender(), handshakeRequest("document-1")),
+    ).toMatchObject({ type: "error" });
     await expect(
       server.dispatchRpc(sender(), request("document-1", "request-1")),
     ).resolves.toMatchObject({ type: "error", error: { code: "FORBIDDEN" } });

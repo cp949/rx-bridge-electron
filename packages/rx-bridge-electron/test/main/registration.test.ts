@@ -4,7 +4,7 @@ import { describe, expect, test, vi } from "vitest";
 import type { BridgeImpl } from "../../src/contract/index.js";
 import { createBridgeServer } from "../../src/main/index.js";
 import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
+import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
 // DELTA-07: 이 파일은 원래 descriptor 기반 registerImplementations/
@@ -95,8 +95,11 @@ describe("createBridgeServer(impl): manifest과 실제 dispatch/subscribe의 일
     };
     const server = createBridgeServer(impl);
     server.attach(new FakeTarget());
-    const handshake = server.handshake(sender(), "document-1");
-    if (handshake === undefined) throw new Error("expected a handshake");
+    const handshake = server.handshake(
+      sender(),
+      handshakeRequest("document-1"),
+    );
+    if (!("manifest" in handshake)) throw new Error("expected a handshake");
     const manifest = handshake.manifest;
     for (const key of manifest.rpc) {
       const response = await server.dispatchRpc(sender(), rpcRequest(key, 1));
@@ -156,8 +159,11 @@ describe("createBridgeServer(impl): manifest 순서 characterization", () => {
       },
     });
     server.attach(new FakeTarget());
-    const handshake = server.handshake(sender(), "document-1");
-    if (handshake === undefined) throw new Error("expected a handshake");
+    const handshake = server.handshake(
+      sender(),
+      handshakeRequest("document-1"),
+    );
+    if (!("manifest" in handshake)) throw new Error("expected a handshake");
     expect(handshake.manifest.rpc).toEqual([
       "rpc:a/op",
       "rpc:a-x/op",

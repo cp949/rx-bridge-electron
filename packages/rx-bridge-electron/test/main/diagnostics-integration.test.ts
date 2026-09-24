@@ -437,8 +437,11 @@ describe("RD-007 진단 통합 시나리오", () => {
     expect(
       rejected.filter((r) => r.reason === "malformed-envelope"),
     ).toHaveLength(1);
+    // 미attach webContents(evilContents)의 disallowed origin handshake는
+    // adapter 자체 origin 검사가 삭제돼(DELTA-03) 이제 attachment 부재로
+    // sender-unauthorized가 된다(checklist 결정 13, F3).
     expect(
-      rejected.filter((r) => r.reason === "origin-not-allowed"),
+      rejected.filter((r) => r.reason === "sender-unauthorized"),
     ).toHaveLength(1);
 
     // 기록 금지 항목: payload·도메인 에러 message·origin·clientId·subscriptionId 표식이

@@ -10,6 +10,15 @@ export const sender = (
   ...overrides,
 });
 
+// server.handshake(sender, value)의 두 번째 인자는 DELTA-03부터 envelope
+// 객체다(옛 시그니처는 clientId 문자열이었다).
+export const handshakeRequest = (
+  clientId: string,
+): { readonly protocolVersion: 1; readonly clientId: string } => ({
+  protocolVersion: 1,
+  clientId,
+});
+
 export class FakeTarget implements AttachedTarget {
   public readonly webContentsId: number;
   public readonly role: string;

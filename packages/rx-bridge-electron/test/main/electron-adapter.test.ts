@@ -5,6 +5,7 @@ import type { IpcMain, WebContents } from "electron";
 import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import { BridgeProtocolError } from "../../src/protocol/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
+import { FakeTarget, sender } from "./fake-ipc.js";
 import {
   bindElectronBridge,
   createBridgeServer,
@@ -13,8 +14,6 @@ import {
   type BridgeContext,
   type BridgeDiagnostic,
 } from "../../src/main/index.js";
-import { recordAdapterRejection } from "../../src/main/diagnostics.js";
-import * as mainIndex from "../../src/main/index.js";
 
 type WaitBridge = { hardware: { rpc: { wait(): undefined } } };
 const waitImpl: BridgeImpl<WaitBridge> = {
@@ -413,60 +412,156 @@ describe("Electron adapter rejection diagnostics", () => {
     });
   });
 
-  test("bindElectronBridge works against a StreamBridgeServer without the adapter Symbol method", async () => {
+  // DELTA-03: envelope parse(version 포함)를 server가 소유한다. IPC 경로에서
+  // version-mismatch·frame-not-main이 채널과 무관하게 기록되는지 확인한다.
+  test("RPC version-mismatch: wire response is VERSION_MISMATCH and the reason is recorded", async () => {
     const ipcMain = new FakeIpcMain();
-    const fakeServer = {
-      attach: () => () => {},
-      dispatchRpc: async (
-        _sender: unknown,
-        envelope: { clientId: string; requestId: string },
-      ) => ({
-        protocolVersion: 1,
-        clientId: envelope.clientId,
-        requestId: envelope.requestId,
-        type: "success",
-        result: undefined,
-      }),
-      cancel: () => {},
-      dispose: () => {},
-      handshake: (_sender: unknown, clientId: string) => ({
-        protocolVersion: 1,
-        clientId,
-        manifest: { domains: {} },
-      }),
-      controlStream: async () => {},
-      // no [recordAdapterRejection] method
-    };
+    const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+    bridge.attach(contents as unknown as WebContents, "main");
 
-    expect(() =>
-      bindElectronBridge({
-        ipcMain: ipcMain as unknown as IpcMain,
-        server: fakeServer as never,
-        namespace: "test",
-        allowedOrigins: ["app://local"],
-      }),
-    ).not.toThrow();
-
-    const contents = new UrlWebContents("app://evil");
-    const handshakeHandler = ipcMain.handlers.get(
-      ELECTRON_BRIDGE_CHANNELS("test").handshake,
+    const rpcHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").rpc,
     )!;
-    const response = await handshakeHandler(
+    const response = await rpcHandler(
       { sender: contents, senderFrame: contents.mainFrame },
-      { protocolVersion: 1, clientId: "client-1" },
+      {
+        protocolVersion: 2,
+        clientId: "client-1",
+        requestId: "request-1",
+        key: "rpc:hardware/wait",
+        input: undefined,
+      },
     );
 
-    expect(response).toMatchObject({ type: "error" });
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "version-mismatch" },
+    ]);
+    expect(response).toMatchObject({
+      type: "error",
+      error: {
+        code: "VERSION_MISMATCH",
+        message: "Unsupported protocol version.",
+      },
+    });
   });
 
-  test("the adapter Symbol is not part of the public main index export", () => {
-    const ipcMain = new FakeIpcMain();
-    const { server } = makeDiagnosticsBridge(ipcMain);
+  test.each([
+    ["handshake" as const],
+    ["cancel" as const],
+    ["control" as const],
+  ])(
+    "%s version-mismatch is recorded once (handshake wire response stays INVALID_ARGUMENT)",
+    async (channel) => {
+      const ipcMain = new FakeIpcMain();
+      const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
+      const contents = new UrlWebContents("app://local");
+      bridge.attach(contents as unknown as WebContents, "main");
+      const event = { sender: contents, senderFrame: contents.mainFrame };
 
-    expect(Object.getOwnPropertySymbols(server)).toContain(
-      recordAdapterRejection,
+      if (channel === "handshake") {
+        const handshakeHandler = ipcMain.handlers.get(
+          ELECTRON_BRIDGE_CHANNELS("test").handshake,
+        )!;
+        const response = await handshakeHandler(event, {
+          protocolVersion: 2,
+          clientId: "client-1",
+        });
+        expect(response).toMatchObject({
+          type: "error",
+          error: { code: "INVALID_ARGUMENT" },
+        });
+      } else if (channel === "cancel") {
+        ipcMain.emit(ELECTRON_BRIDGE_CHANNELS("test").cancel, event, {
+          protocolVersion: 2,
+          clientId: "client-1",
+          requestId: "request-1",
+        });
+      } else {
+        ipcMain.emit(ELECTRON_BRIDGE_CHANNELS("test").control, event, {
+          protocolVersion: 2,
+          clientId: "client-1",
+          type: "unsubscribe",
+          subscriptionId: "sub-1",
+        });
+      }
+
+      expect(rejections(diagnostics)).toEqual([
+        { type: "rejected", reason: "version-mismatch" },
+      ]);
+    },
+  );
+
+  test("RPC frame-not-main is channel-independent (same reason as handshake)", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge, diagnostics } = makeDiagnosticsBridge(ipcMain);
+    const contents = new UrlWebContents("app://local");
+    bridge.attach(contents as unknown as WebContents, "main");
+
+    const rpcHandler = ipcMain.handlers.get(
+      ELECTRON_BRIDGE_CHANNELS("test").rpc,
+    )!;
+    const response = await rpcHandler(
+      { sender: contents, senderFrame: { routingId: 999, url: "app://local" } },
+      {
+        protocolVersion: 1,
+        clientId: "client-1",
+        requestId: "request-1",
+        key: "rpc:hardware/wait",
+        input: undefined,
+      },
     );
-    expect(Object.values(mainIndex)).not.toContain(recordAdapterRejection);
+
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "frame-not-main" },
+    ]);
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
+    });
+  });
+});
+
+describe("StreamBridgeServer.handshake direct calls (DELTA-03)", () => {
+  test("success returns a HandshakeResponse (no 'type' field)", () => {
+    const server = createBridgeServer(waitImpl);
+    server.attach(new FakeTarget());
+    const response = server.handshake(sender(), {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    expect(response).toMatchObject({
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: { rpc: ["rpc:hardware/wait"] },
+    });
+    expect(response).not.toHaveProperty("type");
+  });
+
+  test("rejection returns an RpcResponse error shaped INVALID_ARGUMENT", () => {
+    const server = createBridgeServer(waitImpl);
+    // 미attach — admission이 sender-unauthorized로 거부한다.
+    const response = server.handshake(sender({ webContentsId: 99 }), {
+      protocolVersion: 1,
+      clientId: "client-1",
+    });
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
+    });
+  });
+
+  test("structural error input is malformed-envelope, not thrown", () => {
+    const server = createBridgeServer(waitImpl);
+    server.attach(new FakeTarget());
+    const response = server.handshake(sender(), {
+      protocolVersion: 1,
+      clientId: Symbol("bad"),
+    });
+    expect(response).toMatchObject({
+      type: "error",
+      error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
+    });
   });
 });
 
