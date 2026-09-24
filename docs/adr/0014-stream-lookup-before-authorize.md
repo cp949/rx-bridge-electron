@@ -36,7 +36,7 @@ wire 메시지 순서, [ADR 0009](0009-session-resource-limits.md) §11의 slot 
 
 ## 범위 밖
 
-RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`, RPC `keyOf`) — 후속 ROADMAP.md#RD-016(완료, [ADR 0015](0015-rpc-request-lifecycle.md)). sender admission 통합, `recordAdapterRejection` Symbol, version-mismatch 도달 불가 분기. 와이어 형식·채널·handshake·공개 export 변경(`Subscriptions`는 공개 export가 아니다 — `StreamHub`와 마찬가지로 내부 구현이다).
+RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`, RPC `keyOf`) — 후속 ROADMAP.md#RD-016(완료, [ADR 0015](0015-rpc-request-lifecycle.md)). sender admission 통합, `recordAdapterRejection` Symbol, version-mismatch 도달 불가 분기 — 후속 ROADMAP.md#RD-018(완료, [ADR 0016](0016-sender-admission.md)). 와이어 형식·채널·handshake·공개 export 변경(`Subscriptions`는 공개 export가 아니다 — `StreamHub`와 마찬가지로 내부 구현이다).
 
 ## 이전(migration)
 

@@ -32,13 +32,13 @@ Event buffer(용량과 overflow 정책)는 계약이 값을 가질 수 없으므
 ## 요청 경로와 신뢰 경계
 
 1. Renderer는 preload가 제공한 transport로 handshake를 시작하고 Main에서 공개 manifest를 받는다.
-2. Electron 어댑터는 고정 namespace 채널에서 요청을 받고 sender의 `webContents`, frame, 현재 main frame 여부, origin을 확인한다.
-3. Main은 연결된 문서 세션과 도메인 계약을 확인하고 권한 함수를 적용한다.
+2. Electron 어댑터는 고정 namespace 채널에서 요청을 받아 sender를 `SenderIdentity`(`webContents` id, frame id, 현재 main frame 여부, origin)로 번역해 Main에 넘긴다. frame·origin 판정은 하지 않는다(아래 3번).
+3. Main은 envelope를 파싱하고(version 포함) sender admission을 판정한 뒤 연결된 문서 세션과 도메인 계약을 확인하고 권한 함수를 적용한다.
 4. RPC 입력과 출력, handshake 및 stream envelope는 프로토콜 파서와 payload 한도를 통과해야 한다. RPC handler와 stream source가 만든 값은 원시 값 검사 → 출력 스키마 변환 → 변환 결과 재검사 → 복제 → 복제본 검사 순서를 모두 통과해야 전송된다. 이 순서는 `src/main/output-boundary.ts`의 `parseOutput` 하나로 구현되어 RPC 출력과 stream 값(State/Event)이 공유하며, 두 번째 검사(복제 전)는 accessor·함수 값이 `structuredClone` 단계로 새는 것을 막고 복제는 검증 이후 handler·스키마가 쥔 참조로 값을 바꾸는 TOCTOU를 막는다.
 5. 오류 응답은 안전한 프로토콜 오류 코드로 직렬화한다. 내부 예외나 원문 payload를 진단 정보에 기록하지 않는다.
 6. 실패는 원인별로 분류된 코드로 응답한다: 입력 검증 실패는 `INVALID_ARGUMENT`다. handler가 선언되지 않은 예외를 던지거나 출력 검증이 실패하면(출력 스키마가 던진 예외 포함, 선언된 오류 코드를 가진 예외라도) `INTERNAL "Internal bridge error."`다. 선언된 도메인 에러라도 `message` 또는 `details`가 payload 한도(byte·깊이·항목 수·전체 byte)를 넘으면 같은 `INTERNAL`로 대체된다. 선언된 도메인 에러의 `details`도 검사 → 복제 → 복제본 검사를 거치며, `code`·`message`·`details`는 한 번만 읽어 검사한 값을 그대로 전송한다. 이 필드를 읽다 예외가 나도 `INTERNAL`이다. `authorize` 콜백이 throw하거나 reject해도 RPC·stream 모두 같은 `INTERNAL`이다([ADR 0011](adr/0011-authorize-exception-internal.md)). 출력 검증 실패 시 진단 정보에 `{ type: "validation-failed", key }`를 기록한다. 검증 실패 시점에 요청이 이미 취소된 상태(`context.signal.aborted`)면 `CANCELLED`가 이 분류보다 우선한다. 세션별 자원 한도(동시 RPC·구독 수) 초과는 `RESOURCE_EXHAUSTED`, Main이 스스로 설정한 RPC 실행 시간 상한 초과는 `DEADLINE_EXCEEDED`다 — 아래 "세션 자원 한도" 참고. 이 모든 거부와 완료 결과는 진단 이벤트로도 관측할 수 있다 — 아래 "운영 진단" 참고.
 
-Electron 어댑터는 `allowedOrigins`를 받고 현재 main frame과 허용 origin을 검사한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
+Electron 어댑터는 `allowedOrigins`를 받아 attach 시점에 현재 main frame·허용 origin 판정 함수(`isCurrentMainFrame`/`isAllowedOrigin`)를 만들어 target에 실어 보낸다 — 실제 판정은 Main의 sender admission(아래 "문서 세션과 정리")이 한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
 ## 배선 기본값
 
@@ -50,11 +50,11 @@ preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBr
 
 ## 문서 세션과 정리
 
-Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. handshake에서 sender가 현재 main frame이고 허용 origin인지 확인한다. main-frame navigation, renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
+Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 묶은 세션을 유지한다. sender admission(`DocumentSessions`의 private `#admit`)이 disposed·미attach → `sender-unauthorized`, subframe이거나 현재 main frame이 아님 → `frame-not-main`, 허용 목록 밖 origin → `origin-not-allowed` 순으로 판정하며, handshake·RPC·subscribe(`establish`)와 cancel·unsubscribe/acknowledge(`current`)가 채널과 무관하게 같은 판정을 공유한다. main-frame navigation, renderer process 종료, `webContents` 파괴, detach 또는 서버 dispose가 세션을 retire하고 해당 세션의 RPC와 stream 구독을 중단한다. retire된 client ID는 같은 `webContents`의 새 문서 세션에서 재사용하지 않는다.
 
 이 소유 단위는 창이 아니라 렌더러 문서다. 한 창에서 reload/navigation이 발생하면 이전 문서에서 시작한 비동기 작업이 새 문서로 넘어가지 않아야 한다.
 
-`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `undefined`, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `destroyed` 수명 사건이 오면 해당 `webContentsId`의 retired 기록 전체를 지운다(그 `webContents`는 다시 살아나지 않는다). 살아 있는 `webContents`의 retired 기록은 최근 `maxRetiredClientsPerWebContents`개(기본 32)만 보관하고, 그보다 오래된 clientId는 기록에서 빠진다 — 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다. 근거는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
+`server.dispose()`는 되돌릴 수 없다. 이후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Bridge server is disposed.")`를 동기로 throw하고, handshake·RPC·stream subscribe는 세션이 없을 때 쓰는 기존 거부 경로(handshake `INVALID_ARGUMENT "Invalid bridge request."` 응답, RPC `FORBIDDEN`, subscribe 무시)로 응답한다. 반복 dispose는 no-op이다. retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다 — 위 "재사용하지 않는다" 규칙이 종료 후에도 흔들리지 않아야 하기 때문이다. `destroyed` 수명 사건이 오면 해당 `webContentsId`의 retired 기록 전체를 지운다(그 `webContents`는 다시 살아나지 않는다). 살아 있는 `webContents`의 retired 기록은 최근 `maxRetiredClientsPerWebContents`개(기본 32)만 보관하고, 그보다 오래된 clientId는 기록에서 빠진다 — 그 시점 이후 재사용 방지는 `establish()`의 frame·origin 검사가 대신한다. 근거는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다. `bindElectronBridge(...).dispose()`도 자신의 종료 플래그를 가지며, 반복 호출은 no-op이고 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 throw한다. 이 bind dispose는 자신이 등록한 cancel/control listener만 `removeListener`로 제거한다(`removeAllListeners`를 쓰지 않는다) — 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않기 위해서다. 근거는 [ADR 0006](adr/0006-shutdown-contract.md)에 있다.
 
 ## RPC와 스트림 계약
 
@@ -90,7 +90,7 @@ stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 �
 
 stream 구독 요청은 ID 형식 → 세션별 워터마크 → 등록 조회 → 구독 슬롯 → `authorize` 순서로 판정한다(RPC와 같은 순서). 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`이고, `authorize`는 등록된 key만 받는다. 구독 슬롯 한도 초과(`subscription-limit`)는 등록 조회를 통과한 뒤 판정되므로 진단에 key를 포함한다. 이 수명주기(admission부터 terminal·slot 반환까지)는 Main의 `Subscriptions` 모듈 하나가 소유한다. 근거는 [ADR 0014](adr/0014-stream-lookup-before-authorize.md)에 있다.
 
-RPC 요청은 version 검사 → 세션 해석(`establish`) → 등록 조회 → RPC 슬롯 → `authorize` → pipeline(`parseBridgeValue` → 입력 스키마 → handler → 출력 경계) 순서로 판정한다. 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`다. 이 다섯 단계 경계(`authorize` 뒤, `parseBridgeValue` 실패, 입력 스키마 실패, handler 뒤, 출력 스키마 실패) 각각에서 요청이 이미 취소된 상태(signal aborted)면 `CANCELLED`가 그 단계의 원래 실패 분류보다 우선한다 — 이 규칙은 guard 함수 하나로 정의되고 다섯 지점에 적용된다(삭제하는 분기는 없다). 이 수명주기(등록 조회부터 handler 종료와 슬롯 반환까지)는 Main의 `RpcRequests` 모듈 하나가 소유한다. `authorize` 뒤에는 세션이 여전히 현재인지 별도로 재해석하지 않는다 — 요청 signal(세션 retire 시 abort)만 본다. 근거와 이 가설이 깨졌을 때의 위험은 [ADR 0015](adr/0015-rpc-request-lifecycle.md)에 있다.
+RPC 요청은 envelope parse(version 포함) → 세션 해석(sender admission, `establish`) → 등록 조회 → RPC 슬롯 → `authorize` → pipeline(`parseBridgeValue` → 입력 스키마 → handler → 출력 경계) 순서로 판정한다. 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`다. 이 다섯 단계 경계(`authorize` 뒤, `parseBridgeValue` 실패, 입력 스키마 실패, handler 뒤, 출력 스키마 실패) 각각에서 요청이 이미 취소된 상태(signal aborted)면 `CANCELLED`가 그 단계의 원래 실패 분류보다 우선한다 — 이 규칙은 guard 함수 하나로 정의되고 다섯 지점에 적용된다(삭제하는 분기는 없다). 이 수명주기(등록 조회부터 handler 종료와 슬롯 반환까지)는 Main의 `RpcRequests` 모듈 하나가 소유한다. `authorize` 뒤에는 세션이 여전히 현재인지 별도로 재해석하지 않는다 — 요청 signal(세션 retire 시 abort)만 본다. 근거와 이 가설이 깨졌을 때의 위험은 [ADR 0015](adr/0015-rpc-request-lifecycle.md)에 있다.
 
 근거와 대안 비교는 [ADR 0009](adr/0009-session-resource-limits.md)에 있다.
 
@@ -98,7 +98,7 @@ RPC 요청은 version 검사 → 세션 해석(`establish`) → 등록 조회 �
 
 Main은 `createBridgeServer(impl, { diagnostics })`로 넘긴 `DiagnosticsSink`에 닫힌 타입의 이벤트(`BridgeDiagnostic`)를 기록한다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 동일하다(호출을 삼키는 공통 함수 하나로 모든 기록 지점을 통과시킨다) — sink 실패가 RPC 응답이나 stream 전달에 영향을 주지 않는다. sink를 지정하지 않으면 기본 동작에서 어떤 콘솔 출력도 없다.
 
-이벤트는 RPC 완료(`rpc-finished`, 성공·실패를 나타내는 `outcome` 포함)·취소(`rpc-cancelled`)·Main deadline 만료(`rpc-timed-out`)·출력 검증 실패(`validation-failed`)·Event 큐 깊이(`stream-queue`)와 드롭(`stream-dropped`)·거부(`rejected`, 11개 `RejectReason` 중 하나)·세션과 구독의 생성·해제(`session-opened`/`session-closed`, `subscription-opened`/`subscription-closed`)로 구성된다. 사유는 enum 코드, 식별자는 등록 조회를 통과한 와이어 key만 싣는다 — `Error` 객체, message, stack, 원문 payload, origin, clientId, webContentsId, requestId, subscriptionId는 어떤 이벤트에도 넣지 않는다. Electron 어댑터가 판정하는 거부(`frame-not-main`, `origin-not-allowed`, `malformed-envelope`)는 export하지 않는 내부 Symbol 통로로 같은 sink에 기록되며, 한 요청에서 `rejected`는 최대 1회만 기록된다(server가 이미 기록한 경우 adapter가 중복 기록하지 않는다).
+이벤트는 RPC 완료(`rpc-finished`, 성공·실패를 나타내는 `outcome` 포함)·취소(`rpc-cancelled`)·Main deadline 만료(`rpc-timed-out`)·출력 검증 실패(`validation-failed`)·Event 큐 깊이(`stream-queue`)와 드롭(`stream-dropped`)·거부(`rejected`, 11개 `RejectReason` 중 하나)·세션과 구독의 생성·해제(`session-opened`/`session-closed`, `subscription-opened`/`subscription-closed`)로 구성된다. 사유는 enum 코드, 식별자는 등록 조회를 통과한 와이어 key만 싣는다 — `Error` 객체, message, stack, 원문 payload, origin, clientId, webContentsId, requestId, subscriptionId는 어떤 이벤트에도 넣지 않는다. 모든 거부 판정은 Main(server)이 직접 sink에 기록한다 — Electron 어댑터는 진단을 기록하지 않는다(sink에 접근하지 않는다). `frame-not-main`·`origin-not-allowed`는 채널과 무관하게 sender admission이 판정하고, `malformed-envelope`은 server의 envelope parse가 4채널(handshake·rpc·cancel·control) 공통으로 판정한다. 한 요청에서 `rejected`는 최대 1회만 기록된다.
 
 `server.getDiagnosticsSnapshot()`은 현재 활성 세션 수, in-flight RPC 수, 구독(대기+활성) 수, 대기 중 Event 수를 조회한다 — 이벤트 스트림과 달리 누적하지 않는 현재 스냅샷이며, 누적 카운터는 제공하지 않는다.
 

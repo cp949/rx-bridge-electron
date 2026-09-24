@@ -2,6 +2,8 @@
 
 - 관련: ROADMAP.md#RD-016
 
+> [ADR 0016](0016-sender-admission.md)이 sender admission 판정을 옮겼다. 아래 "결정: `RpcRequests` 모듈" 절의 "`create-bridge-server.ts`의 `dispatchRpc`는 protocolVersion 검사·`sessions.establish`·`sender-unauthorized` 판정과 `rpcRequests.dispatch(session, sender, envelope)` 위임만 남는다"(:15) 서술은 이제 정확하지 않다 — protocolVersion 검사는 `dispatchRpc` 앞이 아니라 envelope parse(`parseWireRpcRequest`) 안에서 판정되고, `sessions.establish`의 거부는 `sender-unauthorized` 하나가 아니라 `frame-not-main`·`origin-not-allowed`·`sender-unauthorized` 중 하나(`Admission` verdict)다. `RpcRequests`가 세션 해석 방법을 몰라도 된다는 이 문서의 핵심 결정(§"`authorize` 뒤 `current()` 재검사를 제거") 자체는 바뀌지 않았다.
+
 ## 상황
 
 RPC 요청 1건의 상태(slot 점유, 취소용 `AbortController`, retire 연동)는 `DocumentSessions`가 `tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`·`rpcInFlightCount` 6개 메서드와 `SessionState`의 `active`·`runningRpc`, 전역 `#globalRunningRpc`로 나눠 들고 있었다. `create-bridge-server.ts`의 `dispatchRpc`가 이 메서드들과 `rpc-dispatcher.ts`의 `findRpc`·`dispatchRegistered`를 순서대로 손으로 배선했다(등록 조회 → slot → `authorize` → `aborted || current() !== session` 재검사 → deny → `dispatchRegistered` → finally에서 slot 반환·`rpc-finished`). `#retire`도 별도로 `active` Map을 순회하며 진행 중 RPC를 취소하는 루프를 가지고 있었다.
