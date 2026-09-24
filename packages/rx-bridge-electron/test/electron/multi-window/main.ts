@@ -110,9 +110,9 @@ const schemas = {
 const server = createBridgeServer(impl, {
   schemas,
   // viewer 창은 쓰기 성격의 RPC를 거부한다.
-  authorize: (context, operationId) =>
+  authorize: (context, operation) =>
     context.windowRole === "editor" ||
-    !["rpc:lab/secure", "rpc:lab/hold"].includes(operationId),
+    !["rpc:lab/secure", "rpc:lab/hold"].includes(operation.key),
   diagnostics: { record: (event) => diagnostics.push(event) },
 });
 

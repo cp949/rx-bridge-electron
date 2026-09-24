@@ -24,10 +24,12 @@ export type {
   AttachedTarget,
   Authorize,
   BridgeContext,
+  BridgeOperation,
   BridgeDiagnostic,
   BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
+  OperationCategory,
   RejectReason,
   SenderIdentity,
 } from "./types.js";

@@ -1,7 +1,9 @@
 import type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
 import type { BridgeValue, RpcResponse } from "../protocol/index.js";
+import type { OperationCategory } from "../protocol/operation-key.js";
 
 export type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
+export type { OperationCategory } from "../protocol/operation-key.js";
 
 export interface AttachedTarget {
   readonly webContentsId: number;
@@ -15,9 +17,23 @@ export interface AttachedTarget {
   ): () => void;
 }
 
+/**
+ * `authorize`가 받는 등록된 operation의 식별 정보. 등록 시 operation마다 한 번
+ * 만들어 동결한다(객체와 `domain` 배열 모두). 같은 operation이 같은 객체라는
+ * 동일성은 계약이 아니다 — 비교는 `key`로 한다.
+ */
+export interface BridgeOperation {
+  /** wire key(`category:domain/op`). 예: `"rpc:device/connect"`. */
+  readonly key: string;
+  readonly category: OperationCategory;
+  /** 도메인 segment 배열. 예: `["device"]`, 중첩이면 `["admin", "users"]`. */
+  readonly domain: readonly string[];
+  readonly operation: string;
+}
+
 export type Authorize = (
   context: BridgeContext,
-  operationId: string,
+  operation: BridgeOperation,
 ) => boolean | Promise<boolean>;
 export type RejectReason =
   | "frame-not-main"

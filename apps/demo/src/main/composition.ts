@@ -17,10 +17,9 @@ export function createDemoComposition() {
   const server = createBridgeServer(impl, {
     schemas,
     errors,
-    authorize: (context, key) =>
+    authorize: (context, operation) =>
       context.windowRole === "main" ||
-      (context.windowRole === "monitor" &&
-        (key.startsWith("state:") || key.startsWith("event:"))),
+      (context.windowRole === "monitor" && operation.category !== "rpc"),
   });
   return {
     server,

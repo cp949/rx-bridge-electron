@@ -158,7 +158,7 @@ export class RpcRequests {
           allowed =
             this.#authorize === undefined
               ? true
-              : await this.#authorize(context, envelope.key);
+              : await this.#authorize(context, registration.bridgeOperation);
         } catch {
           response =
             cancelledIfAborted(controller.signal, envelope) ??

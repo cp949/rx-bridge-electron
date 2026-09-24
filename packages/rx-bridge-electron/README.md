@@ -60,7 +60,7 @@ const impl: BridgeImpl<AppBridge> = {
 };
 const server = createBridgeServer(impl, {
   authorize: (context, operation) =>
-    context.windowRole === "main" || !operation.startsWith("rpc:"),
+    context.windowRole === "main" || operation.category !== "rpc",
 });
 ```
 

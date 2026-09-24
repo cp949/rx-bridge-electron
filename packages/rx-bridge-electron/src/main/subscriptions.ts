@@ -234,7 +234,7 @@ export class Subscriptions {
       allowed =
         this.#authorize === undefined
           ? true
-          : await this.#authorize(context, command.key);
+          : await this.#authorize(context, registration.bridgeOperation);
     } catch {
       if (this.#finishPending(session, state, command.subscriptionId, entry))
         this.#reject(

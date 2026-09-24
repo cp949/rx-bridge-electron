@@ -20,7 +20,7 @@ import type {
   OverflowPolicy,
   ScopedEventSource,
 } from "./sources.js";
-import type { RpcHandler } from "./types.js";
+import type { BridgeOperation, RpcHandler } from "./types.js";
 
 /**
  * value가 plain object이고 열거 가능한 data property만 갖는지 검증한다.
@@ -127,6 +127,7 @@ export interface RpcRegistrationEntry {
   readonly kind: "rpc";
   readonly domainName: string;
   readonly operation: string;
+  readonly bridgeOperation: BridgeOperation;
   readonly handler: RpcHandler;
   readonly input?: Schema<BridgeValue>;
   readonly output?: Schema<BridgeValue>;
@@ -137,6 +138,7 @@ export interface StateRegistrationEntry {
   readonly kind: "state";
   readonly domainName: string;
   readonly operation: string;
+  readonly bridgeOperation: BridgeOperation;
   readonly source: CurrentValueSource<BridgeValue>;
   readonly output?: Schema<BridgeValue>;
 }
@@ -145,6 +147,7 @@ export interface EventRegistrationEntry {
   readonly kind: "event";
   readonly domainName: string;
   readonly operation: string;
+  readonly bridgeOperation: BridgeOperation;
   readonly source: EventSource;
   readonly output?: Schema<BridgeValue>;
   readonly buffer: {
@@ -309,6 +312,12 @@ function walkImplNode(
       const path = `${domainName}/${operation}`;
       assertNoPathCollision(pathTrie, path.split("/"), path);
       const key = formatWireKey(category, domainSegments, operation);
+      const bridgeOperation: BridgeOperation = Object.freeze({
+        key,
+        category,
+        domain: Object.freeze([...domainSegments]),
+        operation,
+      });
       const value = categoryRecord[operation];
 
       if (category === "rpc") {
@@ -329,6 +338,7 @@ function walkImplNode(
           kind: "rpc",
           domainName,
           operation,
+          bridgeOperation,
           handler: value as RpcHandler,
           ...(schemaEntry.input === undefined
             ? {}
@@ -355,6 +365,7 @@ function walkImplNode(
           kind: "state",
           domainName,
           operation,
+          bridgeOperation,
           source: value as CurrentValueSource<BridgeValue>,
           ...(stateOutput === undefined ? {} : { output: stateOutput }),
         });
@@ -383,6 +394,7 @@ function walkImplNode(
           kind: "event",
           domainName,
           operation,
+          bridgeOperation,
           source,
           ...(eventOutput === undefined ? {} : { output: eventOutput }),
           buffer,
