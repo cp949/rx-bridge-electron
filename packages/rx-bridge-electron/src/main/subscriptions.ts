@@ -94,6 +94,36 @@ const sessionEndedError: RpcErrorPayload = {
 };
 
 /**
+ * 시작하지 못한 구독(admission 거부, `authorize` 대기 중 retire)에 `subscribed`(0) 뒤
+ * `error`(1)를 보낸다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+ */
+export function sendSubscribeFailure(
+  command: SubscribeCommand,
+  send: StreamSender,
+  error: RpcErrorPayload,
+): void {
+  try {
+    send(
+      withEnvelope(command.clientId, {
+        subscriptionId: command.subscriptionId,
+        type: "subscribed" as const,
+        sequence: 0,
+      }),
+    );
+    send(
+      withEnvelope(command.clientId, {
+        subscriptionId: command.subscriptionId,
+        type: "error" as const,
+        sequence: 1,
+        error,
+      }),
+    );
+  } catch {
+    // A closed renderer route has no subscriber to notify.
+  }
+}
+
+/**
  * 구독(subscription) 1건의 수명주기 전체(admission부터 terminal·slot 반환까지)를
  * 소유한다. server(`create-bridge-server.ts`)는 세션 해석과 sender admission
  * 판정(`DocumentSessions#admit` — `frame-not-main`·`origin-not-allowed`·
@@ -216,7 +246,7 @@ export class Subscriptions {
         this.#pruneIfEmpty(state);
         controller.abort();
         if (notifiesRenderer(session.signal))
-          this.#pendingCancelled(command, send);
+          sendSubscribeFailure(command, send, sessionEndedError);
       },
     };
     state.pending.set(command.subscriptionId, entry);
@@ -446,32 +476,6 @@ export class Subscriptions {
           type: "error" as const,
           sequence: 1,
           error,
-        }),
-      );
-    } catch {
-      // A closed renderer route has no subscriber to notify.
-    }
-  }
-
-  /**
-   * `authorize` 대기 중 detach·dispose retire. `#reject`와 달리 session이 이미
-   * abort된 상태에서 보낸다(트리거 자체가 그 abort) — 전송 실패는 삼킨다(결정 6).
-   */
-  #pendingCancelled(command: SubscribeCommand, send: StreamSender): void {
-    try {
-      send(
-        withEnvelope(command.clientId, {
-          subscriptionId: command.subscriptionId,
-          type: "subscribed" as const,
-          sequence: 0,
-        }),
-      );
-      send(
-        withEnvelope(command.clientId, {
-          subscriptionId: command.subscriptionId,
-          type: "error" as const,
-          sequence: 1,
-          error: sessionEndedError,
         }),
       );
     } catch {

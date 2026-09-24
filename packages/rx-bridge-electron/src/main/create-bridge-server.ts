@@ -23,7 +23,11 @@ import {
   resolveResourceLimits,
   type ResourceLimits,
 } from "./resource-limits.js";
-import { Subscriptions, type StreamSender } from "./subscriptions.js";
+import {
+  sendSubscribeFailure,
+  Subscriptions,
+  type StreamSender,
+} from "./subscriptions.js";
 import type {
   AttachedTarget,
   Authorize,
@@ -258,28 +262,10 @@ function buildBridgeServer(
       const admission = sessions.establish(sender, command.clientId);
       if ("reason" in admission) {
         reject(admission.reason);
-        try {
-          send(
-            withEnvelope(command.clientId, {
-              subscriptionId: command.subscriptionId,
-              type: "subscribed" as const,
-              sequence: 0,
-            }),
-          );
-          send(
-            withEnvelope(command.clientId, {
-              subscriptionId: command.subscriptionId,
-              type: "error" as const,
-              sequence: 1,
-              error: {
-                code: "FORBIDDEN",
-                message: SENDER_UNAUTHORIZED_MESSAGE,
-              },
-            }),
-          );
-        } catch {
-          // 닫힌 renderer route는 통지 대상이 없다(best-effort).
-        }
+        sendSubscribeFailure(command, send, {
+          code: "FORBIDDEN",
+          message: SENDER_UNAUTHORIZED_MESSAGE,
+        });
         return;
       }
       await subscriptions.subscribe(admission.session, sender, command, send);

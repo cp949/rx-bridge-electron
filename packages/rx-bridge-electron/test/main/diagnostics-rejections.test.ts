@@ -548,6 +548,19 @@ describe("rejected diagnostic reasons", () => {
     ]);
   });
 
+  test("stream sender-unauthorized: a send failure on subscribe rejection is swallowed", async () => {
+    const { server, diagnostics } = setup({});
+    server.dispose();
+    await expect(
+      server.controlStream(sender(), subscribeCommand(), () => {
+        throw new Error("closed frame");
+      }),
+    ).resolves.toBeUndefined();
+    expect(rejections(diagnostics)).toEqual([
+      { type: "rejected", reason: "sender-unauthorized" },
+    ]);
+  });
+
   test("RPC sender-unauthorized: server disposed", async () => {
     const { server, diagnostics } = setup({});
     server.dispose();

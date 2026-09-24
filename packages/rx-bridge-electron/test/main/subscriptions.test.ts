@@ -800,6 +800,33 @@ describe("Main stream terminal notify on retire", () => {
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    source.next(3);
+    expect(messages).toHaveLength(3);
+  });
+
+  test("detach replaces a recorded terminal still waiting for ACK with CANCELLED", async () => {
+    const { server, source, messages, send } = harness();
+    const detach = server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    source.complete();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    detach();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      sequence: 2,
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
   });
 
   test("server.dispose() retires an active broadcast Event subscriber with CANCELLED", async () => {
@@ -995,6 +1022,37 @@ describe("Main stream terminal notify on retire", () => {
     expect(messages[1]).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
+  });
+
+  test("a send failure while notifying a pending subscriber still releases its slot", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const server = createBridgeServer(
+      {
+        hardware: { event: { change$: broadcastEvent(new Subject<number>()) } },
+      },
+      { authorize: () => authorization },
+    );
+    const detach = server.attach(new FakeTarget());
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      () => {
+        throw new Error("closed frame");
+      },
+    );
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
+    expect(() => detach()).not.toThrow();
+    allow(true);
+    await pending;
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("navigation during pending authorization sends nothing", async () => {
