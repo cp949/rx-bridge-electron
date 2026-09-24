@@ -130,6 +130,28 @@
 
   계획: `_works/20260925-06-event-source-normalize/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(slot 누수 한 줄 수정, RED→GREEN) → DELTA-02(scoped 전달 test 4건, coverage 0 안전망) → DELTA-03(registration이 모양·capacity·overflow·factory/source 타입을 검증하는 test 9건, helper는 순수 생성자로 전환) → DELTA-04(event entry를 `delivery: {mode:"broadcast"|"scoped"}`로 등록 시점 정규화, `Subscriptions`의 `isScopedSource`·`#broadcastSource` 제거, 동작 변화 없음) → DELTA-05(`controlStream` 최종 방어 catch와 "reject하지 않는다" 계약 주석) → DELTA-06(architecture·ADR 0012 개정 note·`impl-types.ts`·README·`CONTEXT.md` 반영) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest) 36 files/637 tests 통과, 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `grep -n 'isScopedSource\|#broadcastSource' src/main/subscriptions.ts`·`grep -rn 'assertEventBuffer' src` 모두 0건. 기존 test 단언 변경은 `create-bridge-server-impl.test.ts`의 helper capacity test 1건(의도적 전환)뿐. demo `test:electron`은 제외 범위(패키지 verify의 Electron acceptance로 대체)라 별도 실행하지 않음.
 
+### Renderer API 인스턴스 종료 상태 단일 소유 (출처: 아키텍처 리뷰 `_works/arch-review/02.html` 후보 02)
+
+- [x] **RD-030 — Renderer API 인스턴스의 종료 상태를 수명 객체 하나가 소유하고, 부작용 전에 종료를 확정한다.** 지금 "종료됐다"는 사실이 `RpcClient.#disposed`와 `StreamMultiplexer.#disposed` 두 곳에 나뉘어 있고, 루트 `dispose`는 `rpcClient.dispose()` → `streams[Symbol.dispose]()` 순으로 두 module을 차례로 닫는다. RPC 정리 단계에서 `rpc-settled(disposed)` sink가 동기로 호출되는데, 이때 stream 플래그는 아직 `false`다. 그래서 sink 안에서 `subscribe()`를 부르면 subscribe control이 전송되고 `subscription-opened`가 기록된 뒤, 이어지는 stream 정리가 그 구독을 `complete`로 닫는다. 이 동작은 ADR 0006 "종료 뒤 subscribe는 control 없이 동기 오류"와 ADR 0022 결정 10 "sink 재진입 시 내부 상태는 이미 일관된다"를 어긴다. ADR 0006 §순서의 "사용자 코드가 동기로 실행되는 지점은 `complete()` 하나뿐"이라는 전제는 ADR 0022가 sink를 추가하면서 깨졌다. **구조:**
+  - 새 파일 `src/renderer/api-lifetime.ts`의 수명 객체가 `disposed`와 종료 절차를 소유한다. 절차는 멱등 검사 → ① 플래그 설정 → ② RPC 확정 → ③ stream 정리 순서다. 단계는 범용 콜백 목록이 아니라 고정 슬롯 2개(RPC, stream)로 받는다.
+  - `RpcClient`·`StreamMultiplexer`·`LocalGeneration`은 수명 객체의 `disposed`를 읽기만 한다. `RpcClient.dispose()`와 `StreamMultiplexer[Symbol.dispose]`는 자체 guard가 없는 내부 단계 메서드로 바꾸고, 두 클래스의 `#disposed`는 삭제한다.
+  - 루트 `dispose`는 수명 객체의 `dispose()` 한 줄이 된다.
+  - subscribe 차단 지점은 `LocalGeneration.subscribe` 한 곳을 유지한다.
+  - 공개 계약·wire·진단 종류는 바꾸지 않는다. 새 ADR은 만들지 않고 ADR 0006에 개정 note를 단다.
+
+  **범위 밖(보류):**
+  - envelope 대조 중복 2곳(`rpc-client.ts`·`stream-multiplexer.ts`)과 생성자 인자 전달 2벌: 수명과 무관한 관심사다.
+  - generation terminal 경로 통합과 `StreamMultiplexer.open`의 전제 주석·guard 정리: 리뷰 02 후보 03이며, RD-030 뒤 별도 RD로 진행한다.
+
+  **완료 기준:**
+  - 재진입 매트릭스 test 9건(재진입 지점 `rpc-settled` sink·`subscription-closed` sink·구독자 `complete` 콜백 × 동작 `subscribe`·RPC 호출·`dispose()`)이 있다. 수정 전 RED case와 수정 후 전부 GREEN을 기록한다.
+  - 기존 renderer test의 단언 변경 0건.
+  - `src/renderer`에서 `#disposed` grep 0건, `StreamMultiplexer`의 `Symbol.dispose` 0건.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0006 개정 note, `docs/architecture.md` Renderer dispose 서술, 리뷰 02.html 카드 완료 표시를 반영한다.
+
+  계획: `_works/20260925-07-renderer-api-lifetime/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(재진입 매트릭스 test 9건 추가, RED 2건 확보: `rpc-settled` 지점의 `subscribe`·`dispose` 재진입) → DELTA-02(`src/renderer/api-lifetime.ts` 신규, `ApiLifetime`이 종료 플래그·절차를 소유하고 `RpcClient`·`StreamMultiplexer`·`LocalGeneration`이 이를 읽게 전환, 매트릭스 9/9 GREEN) → DELTA-03(ADR 0006에 RD-030 개정 note, ADR 0022 결정 10에 교차 참조, `docs/architecture.md` Renderer dispose 서술 갱신) → DELTA-04(전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/647 tests 통과, 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. `grep -rn '#disposed' src/renderer`·`grep -n 'Symbol.dispose' src/renderer/stream-multiplexer.ts` 모두 0건. 기존 test 단언 변경 0건(`git diff dev -- packages/rx-bridge-electron/test` 삭제·변경 줄 0). 범위 밖으로 둔 envelope 대조 중복 2곳과 생성자 인자 전달, 리뷰 후보 03(generation terminal 경로 통합)은 계획대로 이 작업에 포함하지 않았다.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
