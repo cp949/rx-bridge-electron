@@ -17,13 +17,11 @@ import { RemoteEvent } from "./remote-event.js";
 import { RemoteStateClient } from "./remote-state.js";
 import { RpcClient } from "./rpc-client.js";
 import { StreamMultiplexer } from "./stream-multiplexer.js";
-import type { BridgeTransport, CallOptions } from "./transport.js";
-
-// `exposeBridgeInMainWorld`(preload)가 기본으로 노출하는 전역 이름과 정확히 일치해야 한다
-// (`src/preload/expose-bridge.ts`의 리터럴 `"rxBridge"`). 이 파일은 renderer 전용이라 그
-// 파일을 import할 수 없으므로(electron/main 코드가 renderer 번들에 섞이면 안 됨) 리터럴을
-// 그대로 둔다. ADR 0013 참고.
-const DEFAULT_GLOBAL_NAME = "rxBridge";
+import {
+  DEFAULT_BRIDGE_GLOBAL_NAME,
+  type BridgeTransport,
+  type CallOptions,
+} from "./transport.js";
 
 declare global {
   interface Window {
@@ -306,13 +304,15 @@ function isBridgeTransport(value: unknown): value is BridgeTransport {
 // `globalThis.rxBridge`를 읽는다. 없거나 transport 모양이 아니면 preload 설정 누락을
 // 바로 알아차릴 수 있게 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 에러를 던진다.
 function resolveGlobalTransport(): BridgeTransport {
-  const candidate = (globalThis as { rxBridge?: unknown })[DEFAULT_GLOBAL_NAME];
+  const candidate = (globalThis as { rxBridge?: unknown })[
+    DEFAULT_BRIDGE_GLOBAL_NAME
+  ];
   if (!isBridgeTransport(candidate)) {
     throw new TypeError(
       "createRendererApi requires a transport: no 'transport' argument was " +
-        `given and 'globalThis.${DEFAULT_GLOBAL_NAME}' is not a bridge ` +
+        `given and 'globalThis.${DEFAULT_BRIDGE_GLOBAL_NAME}' is not a bridge ` +
         "transport. Call exposeBridgeInMainWorld() in your preload script " +
-        `(it exposes 'window.${DEFAULT_GLOBAL_NAME}'), or pass a transport ` +
+        `(it exposes 'window.${DEFAULT_BRIDGE_GLOBAL_NAME}'), or pass a transport ` +
         "explicitly.",
     );
   }

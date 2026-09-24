@@ -1,6 +1,6 @@
 # 배선 인자를 선택화하고 고정 기본값을 둔다: namespace/role `"default"`, globalName `"rxBridge"`, electron는 호출 시점 namespace import
 
-- 관련: RD-014, 체크리스트 `_works/20260924-08-wiring-shorthand/checklist.md`
+- 관련: RD-014, 체크리스트 `_works/_completed/20260924-08-wiring-shorthand/checklist.md`(로컬 작업 폴더)
 
 ## 문제
 
@@ -13,7 +13,7 @@
 ## 결정: `namespace` 기본값은 `"default"`, `role` 기본값은 `"default"`, `globalName` 기본값은 `"rxBridge"`
 
 - `namespace`: Main(`bindElectronBridge`)과 preload(`exposeBridgeInMainWorld`) 양쪽에서 생략 시 같은 문자열 상수 `"default"`를 쓴다. 두 지점이 각자 다른 기본값을 두면 한쪽만 생략했을 때 채널이 어긋나는 조용한 실패가 생긴다. 채널 형식 `rx-bridge-electron:v1:${namespace}:*`는 바뀌지 않으므로, 기본 namespace의 채널은 `rx-bridge-electron:v1:default:*`가 된다.
-- `role`: `attach(webContents, role?)`에서 생략 시 `"default"`. `allowedOrigins`처럼 보안 경계에 쓰이는 값이 아니라 세션을 구분하는 라벨이므로 선택값으로 둘 수 있다.
+- `role`: `attach(webContents, role?)`에서 생략 시 `"default"`. `allowedOrigins`와 달리 생략해도 검사 자체가 사라지지 않는다 — role은 `authorize`의 `context.windowRole` 입력일 뿐이고, 인가 판단은 `authorize`가 한다. 역할로 인가를 나누지 않는 앱은 생략하고, 나누는 앱은 창마다 명시한다(데모의 `main`/`monitor`).
 - `globalName`: `exposeBridgeInMainWorld`가 `contextBridge.exposeInMainWorld`에 쓰는 이름이자 `createRendererApi`가 fallback으로 읽는 전역 프로퍼티 이름이다. 기존에 이미 쓰던 값 `"rxBridge"`를 그대로 기본값으로 삼는다 — 새 이름을 도입하면 기존 데모·문서와 불일치가 생긴다.
 
 ## 결정: electron 모듈은 `import * as electron from "electron"` 네임스페이스 import로 참조하고, 호출 시점에 해석한다. 주입값이 항상 우선한다
@@ -24,7 +24,7 @@
 
 ## 결정: `createRendererApi<B>(transport?)`는 생략 시 `globalThis.rxBridge`를 읽는다
 
-`transport` 인자는 `BridgeTransport | undefined`만 받는다 — `{ globalName }`처럼 다른 정보를 얹은 옵션 객체 overload는 두지 않는다(아래 "범위 밖" 참고). 생략하면 `globalThis.rxBridge`를 읽어 `BridgeTransport`로 쓴다. `rxBridge`는 `exposeBridgeInMainWorld`의 `globalName` 기본값과 같은 문자열이다 — 두 기본값이 어긋나면 축약형 Renderer 코드가 항상 실패하므로 반드시 같은 상수를 공유한다. `globalName`을 바꾼 소비자는 `createRendererApi`에 transport를 직접 만들어 넘긴다(이 경로에서만 `declare global`이 필요하다). 전역에 값이 없으면 "어느 전역을 찾다가 실패했는지"를 담은 명확한 오류로 실패한다 — `undefined`를 그대로 전달해 나중에 알기 어려운 오류로 이어지지 않게 한다.
+`transport` 인자는 `BridgeTransport | undefined`만 받는다 — `{ globalName }`처럼 다른 정보를 얹은 옵션 객체 overload는 두지 않는다(아래 "범위 밖" 참고). 생략하면 `globalThis.rxBridge`를 읽어 `BridgeTransport`로 쓴다. `rxBridge`는 `exposeBridgeInMainWorld`의 `globalName` 기본값과 같은 문자열이다 — 두 기본값이 어긋나면 축약형 Renderer 코드가 항상 실패하므로 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`)를 공유한다. `globalName`을 바꾼 소비자는 `createRendererApi`에 transport를 직접 만들어 넘긴다(이 경로에서만 `declare global`이 필요하다). 전역에 값이 없으면 "어느 전역을 찾다가 실패했는지"를 담은 명확한 오류로 실패한다 — `undefined`를 그대로 전달해 나중에 알기 어려운 오류로 이어지지 않게 한다.
 
 ## 결정: hello-world에서 `pagehide` dispose 등록을 뺀다. `dispose`는 SPA teardown 용도로 문서화한다
 
@@ -38,7 +38,7 @@
 
 ## 결정: `allowedOrigins`는 계속 필수, `role`은 선택(기본 `"default"`)
 
-`allowedOrigins`는 origin 검증이라는 보안 경계 자체를 이루므로 기본값을 주지 않는다 — 생략 가능하게 하면 소비자가 실수로 모든 origin을 허용하는 효과를 내기 쉽다. `role`은 세션을 구분하는 라벨일 뿐 보안 검사에 쓰이지 않으므로 선택값으로 둔다.
+`allowedOrigins`는 origin 검증이라는 보안 경계 자체를 이루므로 기본값을 주지 않는다 — 생략 가능하게 하면 소비자가 실수로 모든 origin을 허용하는 효과를 내기 쉽다. `role`은 `authorize`에 전달되는 입력이므로 생략하면 `"default"`로 전달될 뿐 검사를 우회하지 않는다. 역할 기반 `authorize`를 쓰는 앱은 `"default"`를 허용하지 않도록 작성하고 창마다 role을 명시한다.
 
 ## 결정: `createBridgeServer`와 `bindElectronBridge`의 분리는 유지한다
 

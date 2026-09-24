@@ -22,7 +22,10 @@ import {
   DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
 } from "../main/electron-adapter.js";
-import type { BridgeTransport } from "../renderer/transport.js";
+import {
+  DEFAULT_BRIDGE_GLOBAL_NAME,
+  type BridgeTransport,
+} from "../renderer/transport.js";
 
 const limits = {
   maxDepth: Number.MAX_SAFE_INTEGER,
@@ -115,5 +118,8 @@ export function exposeBridgeInMainWorld(
       return () => ipcRenderer.removeListener(channels.stream, wrapped);
     },
   });
-  contextBridge.exposeInMainWorld(options.globalName ?? "rxBridge", transport);
+  contextBridge.exposeInMainWorld(
+    options.globalName ?? DEFAULT_BRIDGE_GLOBAL_NAME,
+    transport,
+  );
 }

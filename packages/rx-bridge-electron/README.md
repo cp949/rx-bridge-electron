@@ -65,12 +65,12 @@ const server = createBridgeServer(impl, {
 ```
 
 ```ts
-// Main — Electron IPC에 연결합니다. win은 이미 만든 BrowserWindow입니다.
+// Main — Electron IPC에 연결합니다. app은 electron의 app, win은 이미 만든 BrowserWindow입니다.
 import { bindElectronBridge } from "@cp949/rx-bridge-electron/main";
 
 const bridge = bindElectronBridge({ server, allowedOrigins: ["file://"] });
-bridge.attach(win.webContents);
-win.on("closed", () => bridge.dispose());
+bridge.attach(win.webContents, "main"); // 위 authorize가 읽는 context.windowRole
+app.once("before-quit", () => bridge.dispose());
 ```
 
 ```ts
@@ -105,7 +105,7 @@ api.device.state.connection.subscribe(console.log);
 | 옵션                                        | 위치                                                            | 생략 시                                                                                                                                                             |
 | ------------------------------------------- | --------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `namespace`                                 | `bindElectronBridge`, `exposeBridgeInMainWorld`                 | `"default"`(Main·preload 공통 상수). 채널은 `rx-bridge-electron:v1:default:*`가 됩니다.                                                                             |
-| `role`                                      | `attach(contents, role?)`                                       | `"default"`                                                                                                                                                         |
+| `role`                                      | `attach(contents, role?)`                                       | `"default"`. `authorize`의 `context.windowRole`로 전달되므로 역할로 인가를 나누는 앱은 명시합니다.                                                                  |
 | `globalName`                                | `exposeBridgeInMainWorld`, `createRendererApi`가 읽는 전역 이름 | `"rxBridge"`(`window.rxBridge`)                                                                                                                                     |
 | `ipcMain` / `contextBridge` / `ipcRenderer` | `bindElectronBridge` / `exposeBridgeInMainWorld`                | 생략 시 호출 시점에 `import * as electron from "electron"`으로 해석(`electron.ipcMain` 등). 둘 다 없으면(비-Electron 런타임) `TypeError`. 주입값이 항상 우선합니다. |
 | `transport`                                 | `createRendererApi<B>(transport?)`                              | `globalThis.rxBridge`를 읽습니다. 없거나 transport 형태가 아니면 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 `TypeError`.                                       |
@@ -147,15 +147,9 @@ exposeBridgeInMainWorld({
 
 ```ts
 // Preload
-import { contextBridge, ipcRenderer } from "electron";
 import { exposeBridgeInMainWorld } from "@cp949/rx-bridge-electron/preload";
 
-exposeBridgeInMainWorld({
-  contextBridge,
-  ipcRenderer,
-  namespace: "app",
-  globalName: "appBridge",
-});
+exposeBridgeInMainWorld({ globalName: "appBridge" });
 ```
 
 ```ts
