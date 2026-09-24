@@ -101,7 +101,7 @@ describe(`${target} Virtual Device Monitor`, () => {
     const exposed = await main.evaluate(() => ({
       require: typeof (window as unknown as { require?: unknown }).require,
       process: typeof (window as unknown as { process?: unknown }).process,
-      bridge: Object.keys(window.appBridge),
+      bridge: Object.keys(window.rxBridge),
     }));
     expect(exposed.require).toBe("undefined");
     expect(exposed.process).toBe("undefined");

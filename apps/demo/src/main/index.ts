@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, net, protocol } from "electron";
+import { app, BrowserWindow, net, protocol } from "electron";
 import { relative, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createDemoComposition } from "./composition.js";
@@ -42,9 +42,7 @@ async function start(): Promise<void> {
   ];
   const composition = createDemoComposition();
   const bridge = bindElectronBridge({
-    ipcMain,
     server: composition.server,
-    namespace: "demo",
     allowedOrigins,
   });
   const createWindow = async (role: "main" | "monitor"): Promise<void> => {
