@@ -246,6 +246,150 @@ describe("Main stream sources and sharing", () => {
   });
 });
 
+describe("Main stream scoped Event delivery", () => {
+  test("scoped Event batches values with the same ack-gated flow control as broadcast", async () => {
+    const upstream = new Subject<number>();
+    const server = createBridgeServer({
+      hardware: { event: { change$: scopedEvent(() => upstream) } },
+    });
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => messages.push(message);
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    upstream.next(1);
+    upstream.next(2);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    expect(messages.at(-1)).toMatchObject({ values: [1] });
+    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+      "batch",
+    ]);
+    expect(messages.at(-1)).toMatchObject({ values: [2] });
+  });
+
+  test("scoped Event error terminates with a masked INTERNAL error and returns the slot", async () => {
+    const upstream = new Subject<number>();
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      { hardware: { event: { change$: scopedEvent(() => upstream) } } },
+      { diagnostics },
+    );
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => messages.push(message);
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    upstream.error(new Error("boom"));
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(diagnostics.record.mock.calls.map(([event]) => event.type)).toEqual(
+      expect.arrayContaining(["subscription-opened", "subscription-closed"]),
+    );
+  });
+
+  test("scoped Event complete terminates and returns the slot", async () => {
+    const upstream = new Subject<number>();
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      { hardware: { event: { change$: scopedEvent(() => upstream) } } },
+      { diagnostics },
+    );
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => messages.push(message);
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    upstream.complete();
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "complete",
+    ]);
+    expect(diagnostics.record.mock.calls.map(([event]) => event.type)).toEqual(
+      expect.arrayContaining(["subscription-opened", "subscription-closed"]),
+    );
+  });
+
+  test("scoped Event creates a separate upstream per subscription, unlike broadcast", async () => {
+    let factoryCalls = 0;
+    const firstSubject = new Subject<number>();
+    const secondSubject = new Subject<number>();
+    const server = createBridgeServer({
+      hardware: {
+        event: {
+          change$: scopedEvent(() => {
+            factoryCalls += 1;
+            return factoryCalls === 1 ? firstSubject : secondSubject;
+          }),
+        },
+      },
+    });
+    server.attach(new FakeTarget(1));
+    server.attach(new FakeTarget(2));
+    const first: StreamMessage[] = [];
+    const second: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => first.push(message),
+    );
+    await server.controlStream(
+      sender({ webContentsId: 2 }),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-2",
+        "event:hardware/change$",
+      ),
+      (message) => second.push(message),
+    );
+    expect(factoryCalls).toBe(2);
+    firstSubject.next(1);
+    secondSubject.next(2);
+    expect(first.at(-1)).toMatchObject({ values: [1] });
+    expect(second.at(-1)).toMatchObject({ values: [2] });
+  });
+});
+
 describe("Main stream flow control", () => {
   test("queued State is an immutable snapshot of the accepted schema value", async () => {
     const source = new BehaviorSubject({ nested: { count: 1 } });
