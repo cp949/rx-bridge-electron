@@ -1,5 +1,6 @@
-import { Subject, type Subscriber, type TeardownLogic } from "rxjs";
+import { Observable, Subject, type Subscriber, type TeardownLogic } from "rxjs";
 
+import type { RemoteState, RemoteStateSnapshot } from "../contract/index.js";
 import { createDisposedError, type RemoteError } from "./remote-error.js";
 import type { StreamMultiplexer } from "./stream-multiplexer.js";
 
@@ -12,33 +13,37 @@ interface Generation<T> {
   latest: T | undefined;
 }
 
-export interface LocalGenerationPolicy<T> {
-  onOpen?(): void;
-  beforeNext?(value: T): void;
-  onClose?(): void;
-  /**
-   * true면 이미 값을 받은 활성 generation에 늦게 합류하는 구독자에게 현재값을
-   * `subscribe()` 호출 안에서 동기로 1회 재생한다. 값의 수명은 generation의
-   * 수명과 같다 — generation이 폐기되면(마지막 구독 해제, error, complete) 값도
-   * 함께 버려지고 다음 generation에는 재생되지 않는다.
-   */
-  replayLatest?: boolean;
-}
+type LocalGenerationKind = "state" | "event";
 
-export class LocalGeneration<T> {
+/**
+ * generation(open→next*→close) 수명과 snapshot 상태기계를 한 곳에 둔다.
+ * `kind`가 `"state"`일 때만 snapshot을 유지·전이하고 늦은 구독자에게 현재값을
+ * replay한다. `"event"`는 generation 수명 관리만 공유하고 snapshot을 읽지
+ * 않는다.
+ */
+class LocalGeneration<T> {
   readonly #multiplexer: StreamMultiplexer;
   readonly #key: string;
-  readonly #policy: LocalGenerationPolicy<T>;
+  readonly #kind: LocalGenerationKind;
   #generation: Generation<T> | undefined;
+  #snapshot: RemoteStateSnapshot<T> = {
+    status: "uninitialized",
+    active: false,
+  };
 
   public constructor(
     multiplexer: StreamMultiplexer,
     key: string,
-    policy: LocalGenerationPolicy<T> = {},
+    kind: LocalGenerationKind,
   ) {
     this.#multiplexer = multiplexer;
     this.#key = key;
-    this.#policy = policy;
+    this.#kind = kind;
+  }
+
+  /** state 전용 값이다. event에서는 읽지 않는다. */
+  public get snapshot(): RemoteStateSnapshot<T> {
+    return this.#snapshot;
   }
 
   public subscribe(subscriber: Subscriber<T>): TeardownLogic {
@@ -62,7 +67,9 @@ export class LocalGeneration<T> {
         latest: undefined,
       };
       this.#generation = generation;
-      this.#policy.onOpen?.();
+      if (this.#kind === "state") {
+        this.#snapshot = { status: "connecting", active: true };
+      }
     }
 
     generation.subscribers += 1;
@@ -70,13 +77,16 @@ export class LocalGeneration<T> {
 
     if (
       !opensGeneration &&
-      this.#policy.replayLatest === true &&
+      this.#kind === "state" &&
       generation.hasValue &&
       this.#generation === generation &&
       !generation.closed
     ) {
       // 새 구독자에게만 현재값을 동기로 재생한다. subject.next로 재생하면
-      // 기존 구독자가 값을 중복 수신하므로 subscriber에 직접 전달한다.
+      // 기존 구독자가 값을 중복 수신하므로 subscriber에 직접 전달한다. 값의
+      // 수명은 generation의 수명과 같다 — generation이 폐기되면(마지막 구독
+      // 해제, error, complete) 값도 함께 버려지고 다음 generation에는
+      // 재생되지 않는다.
       subscriber.next(generation.latest as T);
     }
 
@@ -95,7 +105,9 @@ export class LocalGeneration<T> {
       ) {
         generation.closed = true;
         this.#generation = undefined;
-        this.#policy.onClose?.();
+        if (this.#kind === "state") {
+          this.#markInactive();
+        }
         if (generation.subscriptionId !== undefined) {
           this.#multiplexer.close(generation.subscriptionId);
         }
@@ -113,7 +125,13 @@ export class LocalGeneration<T> {
             const typedValue = value as T;
             generation.hasValue = true;
             generation.latest = typedValue;
-            this.#policy.beforeNext?.(typedValue);
+            if (this.#kind === "state") {
+              this.#snapshot = {
+                status: "current",
+                active: true,
+                value: typedValue,
+              };
+            }
             generation.subject.next(typedValue);
           },
           error: (error) => this.#finish(generation, error),
@@ -134,11 +152,50 @@ export class LocalGeneration<T> {
     }
     generation.closed = true;
     this.#generation = undefined;
-    this.#policy.onClose?.();
+    if (this.#kind === "state") {
+      this.#markInactive();
+    }
     if (error === undefined) {
       generation.subject.complete();
     } else {
       generation.subject.error(error);
     }
   }
+
+  #markInactive(): void {
+    const snapshot = this.#snapshot;
+    this.#snapshot =
+      snapshot.status === "current" || snapshot.status === "stale"
+        ? { status: "stale", active: false, value: snapshot.value }
+        : { status: "uninitialized", active: false };
+  }
+}
+
+class RemoteStateClient<T> extends Observable<T> implements RemoteState<T> {
+  readonly #local: LocalGeneration<T>;
+
+  public constructor(multiplexer: StreamMultiplexer, key: string) {
+    const local = new LocalGeneration<T>(multiplexer, key, "state");
+    super((subscriber) => local.subscribe(subscriber));
+    this.#local = local;
+  }
+
+  public get snapshot(): RemoteStateSnapshot<T> {
+    return this.#local.snapshot;
+  }
+}
+
+export function createRemoteState<T>(
+  multiplexer: StreamMultiplexer,
+  key: string,
+): RemoteState<T> {
+  return new RemoteStateClient<T>(multiplexer, key);
+}
+
+export function createRemoteEvent<T>(
+  multiplexer: StreamMultiplexer,
+  key: string,
+): Observable<T> {
+  const local = new LocalGeneration<T>(multiplexer, key, "event");
+  return new Observable<T>((subscriber) => local.subscribe(subscriber));
 }

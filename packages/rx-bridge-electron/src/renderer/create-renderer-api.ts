@@ -19,10 +19,9 @@ import {
   type OperationCategory,
   type OperationKeyReject,
 } from "../protocol/operation-key.js";
+import { createRemoteEvent, createRemoteState } from "./local-generation.js";
 import { localError } from "./remote-error.js";
 import type { RemoteError } from "./remote-error.js";
-import { RemoteEvent } from "./remote-event.js";
-import { RemoteStateClient } from "./remote-state.js";
 import { RpcClient } from "./rpc-client.js";
 import { StreamMultiplexer } from "./stream-multiplexer.js";
 import {
@@ -231,9 +230,9 @@ function createProxy(
           ? (input: BridgeValue = undefined, options?: CallOptions) =>
               services.rpcClient.call(child.leaf!.key, input, options)
           : child.leaf?.category === "state"
-            ? new RemoteStateClient(services.streams, child.leaf.key)
+            ? createRemoteState(services.streams, child.leaf.key)
             : child.leaf?.category === "event"
-              ? new RemoteEvent(services.streams, child.leaf.key)
+              ? createRemoteEvent(services.streams, child.leaf.key)
               : child.leaf === undefined
                 ? createProxy(child, services)
                 : undefined;
