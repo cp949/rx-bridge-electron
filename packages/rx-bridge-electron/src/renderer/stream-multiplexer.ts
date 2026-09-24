@@ -44,6 +44,8 @@ export class StreamMultiplexer implements Disposable {
     return this.#disposed;
   }
 
+  // 종료 여부는 호출자(`LocalGeneration.subscribe`)가 먼저 확인한다. 종료 뒤
+  // 호출하면 generation이 등록된 채 남고 subscribe control이 전송된다.
   public open(
     key: string,
     handlers: StreamGenerationHandlers,
