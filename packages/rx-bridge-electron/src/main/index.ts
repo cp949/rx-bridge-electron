@@ -27,7 +27,6 @@ export type {
   BridgeContext,
   BridgeOperation,
   BridgeDiagnostic,
-  BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
   OperationCategory,

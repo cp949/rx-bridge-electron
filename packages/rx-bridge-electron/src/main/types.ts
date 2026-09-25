@@ -1,5 +1,5 @@
 import type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
-import type { BridgeValue, RpcResponse } from "../protocol/index.js";
+import type { BridgeValue } from "../protocol/index.js";
 import type { OperationCategory } from "../protocol/operation-key.js";
 
 export type { BridgeContext, SenderIdentity } from "../contract/impl-types.js";
@@ -86,13 +86,6 @@ export type BridgeDiagnostic =
   | { readonly type: "subscription-closed"; readonly key: string };
 export interface DiagnosticsSink {
   record(event: BridgeDiagnostic): void;
-}
-
-export interface BridgeServer {
-  attach(target: AttachedTarget): () => void;
-  dispatchRpc(sender: SenderIdentity, value: unknown): Promise<RpcResponse>;
-  cancel(sender: SenderIdentity, value: unknown): void;
-  dispose(): void;
 }
 
 export type RpcHandler = (

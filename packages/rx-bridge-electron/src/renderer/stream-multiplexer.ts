@@ -13,7 +13,11 @@ import {
   type SubscriptionCloseCause,
 } from "./diagnostics.js";
 import { createOpaqueId } from "./ids.js";
-import { localError, remoteErrorFromPayload, RemoteError } from "./remote-error.js";
+import {
+  localError,
+  remoteErrorFromPayload,
+  RemoteError,
+} from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
 /**

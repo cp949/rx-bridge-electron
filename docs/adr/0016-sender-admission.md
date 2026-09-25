@@ -47,6 +47,8 @@ _(개정: ADR 0020 — 위 표의 "cancel/control 응답" 열은 cancel·unsubsc
 
 `StreamBridgeServer`의 `handshake`·`controlStream`, 부모 `BridgeServer`의 `dispatchRpc`·`cancel`이 모두 `unknown` 값을 받는다(breaking — 아래 "이전" 참고). 각 메서드는 채널에 맞는 `parseHandshakeRequest`·`parseWireRpcRequest`·`parseWireCancelRequest`·`parseWireStreamCommand`를 가장 먼저 호출한다. 한도는 옛 adapter가 쓰던 값(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)을 그대로 쓴다 — `options.payloadLimits`(contract 단계 한도)는 이 envelope 단계에 적용하지 않는다. 적용하면 `payload-too-large`가 `malformed-envelope`로 흡수돼 두 사유가 구분되지 않기 때문이다.
 
+_(개정: RD-039 — 부모 interface `BridgeServer`는 삭제됐다. `dispatchRpc`·`cancel`은 이제 `StreamBridgeServer`에 직접 선언돼 있다. 결정 내용은 그대로다.)_
+
 parse 실패는 `classifyParseFailure` 하나로 분류한다: `BridgeProtocolError`이고 `code === "VERSION_MISMATCH"`면 `version-mismatch`, 그 외 모든 throw는 `malformed-envelope`. 기록은 요청당 1회다. `protocolVersion !== 1`을 직접 비교하던 server 안 옛 분기(도달 불가였던 코드) 2곳은 삭제한다 — parse가 이제 그 판정을 대신한다.
 
 Electron 어댑터(`electron-adapter.ts`)에서 삭제한 것: `parseHandshakeRequest`/`parseWireRpcRequest`/`parseWireCancelRequest`/`parseWireStreamCommand` import와 채널별 parse try/catch, handshake의 `identity.isMainFrame`·`options.allowedOrigins.includes` 검사, envelope 한도 상수, `recordRejection`과 `recordAdapterRejection` import(이유는 위 "상황"의 Symbol 통로 문단). 남긴 것: `senderIdentity`(Electron event → `SenderIdentity` 번역), `targetFor`(attach 시점의 `isCurrentMainFrame`/`isAllowedOrigin`/`onLifecycle` 조립), 채널 등록·해제, `streamSender`. 각 handler는 `server.<method>(senderIdentity(event), value)`를 그대로 호출하고, server가 던지면(구현이 항상 응답을 반환하는 계약이므로 정상 경로에서는 도달하지 않는 방어용 fallback) invoke 채널(handshake·rpc)은 `protocolError(value, "INVALID_ARGUMENT", "Invalid bridge request.")`를 반환하고 send 채널(cancel·control)은 조용히 무시한다.

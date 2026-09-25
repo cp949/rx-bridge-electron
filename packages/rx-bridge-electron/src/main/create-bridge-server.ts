@@ -31,7 +31,6 @@ import { Subscriptions, type StreamSender } from "./subscriptions.js";
 import type {
   AttachedTarget,
   Authorize,
-  BridgeServer,
   DiagnosticsSink,
   DiagnosticsSnapshot,
   RejectReason,
@@ -52,11 +51,14 @@ function classifyParseFailure(
     : "malformed-envelope";
 }
 
-export interface StreamBridgeServer extends BridgeServer {
+export interface StreamBridgeServer {
+  attach(target: AttachedTarget): () => void;
   handshake(
     sender: SenderIdentity,
     value: unknown,
   ): HandshakeResponse | RpcResponse;
+  dispatchRpc(sender: SenderIdentity, value: unknown): Promise<RpcResponse>;
+  cancel(sender: SenderIdentity, value: unknown): void;
   /** 반환된 promise는 reject하지 않는다(RD-029) — adapter가 `void`로 버리기 때문이다. */
   controlStream(
     sender: SenderIdentity,
@@ -64,6 +66,7 @@ export interface StreamBridgeServer extends BridgeServer {
     send: StreamSender,
   ): Promise<void>;
   getDiagnosticsSnapshot(): DiagnosticsSnapshot;
+  dispose(): void;
 }
 
 /** `createBridgeServer(impl, options)`의 옵션(RD-011). */
@@ -112,8 +115,12 @@ function buildBridgeServer(
   table: RegistrationTable,
   config: ResolvedServerConfig,
 ): StreamBridgeServer {
-  const { payloadLimits: limits, resourceLimits, authorize, diagnostics } =
-    config;
+  const {
+    payloadLimits: limits,
+    resourceLimits,
+    authorize,
+    diagnostics,
+  } = config;
   let disposed = false;
   const sessions = new DocumentSessions(resourceLimits, diagnostics);
   const manifest = manifestFromTable(table);
@@ -135,6 +142,9 @@ function buildBridgeServer(
     recordDiagnostic(diagnostics, { type: "rejected", reason });
   };
   return {
+    attach(target: AttachedTarget): () => void {
+      return sessions.attach(target);
+    },
     handshake(sender: SenderIdentity, value: unknown) {
       let envelope;
       try {
@@ -149,9 +159,6 @@ function buildBridgeServer(
         return invalidRequest(value);
       }
       return withEnvelope(envelope.clientId, { manifest });
-    },
-    attach(target: AttachedTarget): () => void {
-      return sessions.attach(target);
     },
     async dispatchRpc(
       sender: SenderIdentity,
@@ -235,12 +242,6 @@ function buildBridgeServer(
         // 최종 방어: 조용히 무시한다. 진단 기록도, 재throw도 하지 않는다.
       }
     },
-    dispose(): void {
-      if (disposed) return;
-      disposed = true;
-      sessions.dispose();
-      subscriptions.dispose();
-    },
     getDiagnosticsSnapshot(): DiagnosticsSnapshot {
       return {
         sessions: sessions.sessionCount(),
@@ -248,6 +249,12 @@ function buildBridgeServer(
         subscriptions: subscriptions.subscriptionCount(),
         queuedEvents: subscriptions.queuedEventsCount(),
       };
+    },
+    dispose(): void {
+      if (disposed) return;
+      disposed = true;
+      sessions.dispose();
+      subscriptions.dispose();
     },
   };
 }
