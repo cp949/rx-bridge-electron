@@ -48,6 +48,20 @@ export type RejectReason =
   | "rpc-limit"
   | "subscription-limit";
 
+/**
+ * 등록 조회를 통과한 뒤에만 판정되는 사유 — `rejected` 진단에 `key`가 반드시
+ * 있다(ADR 0010 §6). `invalid-input`은 RPC 입력 검증(key 있음)과 subscriptionId
+ * 형식 오류(key 없음) 두 경로에서 나오므로 어느 쪽에도 넣지 않는다.
+ */
+type KeyedRejectReason =
+  "authorize-denied" | "payload-too-large" | "rpc-limit" | "subscription-limit";
+
+/** 등록 조회 전에 판정되는 사유 — `rejected` 진단에 `key`를 넣지 않는다(ADR 0010 §6). */
+export type UnkeyedRejectReason = Exclude<
+  RejectReason,
+  KeyedRejectReason | "invalid-input"
+>;
+
 export interface DiagnosticsSnapshot {
   readonly sessions: number;
   readonly rpcInFlight: number;
@@ -77,7 +91,17 @@ export type BridgeDiagnostic =
     }
   | {
       readonly type: "rejected";
-      readonly reason: RejectReason;
+      readonly reason: KeyedRejectReason;
+      readonly key: string;
+    }
+  | {
+      readonly type: "rejected";
+      readonly reason: UnkeyedRejectReason;
+      readonly key?: never;
+    }
+  | {
+      readonly type: "rejected";
+      readonly reason: "invalid-input";
       readonly key?: string;
     }
   | { readonly type: "session-opened" }

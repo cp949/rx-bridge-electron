@@ -33,8 +33,8 @@ import type {
   Authorize,
   DiagnosticsSink,
   DiagnosticsSnapshot,
-  RejectReason,
   SenderIdentity,
+  UnkeyedRejectReason,
 } from "./types.js";
 
 /**
@@ -138,7 +138,7 @@ function buildBridgeServer(
     diagnostics,
     authorize,
   );
-  const reject = (reason: RejectReason): void => {
+  const reject = (reason: UnkeyedRejectReason): void => {
     recordDiagnostic(diagnostics, { type: "rejected", reason });
   };
   return {

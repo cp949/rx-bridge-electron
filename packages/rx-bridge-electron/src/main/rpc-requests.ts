@@ -39,6 +39,12 @@ type RpcResponseBody =
       };
     };
 
+/** `parseBridgeValue`·입력 스키마 실패가 함께 쓰는 `INVALID_ARGUMENT` 응답 payload. */
+const invalidArgumentError: LibraryErrorPayload = Object.freeze({
+  code: "INVALID_ARGUMENT",
+  message: "Invalid bridge argument.",
+});
+
 /** 요청 envelope의 `clientId`·`requestId`를 붙여 응답을 만든다. */
 function respond(envelope: WireRpcRequest, body: RpcResponseBody): RpcResponse {
   return withEnvelope(envelope.clientId, {
@@ -300,13 +306,7 @@ export class RpcRequests {
             : "invalid-input",
         key: envelope.key,
       });
-      return respond(envelope, {
-        type: "error",
-        error: {
-          code: "INVALID_ARGUMENT",
-          message: "Invalid bridge argument.",
-        } satisfies LibraryErrorPayload,
-      });
+      return respond(envelope, { type: "error", error: invalidArgumentError });
     }
     let input: BridgeValue;
     try {
@@ -322,13 +322,7 @@ export class RpcRequests {
         reason: "invalid-input",
         key: envelope.key,
       });
-      return respond(envelope, {
-        type: "error",
-        error: {
-          code: "INVALID_ARGUMENT",
-          message: "Invalid bridge argument.",
-        } satisfies LibraryErrorPayload,
-      });
+      return respond(envelope, { type: "error", error: invalidArgumentError });
     }
     let result: BridgeValue;
     try {
