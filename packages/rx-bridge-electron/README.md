@@ -91,7 +91,10 @@ const api = await createRendererApi<AppBridge>();
 ```ts
 // Renderer — 사용 예(배선이 아닙니다)
 await api.device.rpc.connect();
-api.device.state.connection.subscribe(console.log);
+api.device.state.connection.subscribe({
+  next: console.log,
+  error: console.error,
+});
 ```
 
 `impl: BridgeImpl<AppBridge>`는 계약이 선언한 모든 도메인·모든 operation에 대응하는 handler/source를 가진 일반 객체입니다. 계약과 구현이 어긋나면(누락, 초과, handler·소스 형태 오류) 컴파일 타임에 실패합니다 — `AppBridge`와 `impl`이 같은 타입에서 파생하므로 별도의 런타임 재검증이 필요 없습니다(근거: [ADR 0012](../../docs/adr/0012-lightweight-type-contract.md)). manifest는 `impl`의 키에서 만들므로, 타입을 우회해(`as any`) 빠뜨린 operation은 애초에 Renderer에 노출되지 않습니다. impl 형태 검사(handler가 함수인지, state가 `getValue`를 갖는지 등)는 타입을 우회한 값을 상대로 한 방어선으로 유지되며, 위반 시 서버 생성이 `TypeError`로 실패합니다.
@@ -359,6 +362,66 @@ export function useRemoteState<T>(
 store의 listener들은 `state` 구독 하나를 공유합니다. 마지막 listener가 나가면 구독을 해제합니다. listener가 있는 동안에는 다른 구독이 연 generation에도 합류해 변경을 알리고, listener가 모두 나갈 때까지 그 구독을 유지합니다. `getSnapshot()`이 바뀌면 반드시 알림을 받습니다(여분 알림은 허용). 원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 스스로 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하세요 — 새 listener가 `state`를 다시 구독하고, 남아 있던 listener도 그 변경을 받습니다. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요. Main 쪽에서 source를 통째로 교체해야 한다면 store 재구독 대신 위 "Main State source 평탄화" 참고.
 
 다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다.
+
+### Event·RPC 직접 사용
+
+Event와 RPC에는 adapter가 없습니다. Event는 현재값이 없어 누적 방식(목록 추가, 개수, 마지막 값)이 화면마다 다르고, RPC는 `Promise`입니다.
+
+Event를 직접 구독할 때는 `error`도 넘기세요. `next`만 넘기면 원격 종료가 rxjs 미처리 오류(`Uncaught RemoteError`)로 보고되고, 구독이 닫힌 채 이후 이벤트를 받지 못합니다. 원격 종료 원인은 다음과 같습니다.
+
+- 세션 종료(detach, `server.dispose()`): `CANCELLED "Bridge session ended."`
+- `authorize` 거부, 세션이 끝난 뒤의 새 구독: `FORBIDDEN`
+- 세션 구독 한도 초과: `RESOURCE_EXHAUSTED`
+- overflow 정책 `"error"`(기본값)의 buffer 초과: `STREAM_OVERFLOW`
+- Main source error, 출력 검증 실패, `authorize` 예외: `INTERNAL`(source error의 `code`는 전달되지 않습니다)
+
+종료 뒤에는 스스로 재구독하지 않습니다. `api.dispose()`는 `error`가 아니라 `complete`로 끝납니다. State를 `snapshotStore` 없이 직접 구독할 때(`pipe(sampleTime(...))` 등)도 같습니다.
+
+```tsx
+import { useEffect, useState } from "react";
+
+import { RemoteError } from "@cp949/rx-bridge-electron/renderer";
+
+function errorText(error: unknown): string {
+  return error instanceof RemoteError
+    ? `${error.code}: ${error.message}`
+    : String(error);
+}
+
+function FaultView() {
+  const [fault, setFault] = useState("");
+  const [streamError, setStreamError] = useState("");
+  useEffect(() => {
+    const subscription = api.relay.event.fault.subscribe({
+      next: (value) => setFault(`${value.code}: ${value.message}`),
+      error: (error: unknown) => setStreamError(errorText(error)),
+    });
+    return () => subscription.unsubscribe();
+  }, []);
+  // ...
+}
+```
+
+TanStack Query 없이 RPC를 부를 때는 호출마다 `AbortController`를 만들고 unmount 때 진행 중인 호출을 모두 abort하세요. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다.
+
+```tsx
+const controllers = useRef(new Set<AbortController>());
+useEffect(() => () => controllers.current.forEach((c) => c.abort()), []);
+
+const invoke = async (call: (signal: AbortSignal) => Promise<unknown>) => {
+  const controller = new AbortController();
+  controllers.current.add(controller);
+  try {
+    await call(controller.signal);
+  } catch (error) {
+    if (!controller.signal.aborted) setOperationError(errorText(error));
+  } finally {
+    controllers.current.delete(controller);
+  }
+};
+
+// <button onClick={() => void invoke((signal) => api.relay.rpc.turnOn(undefined, { signal }))}>
+```
 
 ### TanStack Query 연동
 
