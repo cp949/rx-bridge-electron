@@ -1015,6 +1015,208 @@ describe("Main stream lifecycle and ordering", () => {
     expect(messages[0]).toMatchObject({ type: "subscribed", sequence: 0 });
     await pending;
   });
+
+  test("detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED", async () => {
+    const { server, events, diagnostics, messages, send } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const detach = server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    diagnostics.record.mockImplementation((event: { type: string }) => {
+      if (event.type === "stream-dropped") detach();
+    });
+    events.next(1);
+    events.next(2);
+    events.next(3);
+    events.next(4);
+    events.next(5);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "batch", sequence: 1 },
+      { type: "error", sequence: 2 },
+    ]);
+    expect(messages[1]).toMatchObject({ values: [1] });
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(
+      diagnostics.record.mock.calls
+        .slice(-4)
+        .map(
+          ([event]) =>
+            event as { type: string; count?: number; depth?: number },
+        ),
+    ).toEqual([
+      expect.objectContaining({ type: "stream-dropped", count: 1 }),
+      expect.objectContaining({ type: "session-closed" }),
+      expect.objectContaining({ type: "subscription-closed" }),
+      expect.objectContaining({ type: "stream-queue", depth: 2 }),
+    ]);
+    expect(server.getDiagnosticsSnapshot()).toMatchObject({
+      subscriptions: 0,
+      queuedEvents: 0,
+    });
+  });
+
+  test("detach from the diagnostics sink during a post-push stream-queue diagnostic drops the pending batch", async () => {
+    const { server, events, diagnostics, messages, send } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const detach = server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    diagnostics.record.mockImplementation(
+      (event: { type: string; depth?: number }) => {
+        if (event.type === "stream-queue" && event.depth === 1) detach();
+      },
+    );
+    events.next(1);
+    events.next(2);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "error", sequence: 1 },
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(
+      diagnostics.record.mock.calls
+        .slice(-3)
+        .map(([event]) => event as { type: string; depth?: number }),
+    ).toEqual([
+      expect.objectContaining({ type: "stream-queue", depth: 1 }),
+      expect.objectContaining({ type: "session-closed" }),
+      expect.objectContaining({ type: "subscription-closed" }),
+    ]);
+  });
+
+  test("a synchronous acknowledge reentrant inside send drains the deferred queue in order", async () => {
+    const { server, events, diagnostics } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const id = testSubscriptionId(1);
+    const messages: StreamMessage[] = [];
+    let gate = false;
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+      if (gate && message.type === "batch") {
+        void server.controlStream(sender(), ack(id, message.sequence), send);
+      }
+    };
+    await server.controlStream(
+      sender(),
+      command("subscribe", id, "client-1", "event:hardware/change$"),
+      send,
+    );
+    events.next(1);
+    events.next(2);
+    events.next(3);
+    events.complete();
+    gate = true;
+    await server.controlStream(sender(), ack(id, 1), send);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "batch", sequence: 1 },
+      { type: "batch", sequence: 2 },
+      { type: "batch", sequence: 3 },
+      { type: "complete", sequence: 4 },
+    ]);
+    expect(messages[1]).toMatchObject({ values: [1] });
+    expect(messages[2]).toMatchObject({ values: [2] });
+    expect(messages[3]).toMatchObject({ values: [3] });
+    expect(
+      diagnostics.record.mock.calls
+        .slice(-3)
+        .map(([event]) => event as { type: string; depth?: number }),
+    ).toEqual([
+      expect.objectContaining({ type: "stream-queue", depth: 1 }),
+      expect.objectContaining({ type: "stream-queue", depth: 0 }),
+      expect.objectContaining({ type: "subscription-closed" }),
+    ]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("a synchronous unsubscribe reentrant inside send stops delivery immediately", async () => {
+    const { server, events, diagnostics } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const id = testSubscriptionId(1);
+    const messages: StreamMessage[] = [];
+    const send = (message: StreamMessage) => {
+      messages.push(message);
+      if (message.type === "batch") {
+        void server.controlStream(sender(), command("unsubscribe", id), send);
+      }
+    };
+    await server.controlStream(
+      sender(),
+      command("subscribe", id, "client-1", "event:hardware/change$"),
+      send,
+    );
+    events.next(1);
+    events.next(2);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "batch", sequence: 1 },
+    ]);
+    expect(messages[1]).toMatchObject({ values: [1] });
+    expect(
+      diagnostics.record.mock.calls
+        .slice(-3)
+        .map(([event]) => event as { type: string; depth?: number }),
+    ).toEqual([
+      expect.objectContaining({ type: "stream-queue", depth: 1 }),
+      expect.objectContaining({ type: "stream-queue", depth: 0 }),
+      expect.objectContaining({ type: "subscription-closed" }),
+    ]);
+    expect(server.getDiagnosticsSnapshot()).toMatchObject({
+      subscriptions: 0,
+      queuedEvents: 0,
+    });
+    events.next(3);
+    expect(messages).toHaveLength(2);
+  });
 });
 
 describe("Main stream terminal notify on retire", () => {
