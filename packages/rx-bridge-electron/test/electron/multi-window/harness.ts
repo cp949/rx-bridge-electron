@@ -3,7 +3,7 @@ import { expect } from "vitest";
 import { createRequire } from "node:module";
 import { fileURLToPath } from "node:url";
 
-import { bundleFixture } from "../bundle-fixture.js";
+import { type BundledFixture, bundleFixture } from "../bundle-fixture.js";
 import type { MultiWindowProbe } from "./main.js";
 import type * as FixtureRenderer from "./renderer.js";
 
@@ -20,16 +20,14 @@ const fixtureRenderer = fileURLToPath(
   new URL("./renderer.html", import.meta.url),
 );
 
-export function bundleMultiWindowFixture(): ReturnType<typeof bundleFixture> {
+export function bundleMultiWindowFixture(): Promise<BundledFixture> {
   return bundleFixture(
     "test/electron/multi-window",
     "rx-bridge-electron-multi-window",
   );
 }
 
-export async function launch(
-  fixture: ReturnType<typeof bundleFixture>,
-): Promise<ElectronApp> {
+export async function launch(fixture: BundledFixture): Promise<ElectronApp> {
   return electron.launch({
     executablePath: electronExecutable,
     args: [fixture.main],

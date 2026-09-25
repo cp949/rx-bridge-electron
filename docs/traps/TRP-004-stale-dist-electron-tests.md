@@ -15,9 +15,11 @@
   공개 타입을 바꾼 뒤 build 전에 돌린 `check-types`는 fixture의 옛 시그니처 사용을 잡지 못하고
   exit 0이다(예: `authorize` 인자를 바꿨을 때 build 후에야 `TS2345: Argument of type
 'BridgeOperation' is not assignable to parameter of type 'string'.`).
-- 실패가 tsup dts 빌드 에러(예: `Argument of type '{...}' is not assignable to parameter of type
-'BindElectronBridgeOptions'`)로 나타나, 방금 만든 fixture 코드가 잘못된 것처럼 보인다. 실제로는
-  `dist/`가 이전 함수 시그니처를 그대로 들고 있는 것이다.
+- `bundleFixture`는 tsdown으로 JS만 번들하고 타입을 검사하지 않는다. tsup 시절에는 패키지 config의
+  `dts: true`가 fixture 번들에도 적용돼 dts 빌드 에러(예: `Argument of type '{...}' is not assignable to
+parameter of type 'BindElectronBridgeOptions'`)로 드러났지만, 지금은 Electron test의 런타임 실패로만
+  나타난다. 방금 만든 fixture 코드가 잘못된 것처럼 보이지만 실제로는 `dist/`가 이전 함수 시그니처를
+  그대로 들고 있는 것이다.
 - 패키지 `verify`는 `pnpm build && pnpm check-types && pnpm test` 순서라 이 트랩을 피한다. 루트
   turbo는 `@cp949/rx-bridge-electron#check-types`·`#test`에 `dependsOn: ["build"]`를 선언한다. 그래서
   "verify는 통과했는데 직접 돌린 test는 실패한다"는 차이가 생길 수 있다 — 직접 실행 쪽이 stale `dist/`다.
@@ -26,7 +28,7 @@
 
 패키지가 `package.json`의 `exports`로 `dist/*`만 노출하고(`src` 직접 import 경로 없음), Electron fixture
 (`test/electron/fixture/*.ts`, `test/electron/multi-window/*.ts`)는 워크스페이스 패키지 이름
-(`@cp949/rx-bridge-electron/main` 등)으로 import한다. `bundleFixture`가 tsup으로 이 fixture를 번들할 때
+(`@cp949/rx-bridge-electron/main` 등)으로 import한다. `bundleFixture`가 tsdown으로 이 fixture를 번들할 때
 그 `dist`를 그대로 링크하므로, `src`를 고친 직후 `dist`를 재빌드하지 않으면 fixture 번들이 옛 `dist`를
 링크한다.
 

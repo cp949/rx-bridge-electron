@@ -10,11 +10,11 @@ import {
 } from "./harness.js";
 
 describe("Electron multi-window bridge", () => {
-  let fixture: ReturnType<typeof bundleMultiWindowFixture>;
+  let fixture: Awaited<ReturnType<typeof bundleMultiWindowFixture>>;
   let app: ElectronApp | undefined;
 
-  beforeAll(() => {
-    fixture = bundleMultiWindowFixture();
+  beforeAll(async () => {
+    fixture = await bundleMultiWindowFixture();
   });
 
   afterEach(async () => {

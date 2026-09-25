@@ -7,7 +7,7 @@
   "include": [
     "src/**/*.ts",
     "test/**/*.ts",
-    "tsup.config.ts",
+    "tsdown.config.ts",
     "vitest.config.ts",
     "vitest.soak.config.ts"
   ]

@@ -16,7 +16,7 @@ describe("Electron multi-window soak", () => {
   let app: ElectronApp;
 
   beforeAll(async () => {
-    app = await launch(bundleMultiWindowFixture());
+    app = await launch(await bundleMultiWindowFixture());
   });
 
   afterAll(async () => {

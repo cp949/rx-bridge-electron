@@ -35,8 +35,8 @@ type BridgeGlobal = {
 describe("Electron bridge process seam", () => {
   let app: Awaited<ReturnType<typeof electron.launch>> | undefined;
 
-  beforeAll(() => {
-    bundleFixture("test/electron/fixture", "rx-bridge-electron-fixture");
+  beforeAll(async () => {
+    await bundleFixture("test/electron/fixture", "rx-bridge-electron-fixture");
   });
 
   afterEach(async () => {

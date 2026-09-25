@@ -15,7 +15,7 @@
     "node": ">=24"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsdown",
     "check-types": "tsc --noEmit",
     "test": "vitest run",
     "test:soak": "pnpm build && vitest run --config vitest.soak.config.ts",
@@ -27,7 +27,7 @@
     "@vitest/coverage-v8": "^5.0.1",
     "electron": "^44.4.5",
     "rxjs": "^7.8.2",
-    "tsup": "^8.5.1",
+    "tsdown": "^0.23.0",
     "vitest": "^5.0.1"
   },
   "peerDependencies": {
