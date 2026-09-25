@@ -1450,4 +1450,31 @@ describe("Main stream terminal notify on retire", () => {
       },
     ]);
   });
+
+  test("the authorize-denied diagnostic is recorded before the subscription slot is released", async () => {
+    const diagnostics = { record: vi.fn() };
+    const server = createBridgeServer(
+      {
+        hardware: {
+          state: { current$: currentValueSource(new BehaviorSubject(1)) },
+        },
+      },
+      { authorize: () => false, diagnostics },
+    );
+    server.attach(new FakeTarget());
+    const inSink: number[] = [];
+    diagnostics.record.mockImplementation(
+      (event: { type: string; reason?: string }) => {
+        if (event.type === "rejected" && event.reason === "authorize-denied")
+          inSink.push(server.getDiagnosticsSnapshot().subscriptions);
+      },
+    );
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      () => {},
+    );
+    expect(inSink).toEqual([1]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });
