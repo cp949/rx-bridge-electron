@@ -10,7 +10,7 @@
 - `apps/demo/test/use-remote-state.test.tsx`는 수기 `BridgeTransport`와 `subscribed`/`batch`/`complete` stream 메시지를 손으로 만들었다.
 - `apps/demo/test/composition.test.ts`·`non-hardware-domain.test.ts`는 server(`dispatchRpc`/`controlStream`)를 직접 호출하며 opaque subscription ID(`"test:subscription:N"`)와 wire key(`` `rpc:relay/${operation}` ``, `"rpc:notes/append"`)를 문자열로 썼다.
 
-RD-017·RD-019처럼 wire 형식(envelope·opaque ID·채널)이 바뀔 때마다 이 test들이 함께 깨졌다 — 라이브러리 내부 형식 변경이 라이브러리 소비자의 demo test까지 건드리는 셈이었다. `_works/arch-review/01.html` 카드 06이 이 문제를 "seam에 실제 adapter가 1개뿐"이라는 구조로 기록했다.
+RD-017·RD-019처럼 wire 형식(envelope·opaque ID·채널)이 바뀔 때마다 이 test들이 함께 깨졌다 — 라이브러리 내부 형식 변경이 라이브러리 소비자의 demo test까지 건드리는 셈이었다. 아키텍처 리뷰 01 카드 06이 이 문제를 "seam에 실제 adapter가 1개뿐"이라는 구조로 기록했다.
 
 ## 결정
 
@@ -84,7 +84,6 @@ _(개정: RD-049 — "`dispose()`가 사실상 `destroyed`에 해당"은 맞지 
 
 - [ADR 0001](0001-fixed-preload-capability.md)에 예외를 만들지 않는다 — Renderer 프로덕션 진입점(`./renderer`)은 여전히 고정 preload transport만 받고, `./testing`은 test 코드가 명시적으로 import하는 별도 subpath다. ADR 0001에 이 사실을 교차 참조하는 1줄을 추가했다.
 - [ADR 0016](0016-sender-admission.md)의 범위 밖 절(:84, "후보 06: loopback adapter … 이 ADR의 새 시그니처는 그 adapter를 만들 수 있는 전제만 마련한다")과 대안 기각 사유(:72, "adapter마다(향후 loopback adapter 포함, 후보 06) 판정 순서가 어긋날 위험")가 전제한 것이 이 ADR로 충족됐다 — `createLoopbackTransport`는 판정 로직을 재구현하지 않고 `AttachedTarget`의 `isCurrentMainFrame`/`isAllowedOrigin`/`onLifecycle` port만 구현해 `DocumentSessions#admit` 하나에 판정을 맡긴다(ADR 0016 결정 1). 두 지점에 ADR 0017 참조를 추가했다.
-- `_works/arch-review/01.html` 카드 06을 완료로 표시했다.
 
 ## 범위 밖
 

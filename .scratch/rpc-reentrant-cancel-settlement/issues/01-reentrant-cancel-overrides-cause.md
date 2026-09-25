@@ -2,7 +2,7 @@ Status: closed
 
 # transport.cancel 재진입 시 먼저 발생한 취소 원인 대신 재진입한 원인으로 확정된다
 
-- 출처: RD-021 리뷰(`_works/_completed/20260924-15-renderer-entry-seal/checklist.md` "리뷰 교정", 커밋 `4fc4c85`)
+- 출처: RD-021 리뷰(checklist "리뷰 교정", 커밋 `4fc4c85`)
 
 ## 현상
 

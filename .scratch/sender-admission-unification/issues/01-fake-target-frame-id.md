@@ -2,8 +2,7 @@
 
 - Status: closed — RD-018 DELTA-01(`45ba8c0`)에서 해결. `FakeTarget`에 현재 main frame id 필드와
   `replaceMainFrame(newFrameId)`를 추가하고 `isCurrentMainFrame`이 frameId까지 검사하도록 고쳤다.
-- 출처: `_works/20260924-09-subscription-lifecycle/`(RD-015 구독 수명주기 심화 작업, checklist.md
-  "범위(제외)" 및 "확정된 설계 결정" 14), 아키텍처 리뷰 `_works/arch-review/01.html` 후보 04, RD-015
+- 출처: RD-015 구독 수명주기 심화 작업(checklist "범위(제외)" 및 "확정된 설계 결정" 14), 아키텍처 리뷰 01 후보 04, RD-015
   그릴링 Q5.
 
 ## 배경

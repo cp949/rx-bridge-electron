@@ -6,7 +6,7 @@
 
 Electron adapter(`electron-adapter.ts`)의 `targetFor().onLifecycle`은 main frame `did-start-navigation`마다 문서 세션을 retire했다. 이 이벤트는 navigation _시작_ 시점에 발생하며, 문서가 그대로 살아 있는 이동에서도 온다: `history.pushState`·`location.hash`(`isInPlace: true`), HTTP 204, 다운로드 취소, `will-navigate` `preventDefault()`로 차단된 이동, beforeunload로 취소된 `ERR_ABORTED`. retire된 `clientId`는 같은 문서에서 재사용할 수 없으므로(`document-sessions.ts:95`), 이런 이동을 한 번만 해도 bridge 전체가 reload 전까지 멈췄다(RPC는 `FORBIDDEN "Bridge sender is not authorized."`, subscribe는 진단만 남고 무응답).
 
-DELTA-02(`_works/20260925-02-navigation-commit-retire/DELTA-02.md`)가 Electron 44.4.5에서 15개 case(문서 교체 9건, 문서 생존 6건)를 실행해 어떤 이벤트가 "main frame이 실제로 새 문서로 commit됐다"를 신뢰성 있게 알리는지 확인했다.
+RD-025 작업 중 실험이 Electron 44.4.5에서 15개 case(문서 교체 9건, 문서 생존 6건)를 실행해 어떤 이벤트가 "main frame이 실제로 새 문서로 commit됐다"를 신뢰성 있게 알리는지 확인했다.
 
 ### 실험 결과 요약
 
@@ -15,8 +15,6 @@ DELTA-02(`_works/20260925-02-navigation-commit-retire/DELTA-02.md`)가 Electron 
 예외가 하나 있었다: 연결 거부(`ERR_CONNECTION_REFUSED`) 같은 오류 페이지 commit은 `routingId`가 바뀌는데도(문서가 `chrome-error://chromewebdata/`로 실제 교체됨) `did-navigate`·`did-frame-navigate`가 전혀 발생하지 않았다. 이 case는 `did-fail-load`만 발생한다. `did-fail-load`는 문서 교체가 없는 취소(`ERR_ABORTED`, beforeunload case)에서도 발생하므로 단독으로는 오탐(문서가 안 바뀐 case에서 1회 발생)이 난다. 그러나 `did-fail-load` 콜백 실행 시점에 동기로 읽은 `contents.mainFrame.routingId`가 콜백 인자 `frameRoutingId`와 일치하는지로 실제 커밋 여부를 판별할 수 있었다 — 연결 거부 case는 둘이 일치했고(콜백 시점엔 이미 새 문서가 커밋돼 있다), beforeunload `ERR_ABORTED` case는 `frameRoutingId`가 `undefined`이거나 옛 `routingId`였다.
 
 새 문서의 첫 IPC(preload가 `document-start`에서 즉시 전송)가 선택한 커밋 신호보다 먼저 도착한 case는 없었다(case 1·2·4·6에서 확인) — "새 문서 요청이 commit 신호보다 먼저 온다" 멈추는 지점은 발동하지 않았다.
-
-전체 case별 표, 순서 확인 로그, 실행 스크립트는 `_works/20260925-02-navigation-commit-retire/DELTA-02.md`의 "## 결과"에 있다.
 
 ## 결정: `did-navigate`를 주 신호로, `did-fail-load`(routingId 일치)를 보조 신호로 쓴다
 

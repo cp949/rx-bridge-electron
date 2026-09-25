@@ -1,8 +1,7 @@
 # authorize 예외의 응답 코드 불일치 (RPC INVALID_ARGUMENT vs stream INTERNAL)
 
 - Status: closed (RD-009)
-- 출처: `_works/20260924-05-operational-diagnostics/`(RD-007 운영 진단 작업 중 범위 밖으로 확인, checklist.md
-  "범위(제외)" 및 "확정된 설계 결정" 17).
+- 출처: RD-007 운영 진단 작업 중 범위 밖으로 확인(checklist "범위(제외)" 및 "확정된 설계 결정" 17).
 
 ## 배경
 

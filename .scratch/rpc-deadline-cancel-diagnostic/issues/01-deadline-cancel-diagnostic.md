@@ -2,7 +2,7 @@ Status: closed — 선택지 1(먼저 확정된 원인 하나만 기록) 적용,
 
 # deadline 만료 뒤 Renderer cancel이 rpc-cancelled를 추가 기록한다
 
-- 출처: RD-016 그릴링 결정 9·12(`_works/_completed/20260924-10-rpc-request-lifecycle/`)
+- 출처: RD-016 그릴링 결정 9·12
 
 ## 현상
 

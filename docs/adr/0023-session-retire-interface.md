@@ -16,7 +16,7 @@
 
 RPC 쪽은 이미 ADR 0015대로 동작했지만, 구독 pending·consumer 두 분기는 `session-opened`·`subscription-opened` 진단 sink가 동기로 detach·dispose를 일으키면 통지 없이 조용히 정리됐다 — ADR 0020 결정 5의 "활성 구독·`authorize` 대기 구독은 detach·dispose 시 통지한다" 표를 어겼다.
 
-출처: 아키텍처 리뷰 `_works/arch-review/03.html` 후보 02와 그 grilling 결정(2026-09-25).
+출처: 아키텍처 리뷰 03 후보 02와 그 grilling 결정(2026-09-25).
 
 ## 결정
 

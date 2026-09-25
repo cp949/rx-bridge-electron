@@ -45,4 +45,4 @@
 2. snapshot 전이 순서(값 대입 → 전달, stale 대입 → terminal 통지)와 RD-044 재진입 test는 같은 수준으로 지켜진다.
 3. Event도 같은 구조(`Subject` connector)로 옮겨진다. prototype에 포함했다.
 
-자료: `_works/20260926-07-local-generation-share/`(prototype, probe test, 두 로그).
+자료: RD-050 로컬 작업 폴더의 prototype, probe test, 두 로그(git 추적 제외).

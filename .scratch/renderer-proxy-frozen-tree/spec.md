@@ -1,7 +1,7 @@
 # Renderer API의 Proxy 의존을 동결 객체 트리로 교체 검토
 
 - Status: closed (RD-027)
-- 출처: `_works/20260923-01-renderer-api-naming/pending-issues/01.md`(RD-001 작업 중 발견, 범위 밖으로 분리).
+- 출처: RD-001 작업 중 발견, 범위 밖으로 분리.
 
 ## 배경
 

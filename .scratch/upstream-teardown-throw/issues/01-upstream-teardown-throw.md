@@ -1,7 +1,7 @@
 # 사용자 source teardown throw가 `Upstreams.disconnect` 밖으로 샌다
 
 - Status: 승격 (ROADMAP.md#RD-045)
-- 출처: `_works/arch-review/04.html` 카드 05 그릴링(2026-09-25, `82cfbda` 기준) 곁가지 발견.
+- 출처: 아키텍처 리뷰 04 카드 05 그릴링(2026-09-25, `82cfbda` 기준) 곁가지 발견.
 
 ## 사실
 
