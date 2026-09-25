@@ -385,13 +385,14 @@ describe("createRendererApi transport default (RD-014)", () => {
   });
 });
 
-test("public runtime export surface is sealed to createRendererApi, createOpaqueId, RemoteError", async () => {
+test("public runtime export surface is sealed to createRendererApi, createOpaqueId, RemoteError, snapshotStore", async () => {
   const publicModule = await import("../../src/renderer/index.js");
 
   expect(Object.keys(publicModule).sort()).toEqual([
     "RemoteError",
     "createOpaqueId",
     "createRendererApi",
+    "snapshotStore",
   ]);
 });
 
