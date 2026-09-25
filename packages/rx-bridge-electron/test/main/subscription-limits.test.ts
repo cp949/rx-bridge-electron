@@ -655,6 +655,124 @@ describe("세션별 구독 한도", () => {
       error: { code: "RESOURCE_EXHAUSTED" },
     });
   });
+
+  test("pending → consumer 전환 중에도 slot이 유지된다", async () => {
+    let allowOther!: (value: boolean) => void;
+    const authorize: Authorize = (_context, operation) => {
+      if (operation.key === "state:hardware/current$") return true;
+      return new Promise<boolean>((resolve) => {
+        allowOther = resolve;
+      });
+    };
+    const { server } = setup({
+      resourceLimits: { maxSubscriptions: 2 },
+      authorize,
+    });
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
+      () => {},
+    );
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-1",
+        "state:hardware/other$",
+      ),
+      () => {},
+    );
+    await vi.waitFor(() => expect(allowOther).toBeDefined());
+    const rejected: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(3),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => rejected.push(message),
+    );
+    expect(types(rejected)).toEqual(["subscribed", "error"]);
+    expect(rejected[1]).toMatchObject({
+      error: {
+        code: "RESOURCE_EXHAUSTED",
+        message: "Too many bridge subscriptions.",
+      },
+    });
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(2);
+    allowOther(true);
+    await pending;
+    const rejectedAgain: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(4),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => rejectedAgain.push(message),
+    );
+    expect(types(rejectedAgain)).toEqual(["subscribed", "error"]);
+    expect(rejectedAgain[1]).toMatchObject({
+      error: { code: "RESOURCE_EXHAUSTED" },
+    });
+  });
+
+  test("대기 중 세션 detach는 즉시 slot을 반환하고 CANCELLED를 통지한다", async () => {
+    let allow!: (value: boolean) => void;
+    const authorization = new Promise<boolean>((resolve) => {
+      allow = resolve;
+    });
+    const currentSource = new BehaviorSubject(1);
+    const impl: BridgeImpl<AppBridge> = {
+      hardware: {
+        state: {
+          current$: currentValueSource(currentSource),
+          other$: currentValueSource(new BehaviorSubject(2)),
+        },
+        event: {
+          change$: broadcastEvent(new Subject<number>(), {
+            buffer: { capacity: 1, overflow: "error" },
+          }),
+        },
+      },
+    };
+    const server: StreamBridgeServer = createBridgeServer(impl, {
+      authorize: () => authorization,
+    });
+    const detach = server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    const pending = server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "state:hardware/current$",
+      ),
+      (message) => messages.push(message),
+    );
+    detach();
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    expect(types(messages)).toEqual(["subscribed", "error"]);
+    expect(messages[1]).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    allow(true);
+    await pending;
+    expect(types(messages)).toEqual(["subscribed", "error"]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    expect(currentSource.observed).toBe(false);
+  });
 });
 
 describe("직접 작성한 event source의 buffer 결함은 등록 시점에 거부된다", () => {

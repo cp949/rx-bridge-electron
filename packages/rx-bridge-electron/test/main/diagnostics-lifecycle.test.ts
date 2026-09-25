@@ -483,4 +483,40 @@ describe("getDiagnosticsSnapshot", () => {
       queuedEvents: 0,
     });
   });
+
+  test("active consumer의 queuedEvents와 pending 구독을 포함한 subscriptions, dispose 뒤 모두 0으로 돌아온다", async () => {
+    let allow!: (value: boolean) => void;
+    let pendingSignal: AbortSignal | undefined;
+    const authorize: Authorize = (context, operation) => {
+      if (operation.key === "event:hardware/change$") return true;
+      pendingSignal = context.signal;
+      return new Promise<boolean>((resolve) => {
+        allow = resolve;
+      });
+    };
+    const { server, events } = harness({ authorize });
+    server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      subscribeCommand(testSubscriptionId(1), "event:hardware/change$"),
+      () => {},
+    );
+    const pending = server.controlStream(
+      sender(),
+      subscribeCommand(testSubscriptionId(2), "state:hardware/current$"),
+      () => {},
+    );
+    await vi.waitFor(() => expect(allow).toBeDefined());
+    events.next(1);
+    events.next(2);
+    events.next(3);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(2);
+    expect(server.getDiagnosticsSnapshot().queuedEvents).toBe(2);
+    server.dispose();
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    expect(server.getDiagnosticsSnapshot().queuedEvents).toBe(0);
+    expect(pendingSignal?.aborted).toBe(true);
+    allow(true);
+    await pending;
+  });
 });

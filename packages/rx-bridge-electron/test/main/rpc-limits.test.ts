@@ -245,6 +245,37 @@ describe("세션별 RPC 동시성 한도", () => {
     });
     expect(contexts[0]?.signal.aborted).toBe(false);
   });
+
+  test("같은 requestId 재전송으로 취소된 앞 요청도 handler가 끝나야 slot이 반환된다", async () => {
+    const { handler, resolve } = pendingHandler();
+    const { server } = setup({
+      handler,
+      resourceLimits: { maxConcurrentRpc: 2 },
+    });
+    const pA1 = server.dispatchRpc(sender(), request({ requestId: "a" }));
+    const pA2 = server.dispatchRpc(sender(), request({ requestId: "a" }));
+    await expect(
+      server.dispatchRpc(sender(), request({ requestId: "b" })),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: {
+        code: "RESOURCE_EXHAUSTED",
+        message: "Too many concurrent bridge requests.",
+      },
+    });
+    resolve(0);
+    await expect(pA1).resolves.toMatchObject({
+      type: "error",
+      error: { code: "CANCELLED", message: "Request cancelled." },
+    });
+    const pC = server.dispatchRpc(sender(), request({ requestId: "c" }));
+    expect(handler).toHaveBeenCalledTimes(3);
+    resolve(1);
+    resolve(2);
+    await expect(pA2).resolves.toMatchObject({ type: "success" });
+    await expect(pC).resolves.toMatchObject({ type: "success" });
+    expect(server.getDiagnosticsSnapshot().rpcInFlight).toBe(0);
+  });
 });
 
 describe("Main RPC deadline", () => {
