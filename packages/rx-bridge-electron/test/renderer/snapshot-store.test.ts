@@ -3,10 +3,11 @@
  * 옮기는 것을 검증하는 테스트. 캐시 동일성, snapshot 참조 안정성, 알림 타이밍,
  * 종료(complete/error) 뒤 처리, 구독 해제, listener 공유 구독(종료 뒤 재개·
  * 알림 중 해제·중첩 구독), dispose된 API·사용자 fake 입력을 함께 다룬다.
- * 추가로 generation 교체(G1·G2·G3) 뒤 listener 미알림을 재현하는 RED 고정
- * test(N1~N8, DELTA-01)를 다룬다 — 이 시점 `snapshotStore`는 아직 수정 전이다.
+ * 추가로 generation 교체(G1·G2·G3) 뒤 listener 알림과 합류 재진입(N1~N8,
+ * RD-044), 종료 알림 안 동기 재구독 합류와 동기 transport 합류 누수(N9~N11)를
+ * 다룬다.
  */
-import { BehaviorSubject, Observable, config } from "rxjs";
+import { BehaviorSubject, Observable, config, repeat } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
 import {
@@ -799,6 +800,144 @@ describe("generation 교체 추적", () => {
     expect(store.getSnapshot()).toEqual({
       status: "uninitialized",
       active: false,
+    });
+  });
+
+  test("N9: store보다 먼저 붙은 직접 구독이 원격 complete 알림 안에서 동기로 재구독해도 store listener는 새 generation에 합류해 값 알림을 받는다", async () => {
+    const transport = new FakeTransport({ manifest: STATE_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const store = snapshotStore(state);
+
+    // store보다 먼저 subject에 붙어야 complete를 store보다 먼저 받는다.
+    const subscriptionD = state.pipe(repeat()).subscribe({
+      error: () => {},
+    });
+    const aOnChange = vi.fn();
+    const unsubscribeA = store.subscribe(aOnChange);
+
+    openWithValue(transport, 0, "a");
+    completeGeneration(transport, 0, 2);
+
+    expect(transport.subscribeCommands()).toHaveLength(2);
+    expect(store.getSnapshot()).toEqual({
+      status: "connecting",
+      active: true,
+    });
+
+    const callsBeforeValue = aOnChange.mock.calls.length;
+    openWithValue(transport, 1, "b");
+
+    expect(store.getSnapshot()).toEqual({
+      status: "current",
+      active: true,
+      value: "b",
+    });
+    expect(aOnChange.mock.calls.length).toBeGreaterThan(callsBeforeValue);
+
+    // D가 떠나도 store가 gen2를 붙잡고 있다가 A 해제 때 놓는다.
+    subscriptionD.unsubscribe();
+    expect(
+      transport.controls.filter((command) => command.type === "unsubscribe"),
+    ).toHaveLength(0);
+    unsubscribeA();
+    expect(transport.controls.at(-1)).toEqual({
+      type: "unsubscribe",
+      subscriptionId: transport.subscriptionIdFor(CONNECTION_KEY, 1),
+    });
+  });
+
+  test("N10: transport가 값을 동기로 보내 합류 중 replay 알림 안에서 마지막 store listener가 이탈해도 합류 구독을 남기지 않는다", async () => {
+    let releaseOnNextCall = false;
+    let unsubscribeA: (() => void) | undefined;
+    const aOnChange = vi.fn(() => {
+      if (releaseOnNextCall) {
+        unsubscribeA?.();
+      }
+    });
+    const prepared = await prepareStaleWithListenerA(aOnChange);
+    const { transport, state } = prepared;
+    unsubscribeA = prepared.unsubscribeA;
+
+    // subscribe 명령 안에서 subscribed와 값을 동기로 돌려준다. 그러면 신호가
+    // 올 때 generation에 이미 값이 있어 합류가 replay 알림을 동기로 부른다.
+    transport.controlHook = (command) => {
+      if (command.type === "subscribe") {
+        transport.emitStream(
+          streamMessage(command.subscriptionId, {
+            type: "subscribed",
+            sequence: 0,
+          }),
+        );
+        transport.emitStream(
+          streamMessage(command.subscriptionId, {
+            type: "batch",
+            sequence: 1,
+            values: ["b"],
+          }),
+        );
+      }
+    };
+    releaseOnNextCall = true;
+
+    state.subscribe({ next: () => {}, error: () => {} }).unsubscribe();
+
+    expect(transport.controls.at(-1)).toEqual({
+      type: "unsubscribe",
+      subscriptionId: transport.subscriptionIdFor(CONNECTION_KEY, 1),
+    });
+    expect(state.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "b",
+    });
+  });
+
+  test("N11: 합류 중 replay 알림 안에서 마지막 listener가 이탈하고 새 listener가 들어와도 구독은 새 listener 쪽 하나만 남는다", async () => {
+    let swapOnNextCall = false;
+    let unsubscribeA: (() => void) | undefined;
+    let unsubscribeB: (() => void) | undefined;
+    const aOnChange = vi.fn(() => {
+      if (swapOnNextCall) {
+        swapOnNextCall = false;
+        unsubscribeA?.();
+        unsubscribeB = store.subscribe(() => {});
+      }
+    });
+    const prepared = await prepareStaleWithListenerA(aOnChange);
+    const { transport, state, store } = prepared;
+    unsubscribeA = prepared.unsubscribeA;
+
+    transport.controlHook = (command) => {
+      if (command.type === "subscribe") {
+        transport.emitStream(
+          streamMessage(command.subscriptionId, {
+            type: "subscribed",
+            sequence: 0,
+          }),
+        );
+        transport.emitStream(
+          streamMessage(command.subscriptionId, {
+            type: "batch",
+            sequence: 1,
+            values: ["b"],
+          }),
+        );
+      }
+    };
+    swapOnNextCall = true;
+
+    state.subscribe({ next: () => {}, error: () => {} }).unsubscribe();
+
+    expect(unsubscribeB).toBeDefined();
+    expect(
+      transport.controls.filter((command) => command.type === "unsubscribe"),
+    ).toHaveLength(0);
+
+    unsubscribeB?.();
+    expect(transport.controls.at(-1)).toEqual({
+      type: "unsubscribe",
+      subscriptionId: transport.subscriptionIdFor(CONNECTION_KEY, 1),
     });
   });
 });
