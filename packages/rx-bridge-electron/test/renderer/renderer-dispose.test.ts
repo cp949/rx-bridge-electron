@@ -7,11 +7,8 @@ import {
   type RendererDiagnostic,
   type RendererDiagnosticsSink,
 } from "../../src/renderer/index.js";
-import type {
-  RendererStreamCommand,
-  StreamMessage,
-} from "../../src/protocol/index.js";
-import { FakeTransport } from "./fake-transport.js";
+import type { RendererStreamCommand } from "../../src/protocol/index.js";
+import { FakeTransport, rpcSuccess, streamMessage } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
@@ -27,63 +24,10 @@ interface AppBridge {
   };
 }
 
-type StreamMessageBody = StreamMessage extends infer Message
-  ? Message extends StreamMessage
-    ? Omit<Message, "protocolVersion" | "clientId" | "subscriptionId">
-    : never
-  : never;
-
-type SubscribeCommand = Extract<
-  RendererStreamCommand,
-  { readonly type: "subscribe" }
->;
-
 type UnsubscribeCommand = Extract<
   RendererStreamCommand,
   { readonly type: "unsubscribe" }
 >;
-
-function bridgeTransport(): FakeTransport {
-  const transport = new FakeTransport();
-  transport.handshake = Promise.resolve({
-    protocolVersion: 1,
-    clientId: "client-1",
-    manifest: {
-      rpc: ["rpc:hardware/connect"],
-      state: ["state:hardware/status$"],
-      event: ["event:hardware/log$"],
-    },
-  });
-  return transport;
-}
-
-function message(
-  subscriptionId: string,
-  value: StreamMessageBody,
-): StreamMessage {
-  return {
-    protocolVersion: 1,
-    clientId: "client-1",
-    subscriptionId,
-    ...value,
-  } as StreamMessage;
-}
-
-function subscribeCommands(transport: FakeTransport): SubscribeCommand[] {
-  return transport.controls.filter(
-    (command): command is SubscribeCommand => command.type === "subscribe",
-  );
-}
-
-function subscriptionIdFor(transport: FakeTransport, key: string): string {
-  const command = subscribeCommands(transport).find(
-    (candidate) => candidate.key === key,
-  );
-  if (command === undefined) {
-    throw new Error(`Missing subscribe command for ${key}.`);
-  }
-  return command.subscriptionId;
-}
 
 function unsubscribeCommands(
   commands: readonly RendererStreamCommand[],
@@ -97,7 +41,13 @@ async function setup(): Promise<{
   readonly transport: FakeTransport;
   readonly api: RendererApi<AppBridge>;
 }> {
-  const transport = bridgeTransport();
+  const transport = new FakeTransport({
+    manifest: {
+      rpc: ["rpc:hardware/connect"],
+      state: ["state:hardware/status$"],
+      event: ["event:hardware/log$"],
+    },
+  });
   const api = await createRendererApi<AppBridge>({ transport });
   return { transport, api };
 }
@@ -163,10 +113,10 @@ describe("api.dispose() root shutdown", () => {
         stateCompleted += 1;
       },
     });
-    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+    const stateId = transport.subscriptionIdFor("state:hardware/status$");
+    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
 
     let eventErrored: unknown;
@@ -181,8 +131,8 @@ describe("api.dispose() root shutdown", () => {
         eventCompleted += 1;
       },
     });
-    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
-    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
+    const eventId = transport.subscriptionIdFor("event:hardware/log$");
+    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
 
     api.dispose();
 
@@ -305,14 +255,14 @@ describe("api.dispose() root shutdown", () => {
     const { transport, api } = await setup();
 
     api.hardware.event.log$.subscribe({ error: () => {} });
-    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
-    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
+    const eventId = transport.subscriptionIdFor("event:hardware/log$");
+    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
 
     api.hardware.state.status$.subscribe({ error: () => {} });
-    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+    const stateId = transport.subscriptionIdFor("state:hardware/status$");
+    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
 
     const joinedStateValues: Array<string | undefined> = [];
@@ -371,10 +321,10 @@ describe("api.dispose() root shutdown", () => {
     const subscription = api.hardware.state.status$.subscribe({
       error: () => {},
     });
-    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+    const stateId = transport.subscriptionIdFor("state:hardware/status$");
+    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      message(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
     );
     subscription.unsubscribe();
 
@@ -444,30 +394,30 @@ describe("api.dispose() root shutdown", () => {
       },
       error: () => {},
     });
-    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+    const stateId = transport.subscriptionIdFor("state:hardware/status$");
+    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
 
     const lateListener = [...transport.streamListeners][0]!;
 
     api.dispose();
 
-    transport.resolveInvocation(0, {
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "success",
-      requestId: invocation.requestId,
-      result: { connected: true },
-    });
+    transport.resolveInvocation(0, rpcSuccess(invocation.requestId));
     await expect(rpcPromise).rejects.toMatchObject({ code: "CANCELLED" });
 
     lateListener(
-      message(stateId, { type: "batch", sequence: 1, values: ["late"] }),
+      streamMessage(stateId, { type: "batch", sequence: 1, values: ["late"] }),
     );
     expect(stateNextCalled).toBe(false);
   });
 
   test("RPC 확정 중 rpc-settled sink에서 마지막 구독을 해제하면 종료 정리가 한 번만 닫는다", async () => {
-    const transport = bridgeTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        rpc: ["rpc:hardware/connect"],
+        state: ["state:hardware/status$"],
+        event: ["event:hardware/log$"],
+      },
+    });
     const sinkEvents: RendererDiagnostic[] = [];
     let unsubscribeState: (() => void) | undefined;
     const api = await createRendererApi<AppBridge>({
@@ -492,8 +442,8 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     unsubscribeState = () => subscription.unsubscribe();
-    const stateId = subscriptionIdFor(transport, "state:hardware/status$");
-    transport.emitStream(message(stateId, { type: "subscribed", sequence: 0 }));
+    const stateId = transport.subscriptionIdFor("state:hardware/status$");
+    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
 
     const controlsBeforeDispose = transport.controls.length;
     api.dispose();
@@ -517,7 +467,13 @@ describe("api.dispose() root shutdown", () => {
   });
 
   test("재진입: batch 전달 중 next 콜백에서 dispose하면 그 batch의 acknowledge를 보내지 않는다", async () => {
-    const transport = bridgeTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        rpc: ["rpc:hardware/connect"],
+        state: ["state:hardware/status$"],
+        event: ["event:hardware/log$"],
+      },
+    });
     const sinkEvents: RendererDiagnostic[] = [];
     const api = await createRendererApi<AppBridge>({
       transport,
@@ -542,10 +498,10 @@ describe("api.dispose() root shutdown", () => {
         completed += 1;
       },
     });
-    const eventId = subscriptionIdFor(transport, "event:hardware/log$");
-    transport.emitStream(message(eventId, { type: "subscribed", sequence: 0 }));
+    const eventId = transport.subscriptionIdFor("event:hardware/log$");
+    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      message(eventId, {
+      streamMessage(eventId, {
         type: "batch",
         sequence: 1,
         values: ["first", "second"],
@@ -573,7 +529,13 @@ describe("api.dispose() root shutdown", () => {
   });
 
   test("재진입: 구독 해제 중 subscription-closed sink에서 dispose해도 그 구독의 unsubscribe는 1회 보낸다", async () => {
-    const transport = bridgeTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        rpc: ["rpc:hardware/connect"],
+        state: ["state:hardware/status$"],
+        event: ["event:hardware/log$"],
+      },
+    });
     const sinkEvents: RendererDiagnostic[] = [];
     let api!: RendererApi<AppBridge>;
     api = await createRendererApi<AppBridge>({
@@ -617,7 +579,13 @@ describe("api.dispose() root shutdown", () => {
   test.each(REENTRY_MATRIX)(
     "재진입 매트릭스: %s 지점에서 %s 재진입은 ADR 0006 종료 계약을 지킨다",
     async (point, action) => {
-      const transport = bridgeTransport();
+      const transport = new FakeTransport({
+        manifest: {
+          rpc: ["rpc:hardware/connect"],
+          state: ["state:hardware/status$"],
+          event: ["event:hardware/log$"],
+        },
+      });
 
       let api!: RendererApi<AppBridge>;
       let hookFired = false;
@@ -729,9 +697,9 @@ describe("api.dispose() root shutdown", () => {
           }
         },
       });
-      const stateId = subscriptionIdFor(transport, "state:hardware/status$");
+      const stateId = transport.subscriptionIdFor("state:hardware/status$");
       transport.emitStream(
-        message(stateId, { type: "subscribed", sequence: 0 }),
+        streamMessage(stateId, { type: "subscribed", sequence: 0 }),
       );
 
       let eventCompleted = 0;
@@ -741,9 +709,9 @@ describe("api.dispose() root shutdown", () => {
           eventCompleted += 1;
         },
       });
-      const eventId = subscriptionIdFor(transport, "event:hardware/log$");
+      const eventId = transport.subscriptionIdFor("event:hardware/log$");
       transport.emitStream(
-        message(eventId, { type: "subscribed", sequence: 0 }),
+        streamMessage(eventId, { type: "subscribed", sequence: 0 }),
       );
 
       const controlsBeforeDispose = transport.controls.length;
