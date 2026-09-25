@@ -67,7 +67,7 @@ createBridgeServer<AppBridge>(impl, {
 
 계약에는 buffer capacity·overflow 선언 자리가 없다(계약이 타입이라 값을 담을 수 없다). Main에서 source를 만들 때 옵션으로 준다: `eventSource(data$, { buffer })`. 생략하면 기본값(`capacity: 100`, `overflow: "error"`)을 쓴다. capacity 검증(양의 정수 등)은 기존 `event()` descriptor가 하던 검사를 그대로 옮긴다.
 
-> **개정 (RD-029, `ROADMAP.md#RD-029`)**: 위 capacity 검증은 "source 생성 시점"이 아니라 `createBridgeServer` 등록 단계(registration)로 옮겼다. `overflow` 값(`"error" | "drop-oldest" | "drop-newest"`)도 같은 단계에서 검증하며, 이전에는 오타가 조용히 `drop-oldest`로 동작했다. `broadcastEvent`/`scopedEvent` helper는 이제 검증을 하지 않는 순수 생성자다 — 헬퍼를 쓰지 않고 직접 작성한 source 객체 리터럴도 registration이 같은 규칙으로 검증하므로, 헬퍼 우회로 검증을 피할 수 없다.
+> **개정 ([RD-029](../history/roadmap.md))**: 위 capacity 검증은 "source 생성 시점"이 아니라 `createBridgeServer` 등록 단계(registration)로 옮겼다. `overflow` 값(`"error" | "drop-oldest" | "drop-newest"`)도 같은 단계에서 검증하며, 이전에는 오타가 조용히 `drop-oldest`로 동작했다. `broadcastEvent`/`scopedEvent` helper는 이제 검증을 하지 않는 순수 생성자다 — 헬퍼를 쓰지 않고 직접 작성한 source 객체 리터럴도 registration이 같은 규칙으로 검증하므로, 헬퍼 우회로 검증을 피할 수 없다.
 
 _(개정: RD-049 — 위 본문의 `eventSource(data$, { buffer })`는 실제 API 이름이 아니다. Event source helper는 `broadcastEvent(source, { buffer })`·`scopedEvent(factory, { buffer })`다(`src/main/sources.ts`).)_
 

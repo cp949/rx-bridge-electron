@@ -819,4 +819,4 @@ server.dispose();
 
 - 대용량 바이너리 전송과 지속적인 고속 스트림. 필요하면 이 API에 원시 IPC를 노출하지 말고 별도 MessagePort 어댑터 뒤에 구현합니다.
 - Renderer 쪽 도메인 에러 코드 타입 추론. `ErrorsFor<B>`는 Main 옵션 타입입니다.
-- 그 밖의 제외 항목은 [ROADMAP "현재 범위 밖의 확장"](../../ROADMAP.md#현재-범위-밖의-확장)에 있습니다.
+- 그 밖의 제외 항목은 [아키텍처 문서 "목적과 범위"](../../docs/architecture.md#목적과-범위)에 있습니다.

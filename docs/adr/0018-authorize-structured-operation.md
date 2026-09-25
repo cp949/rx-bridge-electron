@@ -1,6 +1,6 @@
 # `authorize`의 두 번째 인자를 wire key 문자열에서 구조화 객체 `BridgeOperation`으로 바꾼다
 
-- 관련: ROADMAP.md#RD-024
+- 관련: [RD-024](../history/roadmap.md)
 
 ## 상황
 

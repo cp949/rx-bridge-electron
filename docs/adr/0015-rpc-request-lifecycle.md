@@ -1,6 +1,6 @@
 # RPC 요청 수명주기를 `RpcRequests` 모듈 하나로 모으고 `authorize` 뒤 `current()` 재검사를 제거한다
 
-- 관련: ROADMAP.md#RD-016
+- 관련: [RD-016](../history/roadmap.md)
 
 > [ADR 0016](0016-sender-admission.md)이 sender admission 판정을 옮겼다. 아래 "결정: `RpcRequests` 모듈" 절의 "`create-bridge-server.ts`의 `dispatchRpc`는 protocolVersion 검사·`sessions.establish`·`sender-unauthorized` 판정과 `rpcRequests.dispatch(session, sender, envelope)` 위임만 남는다"(:15) 서술은 이제 정확하지 않다 — protocolVersion 검사는 `dispatchRpc` 앞이 아니라 envelope parse(`parseWireRpcRequest`) 안에서 판정되고, `sessions.establish`의 거부는 `sender-unauthorized` 하나가 아니라 `frame-not-main`·`origin-not-allowed`·`sender-unauthorized` 중 하나(`Admission` verdict)다. `RpcRequests`가 세션 해석 방법을 몰라도 된다는 이 문서의 핵심 결정(§"`authorize` 뒤 `current()` 재검사를 제거") 자체는 바뀌지 않았다.
 
@@ -10,7 +10,7 @@ RPC 요청 1건의 상태(slot 점유, 취소용 `AbortController`, retire 연�
 
 "요청이 취소됐으면 다른 분류보다 `CANCELLED`가 우선한다"(ADR 0011) 규칙은 `rpc-dispatcher.ts`의 `dispatchRegistered` 안 5개 지점(`authorize` 뒤, `parseBridgeValue` 실패, input schema 실패, handler 뒤, output schema 실패)과 `create-bridge-server.ts`의 `authorize` 뒤 재검사 지점에서 각자 따로 판정했다. 이 재검사(`current() !== session`)는 세션이 `authorize` 대기 중에 더 이상 현재가 아니게 됐는지를 `dispatchRpc`가 `DocumentSessions.current()`를 다시 호출해 확인하는 것으로, `RpcRequests`가 세션 해석 방법을 알아야만 할 수 있는 검사였다.
 
-이 상태와 순서 연결은 [ADR 0014](0014-stream-lookup-before-authorize.md)가 구독(stream) 쪽에 적용한 것과 같은 모양의 문제였다(ROADMAP RD-015). RD-015 완료 시점에 ADR 0014는 "`DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기만 남는다"고 적었고(범위 밖으로 명시), 이 ADR이 그 후속(RD-016)이다.
+이 상태와 순서 연결은 [ADR 0014](0014-stream-lookup-before-authorize.md)가 구독(stream) 쪽에 적용한 것과 같은 모양의 문제였다([RD-015](../history/roadmap.md)). RD-015 완료 시점에 ADR 0014는 "`DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기만 남는다"고 적었고(범위 밖으로 명시), 이 ADR이 그 후속(RD-016)이다.
 
 ## 결정: `RpcRequests` 모듈 하나가 RPC 요청 수명주기 전체를 소유한다
 
@@ -26,13 +26,13 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 
 적용 지점은 5곳이다: `authorize` 뒤(throw·정상 반환 모두), `parseBridgeValue` 실패, input schema 실패, handler 뒤(throw·정상 반환 모두), output schema 실패. **삭제한 분기는 없다.** 각 지점의 진단 기록 대비 순서는 그대로 보존한다 — `parseBridgeValue`·input schema 실패는 guard가 먼저이므로 aborted면 진단을 기록하지 않은 채 반환하고, output schema 실패는 `validation-failed`를 먼저 기록한 뒤 guard를 본다. `authorize` 뒤는 guard가 `authorize-denied` 진단보다 먼저 판정한다.
 
-이 결정은 계획 단계의 가정을 보정한 결과다. 그릴링 초안과 `ROADMAP.md` RD-016은 `rpc-dispatcher.ts`의 세 지점(`parseBridgeValue`·input schema·output schema 실패)을 "직전 aborted 검사와 동기 parse 사이에 `await`가 없으므로 도달 불가"로 보고 삭제 대상으로 적었다. 이는 틀렸다: `await`가 없어도 동기 단계 안에서 사용자 코드(스키마의 `parse`)가 실행되면 그 코드가 `signal`을 abort시키는 콜백(예: 동기 `server.cancel` 호출)을 가질 수 있다.
+이 결정은 계획 단계의 가정을 보정한 결과다. 그릴링 초안과 [RD-016](../history/roadmap.md)은 `rpc-dispatcher.ts`의 세 지점(`parseBridgeValue`·input schema·output schema 실패)을 "직전 aborted 검사와 동기 parse 사이에 `await`가 없으므로 도달 불가"로 보고 삭제 대상으로 적었다. 이는 틀렸다: `await`가 없어도 동기 단계 안에서 사용자 코드(스키마의 `parse`)가 실행되면 그 코드가 `signal`을 abort시키는 콜백(예: 동기 `server.cancel` 호출)을 가질 수 있다.
 
 - output schema 실패 지점은 `rpc-requests.test.ts`의 "prefers CANCELLED when the request is aborted before the output schema throws"가 output schema의 `parse` 안에서 `server.cancel`을 동기 호출해 이 분기를 실제로 실행하고 고정한다.
 - input schema `parse`도 사용자 코드라 같은 방식으로 도달한다.
 - `parseBridgeValue` 실패 지점은 `Reflect.ownKeys`·`Object.getOwnPropertyDescriptor`가 Proxy trap을 실행하므로, in-process 호출자(`server.dispatchRpc` 직접 호출)에서 Proxy 입력을 넘기면 도달한다. IPC 경유 입력(structured clone)에는 Proxy가 올 수 없어 이 경로 자체는 아니지만, "도달 불가"를 근거로 분기를 지우는 것은 in-process 호출자를 배제하는 잘못된 전제였다.
 
-따라서 규칙 정의는 1곳(guard 함수)으로 통합하되, 적용 지점 5곳은 모두 유지한다. `ROADMAP.md` RD-016의 해당 서술은 이 작업 중 정정했다.
+따라서 규칙 정의는 1곳(guard 함수)으로 통합하되, 적용 지점 5곳은 모두 유지한다. RD-016의 해당 서술은 이 작업 중 정정했다.
 
 ## 결정: `authorize` 뒤 `current()` 재검사를 제거하고 요청 signal 판정만 본다
 
@@ -64,7 +64,7 @@ _(개정: RD-049 — "`FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하�
 
 ## 범위 밖
 
-- ROADMAP RD-016 후보 03(wire key 문법 — `startsWith("rpc:")`·`slice(4)`를 protocol 모듈로 옮기는 것. 이 ADR은 조회 위치만 `RpcRequests` 안으로 옮겼을 뿐 문법 자체는 손대지 않았다)과 후보 04(server version 분기 — 운영 경로 도달 불가, `recordAdapterRejection` Symbol, `FakeTarget` frameId).
+- [RD-016](../history/roadmap.md) 후보 03(wire key 문법 — `startsWith("rpc:")`·`slice(4)`를 protocol 모듈로 옮기는 것. 이 ADR은 조회 위치만 `RpcRequests` 안으로 옮겼을 뿐 문법 자체는 손대지 않았다)과 후보 04(server version 분기 — 운영 경로 도달 불가, `recordAdapterRejection` Symbol, `FakeTarget` frameId).
 - deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 후속 이슈에서 "먼저 확정된 원인 하나만 기록"으로 해결했다([ADR 0010](0010-operational-diagnostics.md) §8).
 - wire 형식·채널·handshake·공개 export 변경. `RpcRequests`는 `src/main/index.ts`의 공개 export가 아니다 — `Subscriptions`와 같은 내부 구현이다.
 

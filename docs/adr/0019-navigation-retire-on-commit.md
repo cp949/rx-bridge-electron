@@ -1,6 +1,6 @@
 # navigation 세션 retire 시점을 main-frame `did-start-navigation`에서 문서 commit으로 옮긴다
 
-- 관련: ROADMAP.md#RD-025
+- 관련: [RD-025](../history/roadmap.md)
 
 ## 상황
 

@@ -1,6 +1,6 @@
 # 사용자 source의 teardown 예외를 `Upstreams`가 격리하고 `upstream-teardown-failed` 진단으로 기록한다
 
-- 관련: ROADMAP.md#RD-045
+- 관련: [RD-045](../history/roadmap.md)
 
 ## 상황
 

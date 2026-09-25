@@ -1,6 +1,6 @@
 # Renderer는 진단 이벤트로 RPC 확정 원인·구독 종료 원인·메시지 폐기·전송 실패를 관측 가능하게 한다
 
-- 관련: ROADMAP.md#RD-028
+- 관련: [RD-028](../history/roadmap.md)
 
 ## 상황
 

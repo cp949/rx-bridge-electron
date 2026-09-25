@@ -1,6 +1,6 @@
 # Renderer는 `snapshotStore`로 `RemoteState`를 외부 store 계약으로 옮긴다
 
-- 관련: ROADMAP.md#RD-043
+- 관련: [RD-043](../history/roadmap.md)
 
 ## 상황
 
@@ -37,9 +37,9 @@ export interface RemoteStateStore<T> {
 
 ### 범위 해석
 
-ROADMAP "현재 범위 밖의 확장"은 "React 전용 패키지"를 제외한다. 이 제외는 유지한다. `snapshotStore`는 프레임워크 중립 adapter이고 React 의존성을 만들지 않는다 — README의 React 레시피는 사용자 코드로 예시일 뿐 패키지 의존성이 아니다. 따라서 이 adapter와 레시피는 "React 전용 패키지" 제외에 해당하지 않는다.
+[아키텍처 문서 "목적과 범위"](../architecture.md#목적과-범위)는 "React 전용 패키지"를 제외한다. 이 제외는 유지한다. `snapshotStore`는 프레임워크 중립 adapter이고 React 의존성을 만들지 않는다 — README의 React 레시피는 사용자 코드로 예시일 뿐 패키지 의존성이 아니다. 따라서 이 adapter와 레시피는 "React 전용 패키지" 제외에 해당하지 않는다.
 
-> **개정 (RD-044, `ROADMAP.md#RD-044`)**: store는 `LocalGeneration`의 모듈 내부 "generation 열림" 신호에 합류한다. 신호는 구현 내부 전용이고 공개 타입 `RemoteState`·`RemoteStateSnapshot`은 바뀌지 않는다 — `RemoteStateClient`가 아닌 입력(사용자 fake 등)은 여전히 이벤트 기반 그대로 동작한다. listener가 하나 이상 있는 동안에는 새로 열린 generation에 합류해 유지한다. 남이 연 generation도 포함하고, store 스스로 새 generation을 열지는 않는다. 알림 불변식은 `getSnapshot()`이 바뀌면 반드시 알린다는 것이다(여분 알림은 허용). 구독 중이던 listener도 자기 구독이 연 generation의 `connecting` 알림을 받는다. 신호는 `multiplexer.open` 뒤, 그 generation이 여전히 활성일 때만 발사한다. handler는 합류(`state.subscribe`)를 먼저 하고 그다음 listener에게 notify한다 — 순서를 뒤집으면 콜백이 동기로 generation을 닫았을 때 재합류가 자동 재구독이 된다. 종료를 store보다 먼저 받은 구독자(`repeat`·`retry` 등)가 그 안에서 동기로 새 generation을 열면 신호는 store가 아직 옛 generation에 붙어 있을 때 온다. 그래서 store는 자기 종료 처리에서 활성 generation이 있으면 합류한다(활성일 때만이라 새 generation을 열지 않는다). transport가 값을 동기로 보내 합류 중 알림 안에서 마지막 listener가 떠나면 합류 구독을 바로 놓는다. 신호 listener가 던지는 예외는 격리해 전파하지 않는다. Main 쪽 source 교체 지침은 패키지 README "State source 교체" 절을 참고한다.
+> **개정 ([RD-044](../history/roadmap.md))**: store는 `LocalGeneration`의 모듈 내부 "generation 열림" 신호에 합류한다. 신호는 구현 내부 전용이고 공개 타입 `RemoteState`·`RemoteStateSnapshot`은 바뀌지 않는다 — `RemoteStateClient`가 아닌 입력(사용자 fake 등)은 여전히 이벤트 기반 그대로 동작한다. listener가 하나 이상 있는 동안에는 새로 열린 generation에 합류해 유지한다. 남이 연 generation도 포함하고, store 스스로 새 generation을 열지는 않는다. 알림 불변식은 `getSnapshot()`이 바뀌면 반드시 알린다는 것이다(여분 알림은 허용). 구독 중이던 listener도 자기 구독이 연 generation의 `connecting` 알림을 받는다. 신호는 `multiplexer.open` 뒤, 그 generation이 여전히 활성일 때만 발사한다. handler는 합류(`state.subscribe`)를 먼저 하고 그다음 listener에게 notify한다 — 순서를 뒤집으면 콜백이 동기로 generation을 닫았을 때 재합류가 자동 재구독이 된다. 종료를 store보다 먼저 받은 구독자(`repeat`·`retry` 등)가 그 안에서 동기로 새 generation을 열면 신호는 store가 아직 옛 generation에 붙어 있을 때 온다. 그래서 store는 자기 종료 처리에서 활성 generation이 있으면 합류한다(활성일 때만이라 새 generation을 열지 않는다). transport가 값을 동기로 보내 합류 중 알림 안에서 마지막 listener가 떠나면 합류 구독을 바로 놓는다. 신호 listener가 던지는 예외는 격리해 전파하지 않는다. Main 쪽 source 교체 지침은 패키지 README "State source 교체" 절을 참고한다.
 
 ## 대안과 기각 사유
 
@@ -48,7 +48,7 @@ ROADMAP "현재 범위 밖의 확장"은 "React 전용 패키지"를 제외한�
 - **`RemoteState`에 메서드 추가(`state.toStore()` 등).** `RemoteState`는 공개 인터페이스이므로 사용자가 만드는 fake·mock도 새 메서드를 구현해야 한다. 독립 함수로 두면 `RemoteState<T>` 모양만 만족하면 된다.
 - **캐시 없는 함수(매 호출 새 store 생성).** React에서 안정된 참조를 얻으려면 호출부가 `useMemo`/`useCallback`을 직접 써야 해 hook 작성 부담이 그대로 남는다. `WeakMap` 캐시가 이 부담을 adapter 쪽으로 옮긴다.
 - **자동 재구독.** 원격 종료는 ADR 0020이 정한 최종 상태이고, 자동 재구독은 그 계약과 충돌한다. 원격이 계속 종료하면 재구독이 반복된다.
-- **snapshot에 error 추가.** `RemoteStateSnapshot`은 공개 계약이다. error를 실으려면 모든 소비자가 새 판별 분기를 갖게 되고, ROADMAP 결정("종료 원인은 노출하지 않는다")과도 어긋난다. 원인이 필요하면 `state`를 직접 구독한다.
+- **snapshot에 error 추가.** `RemoteStateSnapshot`은 공개 계약이다. error를 실으려면 모든 소비자가 새 판별 분기를 갖게 되고, RD-043 결정("종료 원인은 노출하지 않는다")과도 어긋난다. 원인이 필요하면 `state`를 직접 구독한다.
 - **snapshot 전이 신호를 발사 지점 3곳에 나눠 두는 방식(RD-044).** `next`·`error`·complete 각 경로마다 신호를 쏘면 발사 지점이 늘고, 기존 이벤트(`onChange`) 경로와 중복된다.
 - **Main 쪽 평탄화만으로 해결(RD-044).** README 평탄화 지침만으로는 출력 검증 실패, 연결 실패, `authorize` 거부, 리소스 한도, 세션 종료로 끝나는 generation을 막지 못한다 — 이런 경로는 Renderer 쪽 합류가 있어야 listener가 알림을 받는다.
 - **`RemoteState` 계약 자체를 generation을 넘어 잇는 방식(RD-044).** `complete`/`error`의 의미가 바뀌어 ADR 0003·ADR 0020에 영향을 준다.

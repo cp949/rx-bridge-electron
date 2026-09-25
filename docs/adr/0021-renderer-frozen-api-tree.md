@@ -1,6 +1,6 @@
 # Renderer API를 Proxy 대신 동결 객체 트리로 만든다
 
-- 관련: ROADMAP.md#RD-027
+- 관련: [RD-027](../history/roadmap.md)
 
 ## 상황
 

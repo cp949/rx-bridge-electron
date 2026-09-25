@@ -6,6 +6,8 @@
 
 `@cp949/rx-bridge-electron`은 신뢰하는 로컬 Electron UI의 Main과 Renderer 사이에 타입 및 스키마 검증을 거치는 RPC, State, Event 통신을 제공한다. 원격 콘텐츠, 플러그인 권한, 범용 `webContents` 스트림 범위, 지속적인 고속 Event, 바이너리 전송은 현재 계약 범위가 아니다.
 
+현재 범위 밖의 확장: Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지, 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자. 실제 사용 사례가 생기면 기존 RPC·State·Event 인터페이스로 해결 가능한지 먼저 확인한다. 해결되지 않으면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계하고 GitHub issue로 등록한다.
+
 ## 패키지 경계
 
 | 진입점                               | 실행 위치     | 책임                                                                           |

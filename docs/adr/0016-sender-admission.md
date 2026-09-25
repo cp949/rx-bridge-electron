@@ -1,8 +1,8 @@
 # sender admission 판정을 `DocumentSessions`의 `#admit` 하나로 모으고 envelope parse를 server가 소유한다
 
-- 관련: ROADMAP.md#RD-018
+- 관련: [RD-018](../history/roadmap.md)
 
-> **개정 (RD-019, `ROADMAP.md#RD-019`)**: 결정 2가 정의한 envelope parse 한도(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)는 이제 `src/protocol/messages.ts`의 모듈 내부 상수 `ENVELOPE_LIMITS` 하나이고, 이 상수를 쓰던 호출자 5곳(옛 preload·`rpc-client.ts`·`stream-multiplexer.ts`·`create-renderer-api.ts`의 각자 상수, `create-bridge-server.ts`의 `envelopeLimits`)이 이 하나를 공유한다 — 값 자체는 바뀌지 않았다. `:54`가 `protocol-error.ts`를 별도 파일에 둔 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 RD-019가 채널 상수 정의를 `src/protocol/electron-channels.ts`로 옮기며 사라졌다 — `:54`에 개정 표시를 남겼다(파일 분리 자체는 유지). `:79`가 범위 밖으로 미룬 "채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것"은 RD-019가 처리했다. 이 문서의 판정 순서·사유 매핑·wire 응답 모양 결정은 그대로 유효하다.
+> **개정 ([RD-019](../history/roadmap.md))**: 결정 2가 정의한 envelope parse 한도(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)는 이제 `src/protocol/messages.ts`의 모듈 내부 상수 `ENVELOPE_LIMITS` 하나이고, 이 상수를 쓰던 호출자 5곳(옛 preload·`rpc-client.ts`·`stream-multiplexer.ts`·`create-renderer-api.ts`의 각자 상수, `create-bridge-server.ts`의 `envelopeLimits`)이 이 하나를 공유한다 — 값 자체는 바뀌지 않았다. `:54`가 `protocol-error.ts`를 별도 파일에 둔 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 RD-019가 채널 상수 정의를 `src/protocol/electron-channels.ts`로 옮기며 사라졌다 — `:54`에 개정 표시를 남겼다(파일 분리 자체는 유지). `:79`가 범위 밖으로 미룬 "채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것"은 RD-019가 처리했다. 이 문서의 판정 순서·사유 매핑·wire 응답 모양 결정은 그대로 유효하다.
 
 ## 상황
 

@@ -1,6 +1,6 @@
 # `DocumentSession`의 retire 통지를 raw `AbortSignal` 대신 세션 interface로 노출한다
 
-- 관련: ROADMAP.md#RD-037
+- 관련: [RD-037](../history/roadmap.md)
 
 ## 상황
 

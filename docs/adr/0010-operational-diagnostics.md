@@ -4,7 +4,7 @@
 
 ## 상황
 
-Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-finished`, `rpc-cancelled`, `validation-failed`, `stream-queue`, `stream-dropped`)뿐이었다. 보안 거부(`sender-unauthorized` 등)·입력 거부(`invalid-input`, `payload-too-large`)·자원 한도 거부(`rpc-limit`, `subscription-limit`)의 사유, Main deadline 만료, RPC 성공·실패 구분, 세션·구독의 생성과 해제는 기록하지 않았다. 활성 세션·RPC·구독 수, 대기 중 이벤트 수를 조회할 방법도 없었다. 7개 호출 지점 모두 `diagnostics?.record(...)`를 try로 감싸지 않아 sink가 throw하면 dispatch·stream 경로로 예외가 전파됐다. ROADMAP RD-007.
+Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-finished`, `rpc-cancelled`, `validation-failed`, `stream-queue`, `stream-dropped`)뿐이었다. 보안 거부(`sender-unauthorized` 등)·입력 거부(`invalid-input`, `payload-too-large`)·자원 한도 거부(`rpc-limit`, `subscription-limit`)의 사유, Main deadline 만료, RPC 성공·실패 구분, 세션·구독의 생성과 해제는 기록하지 않았다. 활성 세션·RPC·구독 수, 대기 중 이벤트 수를 조회할 방법도 없었다. 7개 호출 지점 모두 `diagnostics?.record(...)`를 try로 감싸지 않아 sink가 throw하면 dispatch·stream 경로로 예외가 전파됐다. [RD-007](../history/roadmap.md).
 
 ## 결정
 
