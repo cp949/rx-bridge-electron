@@ -187,6 +187,26 @@ describe("onRetire(L5)", () => {
     expect(listener).not.toHaveBeenCalled();
   });
 
+  test("release 뒤에도 세션이 이미 retire돼 있으면 onRetire가 즉시 호출된다(등록은 남지 않는다)", () => {
+    const slots = new SessionSlots(2);
+    const { session, detach } = createSession();
+    const lease = slots.acquire(session);
+    if (lease === undefined) throw new Error("expected a lease");
+    lease.release();
+    detach();
+
+    const listener = vi.fn();
+    lease.onRetire(listener);
+    expect(listener).toHaveBeenCalledTimes(1);
+
+    // 즉시 호출 뒤 등록은 남지 않는다 — offRetire는 no-op이고 재등록해도
+    // released 상태이므로 다시 즉시 호출된다(등록이 쌓이지 않는다).
+    expect(() => lease.offRetire()).not.toThrow();
+    const listener2 = vi.fn();
+    lease.onRetire(listener2);
+    expect(listener2).toHaveBeenCalledTimes(1);
+  });
+
   test("listener가 이미 등록된 lease에 onRetire를 다시 부르면 throw하고, 기존 등록은 남는다", () => {
     const slots = new SessionSlots(2);
     const { session, detach } = createSession();
