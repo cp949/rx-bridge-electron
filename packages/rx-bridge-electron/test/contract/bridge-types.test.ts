@@ -17,7 +17,6 @@ import type { BridgeValue } from "../../src/protocol/index.js";
 
 // 경량 계약(ADR 0012): 런타임 descriptor 없이 계약 타입 하나에서
 // BridgeApi/BridgeImpl/SchemasFor/ErrorsFor를 파생할 수 있는지 검증한다.
-// `.scratch/lightweight-contract/spec.md`의 확정 결정 1, 3 참고.
 
 type Connection = { readonly ok: boolean };
 type SendResult = { readonly bytesWritten: number };

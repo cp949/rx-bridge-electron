@@ -1,6 +1,6 @@
 # 문서가 살아있는 채로 세션이 끝나면 스트림 구독에 종료를 통지한다
 
-- 관련: ROADMAP.md#RD-026
+- 관련: [RD-026](../history/roadmap.md)
 
 ## 상황
 
@@ -15,7 +15,7 @@
 
 문서가 살아있는 채로 세션이 끝나는 경우(detach, `server.dispose()`, bind `dispose()`)는 Renderer 구독자가 자신의 구독이 끊겼다는 사실을 알 방법이 없다. `RemoteState`는 `stale`로 전이하지 않고 마지막 값을 계속 "현재값"처럼 보여주고, `RemoteEvent` 구독은 그냥 멈춘다.
 
-`ADR 0006`(종료 계약)은 이 통지를 명시적으로 범위 밖에 뒀다 — Renderer `api.dispose()` 경로는 결정했지만, Main이 먼저 세션을 끝내는 경우의 프로토콜 확장은 후속 과제로 남겼다. 출처는 `.scratch/shutdown-renderer-notify`.
+`ADR 0006`(종료 계약)은 이 통지를 명시적으로 범위 밖에 뒀다 — Renderer `api.dispose()` 경로는 결정했지만, Main이 먼저 세션을 끝내는 경우의 프로토콜 확장은 후속 과제로 남겼다.
 
 문서가 죽는 대부분의 retire 원인(navigation commit, `render-process-gone`, `webContents` 파괴)은 통지를 관찰할 대상(그 문서의 Renderer)도 함께 사라지므로 통지가 무의미하다. `monitor` 같은 "다른 문서의 세션을 지켜보는" 시나리오는 성립하지 않는다 — 세션은 `webContents`(문서)별이라 다른 창의 retire가 이 구독에 닿지 않는다. 통지가 실제로 관찰되는 경우는 문서 자신이 살아있는 채로 브리지 연결만 끊기는 detach·`server.dispose()`·bind `dispose()`뿐이다.
 

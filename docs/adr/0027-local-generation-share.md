@@ -1,6 +1,6 @@
 # Renderer `LocalGeneration`은 generation 공유를 rxjs `share`로 얻고, snapshot·열림 신호·종료 차단은 직접 소유한다
 
-- 관련: ROADMAP.md#RD-050, 이슈 `.scratch/local-generation-share/issues/01-share-replaysubject-refactor.md`
+- 관련: [RD-050](../history/roadmap.md)
 
 ## 상황
 

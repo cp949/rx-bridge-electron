@@ -1,8 +1,7 @@
 # rubber-workflow
 
-한 덩어리의 작업을 DELTA 단위로 나눠 실행하는 절차. "로드맵"이라는 단어가 무엇을 할지 정리한
-문서(`ROADMAP.md`)와 어떻게 실행할지 정하는 절차 양쪽에서 다른 뜻으로 쓰이면 혼란스러워서, 이
-저장소에서는 실행 절차를 "rubber-workflow"라고 부른다. 구현 전에 모든 DELTA의 계획을 먼저
+한 덩어리의 작업을 DELTA 단위로 나눠 실행하는 절차. 이 저장소에서는 이 실행 절차를
+"rubber-workflow"라고 부른다. 구현 전에 모든 DELTA의 계획을 먼저
 작성하고, 작업 중 발견에 따라 DELTA를 수정·추가·분할하는 탄력성("고무")이 핵심이다.
 
 ## 진입 경로
@@ -10,11 +9,11 @@
 다음 둘 중 하나로 시작한다.
 
 - **브레인스토밍**: 사용자와 논의해 확정한 작업(브레인스토밍 스킬의 설계 승인 등). 관련
-  ROADMAP 항목이 없다.
-- **ROADMAP.md 항목**: 루트 `ROADMAP.md`의 항목 하나를 실행.
+  issue가 없다.
+- **GitHub issue**: issue `#N` 하나를 실행(`docs/agents/issue-tracker.md`).
 
-둘 다 아래 절차는 동일하다. ROADMAP.md 항목에서 시작했으면 "마무리"에서 `ROADMAP.md`도
-갱신한다.
+둘 다 아래 절차는 동일하다. issue에서 시작했으면 "마무리"에서 issue를 닫는다.
+`docs/history/roadmap.md`는 RD-050에서 동결한 이력이다 — 새 RD 항목을 추가하지 않는다.
 
 ## 언제 쓰나
 
@@ -30,7 +29,7 @@
 
 ```text
 _works/20260921-01-example-task/
-  _meta.md               # 작업 브랜치·관련 ROADMAP 항목·상태 — 다른 에이전트가 이어받기 위한 최소 정보
+  _meta.md               # 작업 브랜치·관련 issue·상태 — 다른 에이전트가 이어받기 위한 최소 정보
   checklist.md            # 목표·범위·DELTA 목록·최종 완료 조건
   DELTA-01.md
   DELTA-02.md
@@ -49,7 +48,7 @@ _works/20260921-01-example-task/
 ```markdown
 ---
 작업 브랜치: example-task
-관련 ROADMAP 항목: 없음 # ROADMAP.md 항목에서 시작했으면 해당 항목
+관련 issue: 없음 # GitHub issue에서 시작했으면 #N
 상태: 진행중
 ---
 ```
@@ -70,7 +69,7 @@ _works/20260921-01-example-task/
 
 - 목표: ...
 - 범위(포함/제외): ...
-- 관련 ROADMAP 항목: ROADMAP.md#<항목> (브레인스토밍에서 시작했으면 생략)
+- 관련 issue: #N (브레인스토밍에서 시작했으면 생략)
 
 ## DELTA 목록
 
@@ -153,7 +152,7 @@ DELTA의 "## 계획"은 고치지 않는다 — 추가 변경은 새 DELTA로 �
   checklist를 고친다. 분할한 DELTA 안에서 문서 갱신과 함께 조용히 처리하지 않는다.
 - checklist의 "멈추는 지점"이 발동했으면 자체 해결(측정법 변경, 스크립트 수정) 여부와
   무관하게 "## 결정"에 발동 사실·1차 결과·해결 근거를 적는다.
-- 완료 보고(checklist 완료 조건, `ROADMAP.md` 완료 기준)는 성공과 예외를 함께 적는다.
+- 완료 보고(checklist 완료 조건, issue 완료 기준)는 성공과 예외를 함께 적는다.
   예: 복귀 240/240, 형식 10/12셀, 편차 2셀 수용(근거). 실측으로 원래 요구를 덮어쓰지 않는다.
 
 ## 이어받기 (다른 에이전트가 이어서 진행)
@@ -213,16 +212,17 @@ DELTA의 "## 계획"은 고치지 않는다 — 추가 변경은 새 DELTA로 �
 checklist의 완료 조건을 전부 만족하면:
 
 1. `pending-traps/`, `pending-issues/`를 훑어 승격 여부를 판단한다(아래 기준).
-2. ROADMAP.md 항목에서 시작한 작업이면 `ROADMAP.md`에서 해당 항목을 완료로 표시한다.
-   브레인스토밍에서 시작한 작업이면 이 단계는 없다.
-3. "브랜치와 병합"에 따라 재그룹화 후 기준 브랜치에 병합한다.
+2. "브랜치와 병합"에 따라 재그룹화 후 기준 브랜치에 병합한다.
+3. GitHub issue에서 시작한 작업이면 `gh issue close <N> --comment "..."`로 닫는다. 댓글에
+   결과(병합 커밋, 검증 수치, 편차)를 적는다. 기준 브랜치가 `dev`라 커밋 메시지의
+   `Closes #N`으로는 자동으로 닫히지 않는다. 브레인스토밍에서 시작한 작업이면 이 단계는 없다.
 4. `_meta.md`의 `상태`를 `완료`로 바꾼다.
 5. 작업 폴더를 `_works/_completed/<원래 폴더명>/`으로 옮긴다(`mv`, 이름은 그대로 —
    이미 `yyyyMMdd-NN-<제목>` 형식이라 재명명하지 않는다). `_works/`가 통째로 gitignore
    대상이라 이 이동은 git에 기록되지 않는다.
 
-`ROADMAP.md`·ADR·`.scratch/`·소스 주석 같은 추적 파일에는 `_works/` 경로를 적지 않는다 — 다른
-환경에서는 그 경로가 없다. 출처는 RD 번호·커밋 해시·ADR 링크로 남긴다.
+ADR·GitHub issue·소스 주석 같은 추적 대상에는 `_works/` 경로를 적지 않는다 — 다른 환경에서는
+그 경로가 없다. 출처는 issue 번호·커밋 해시·ADR 링크로 남긴다.
 
 ### 함정 → 장기 문서화
 
@@ -250,9 +250,9 @@ checklist의 완료 조건을 전부 만족하면:
 
 ### 후속 작업 → 등록
 
-- 현재 ROADMAP.md 항목의 범위 안이면 그 항목의 하위 항목으로 `ROADMAP.md`에 삽입한다.
-- 범위 밖이거나 ROADMAP.md와 무관한 작업(브레인스토밍 시작 포함)이면
-  `.scratch/<feature-slug>/issues/`에 등록한다(`docs/agents/issue-tracker.md`).
+- 현재 issue의 범위 안이면 그 issue의 sub-issue로 등록한다.
+- 범위 밖이거나 issue 없이 시작한 작업(브레인스토밍)이면 별도 GitHub issue로 등록한다
+  (`docs/agents/issue-tracker.md`).
 - 등록 여부는 매번 판단한다 — 사소하면 버려도 된다.
 
 ## 금지

@@ -7,7 +7,7 @@
 - RPC(`dispatchRpc`): 요청이 취소되지 않았으면 예외를 다시 던졌다. 예외는 `bindElectronBridge`의 rpc 핸들러 catch까지 올라가 `protocolError` 폴백인 `INVALID_ARGUMENT "Invalid bridge request."`가 됐다. Main deadline이 걸려 있어도 `Promise.race`가 즉시 reject되어 같은 폴백으로 갔다.
 - stream(`controlStream`): `subscribed` 다음 `INTERNAL "Internal bridge error."` `error`를 보내고 슬롯을 반환했다.
 
-`INVALID_ARGUMENT`는 요청 envelope나 입력이 규칙을 어겼다는 뜻이다. `authorize`는 호스트 애플리케이션 코드이고, 그 실패는 Renderer가 보낸 요청의 형식과 무관하다. RPC 경로는 Renderer에 원인을 잘못 알렸다. RD-007([ADR 0010](0010-operational-diagnostics.md)) 작업 중 이 불일치를 확인하고 범위 밖으로 남겼다. ROADMAP RD-009.
+`INVALID_ARGUMENT`는 요청 envelope나 입력이 규칙을 어겼다는 뜻이다. `authorize`는 호스트 애플리케이션 코드이고, 그 실패는 Renderer가 보낸 요청의 형식과 무관하다. RPC 경로는 Renderer에 원인을 잘못 알렸다. RD-007([ADR 0010](0010-operational-diagnostics.md)) 작업 중 이 불일치를 확인하고 범위 밖으로 남겼다. [RD-009](../history/roadmap.md).
 
 ## 결정
 

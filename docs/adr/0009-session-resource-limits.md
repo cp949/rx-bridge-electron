@@ -2,7 +2,7 @@
 
 ## 상황
 
-Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 timeout만 존재하고, 만료 시 best-effort `cancel`만 보낸다). 진행 중 RPC 수와 구독 수에도 상한이 없었다. `DocumentSessions`의 `usedStreamIds`(세션별 Set)와 `StreamHub`의 `#used`/`#usedBySession`은 세션 수명 동안 계속 커졌다. `#retiredClients`는 삭제 경로가 없어 무한히 쌓였다. payload 크기 검사는 깊이·항목 수·문자열 길이만 있고 전체 크기 한도가 없어 큰 배열이나 bigint를 통해 메모리를 소모시킬 수 있었다. 이 모든 자원은 세션(연결된 `webContents`의 현재 main-frame 문서) 단위로 공유되지 않지만 프로세스는 공유하므로, 한 세션이 자원을 소진하면 다른 세션의 정상 요청도 영향을 받을 수 있었다. ROADMAP RD-006.
+Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 timeout만 존재하고, 만료 시 best-effort `cancel`만 보낸다). 진행 중 RPC 수와 구독 수에도 상한이 없었다. `DocumentSessions`의 `usedStreamIds`(세션별 Set)와 `StreamHub`의 `#used`/`#usedBySession`은 세션 수명 동안 계속 커졌다. `#retiredClients`는 삭제 경로가 없어 무한히 쌓였다. payload 크기 검사는 깊이·항목 수·문자열 길이만 있고 전체 크기 한도가 없어 큰 배열이나 bigint를 통해 메모리를 소모시킬 수 있었다. 이 모든 자원은 세션(연결된 `webContents`의 현재 main-frame 문서) 단위로 공유되지 않지만 프로세스는 공유하므로, 한 세션이 자원을 소진하면 다른 세션의 정상 요청도 영향을 받을 수 있었다. [RD-006](../history/roadmap.md).
 
 ## 결정
 

@@ -1,8 +1,8 @@
 # sender admission 판정을 `DocumentSessions`의 `#admit` 하나로 모으고 envelope parse를 server가 소유한다
 
-- 관련: ROADMAP.md#RD-018
+- 관련: [RD-018](../history/roadmap.md)
 
-> **개정 (RD-019, `ROADMAP.md#RD-019`)**: 결정 2가 정의한 envelope parse 한도(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)는 이제 `src/protocol/messages.ts`의 모듈 내부 상수 `ENVELOPE_LIMITS` 하나이고, 이 상수를 쓰던 호출자 5곳(옛 preload·`rpc-client.ts`·`stream-multiplexer.ts`·`create-renderer-api.ts`의 각자 상수, `create-bridge-server.ts`의 `envelopeLimits`)이 이 하나를 공유한다 — 값 자체는 바뀌지 않았다. `:54`가 `protocol-error.ts`를 별도 파일에 둔 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 RD-019가 채널 상수 정의를 `src/protocol/electron-channels.ts`로 옮기며 사라졌다 — `:54`에 개정 표시를 남겼다(파일 분리 자체는 유지). `:79`가 범위 밖으로 미룬 "채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것"은 RD-019가 처리했다. 이 문서의 판정 순서·사유 매핑·wire 응답 모양 결정은 그대로 유효하다.
+> **개정 ([RD-019](../history/roadmap.md))**: 결정 2가 정의한 envelope parse 한도(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)는 이제 `src/protocol/messages.ts`의 모듈 내부 상수 `ENVELOPE_LIMITS` 하나이고, 이 상수를 쓰던 호출자 5곳(옛 preload·`rpc-client.ts`·`stream-multiplexer.ts`·`create-renderer-api.ts`의 각자 상수, `create-bridge-server.ts`의 `envelopeLimits`)이 이 하나를 공유한다 — 값 자체는 바뀌지 않았다. `:54`가 `protocol-error.ts`를 별도 파일에 둔 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제는 RD-019가 채널 상수 정의를 `src/protocol/electron-channels.ts`로 옮기며 사라졌다 — `:54`에 개정 표시를 남겼다(파일 분리 자체는 유지). `:79`가 범위 밖으로 미룬 "채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것"은 RD-019가 처리했다. 이 문서의 판정 순서·사유 매핑·wire 응답 모양 결정은 그대로 유효하다.
 
 ## 상황
 
@@ -14,7 +14,7 @@
 
 adapter가 판정한 `frame-not-main`·`origin-not-allowed`를 같은 진단 sink에 보내려고 `src/main/diagnostics.ts`에 모듈 내부 Symbol `recordAdapterRejection`을 두고 `StreamBridgeServer`에 그 Symbol 키의 선택적 메서드를 붙이는 통로(ADR 0010 §14)가 생겼다. 판정을 server 하나로 모으면 adapter가 sink에 닿을 일 자체가 없어져 이 통로가 필요 없어진다.
 
-test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `webContentsId`·`isMainFrame`만 보고 frameId를 무시해, server seam test가 frame 교체 뒤 거부를 관측할 수 없었다(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`). 실제 adapter(`electron-adapter.ts`)는 `contents.mainFrame.routingId === sender.frameId`까지 비교한다.
+test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `webContentsId`·`isMainFrame`만 보고 frameId를 무시해, server seam test가 frame 교체 뒤 거부를 관측할 수 없었다. 실제 adapter(`electron-adapter.ts`)는 `contents.mainFrame.routingId === sender.frameId`까지 비교한다.
 
 ## 결정 1: `DocumentSessions`의 private `#admit(sender)` 하나가 모든 채널의 sender admission을 판정한다
 

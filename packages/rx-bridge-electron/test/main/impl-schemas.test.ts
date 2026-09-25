@@ -1,9 +1,8 @@
 // 선택 스키마 map(ADR 0012): `createBridgeServer(impl, options)`의 `schemas`·`errors`
 // map이 operation 단위 부분·점진 적용과 정확한 실패 분류를 지키는지 검증한다.
-// `.scratch/lightweight-contract/spec.md`의 확정 결정 3(요청 처리 순서:
-// `parseBridgeValue(input)` → 입력 스키마 → handler → 출력 스키마 →
-// `parseBridgeValue`+clone)·5(errors map, 목록 밖 코드는 안전한 오류)를
-// impl 기반 API 기준으로 확인한다.
+// ADR 0012의 요청 처리 순서(`parseBridgeValue(input)` → 입력 스키마 →
+// handler → 출력 스키마 → `parseBridgeValue`+clone)와 errors map(목록 밖
+// 코드는 안전한 오류)을 impl 기반 API 기준으로 확인한다.
 import { describe, expect, test } from "vitest";
 
 import {

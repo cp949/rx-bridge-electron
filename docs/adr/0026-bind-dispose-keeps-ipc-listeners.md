@@ -1,6 +1,6 @@
 # bind `dispose()`는 IPC listener를 남겨 폐기된 server가 요청을 거부하게 하고, 같은 namespace의 새 bind가 그 listener를 인수한다
 
-- 관련: ROADMAP.md#RD-048
+- 관련: [RD-048](../history/roadmap.md)
 
 ## 상황
 

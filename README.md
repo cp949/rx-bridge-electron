@@ -10,11 +10,10 @@
 | ------------------------------ | ------------------------------------------------------------------ |
 | `packages/rx-bridge-electron/` | 배포 패키지 `@cp949/rx-bridge-electron`. `tsdown`으로 `dist/` 빌드 |
 | `apps/demo/`                   | 라이브러리를 쓰는 Electron + React 데모 앱(`electron-vite`)        |
-| `docs/`                        | 아키텍처, 설계 문서, ADR, 검증 결과, 함정 기록                     |
-| `ROADMAP.md`                   | 작업 목록과 다음 요구사항                                          |
+| `docs/`                        | 아키텍처, 설계 문서, ADR, 검증 결과, 함정 기록, 로드맵 이력(동결)  |
 | `CONTEXT.md`                   | 도메인 용어집                                                      |
 
-pnpm workspace와 Turborepo로 관리합니다.
+pnpm workspace와 Turborepo로 관리합니다. 작업 목록과 다음 요구사항은 [GitHub issue](https://github.com/cp949/rx-bridge-electron/issues)에서 관리합니다.
 
 ## 요구 사항
 

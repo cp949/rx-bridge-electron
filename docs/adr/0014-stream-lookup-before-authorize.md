@@ -1,6 +1,6 @@
 # 구독 등록 조회를 `authorize` 앞으로 옮기고, 구독 수명주기를 `Subscriptions` 모듈 하나로 모은다
 
-- 관련: ROADMAP.md#RD-015
+- 관련: [RD-015](../history/roadmap.md)
 
 > [ADR 0015](0015-rpc-request-lifecycle.md)가 RPC 쪽에 같은 이동을 적용했다. 아래 "결정: 구독 수명주기 전체를 `Subscriptions` 모듈 하나가 소유한다"의 "`DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`)만 남는다" 서술은 더 이상 맞지 않다 — 그 RPC 수명주기 메서드들도 `RpcRequests` 모듈로 옮겨져 `DocumentSessions`에서 전부 제거됐다(`DocumentSessions`는 이제 RPC도 모른다). 아래 "수용한 동작 변화"의 "`#retire`의 RPC 취소 루프보다 먼저 실행된다" 서술도 이력이다 — 그 루프 자체가 삭제되고 RPC retire도 구독과 같은 `session.signal` abort listener 패턴으로 바뀌었다(순서 변화의 성격은 ADR 0015가 이어서 기록한다). 이 문서의 다른 결정은 그대로 유효하다.
 
@@ -38,4 +38,4 @@ wire 메시지 순서, [ADR 0009](0009-session-resource-limits.md) §11의 slot 
 
 ## 범위 밖
 
-RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`, RPC `keyOf`) — 후속 ROADMAP.md#RD-016(완료, [ADR 0015](0015-rpc-request-lifecycle.md)). sender admission 통합, `recordAdapterRejection` Symbol, version-mismatch 도달 불가 분기 — 후속 ROADMAP.md#RD-018(완료, [ADR 0016](0016-sender-admission.md)). 와이어 형식·채널·handshake·공개 export 변경(`Subscriptions`는 공개 export가 아니다 — `StreamHub`와 마찬가지로 내부 구현이다).
+RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`, RPC `keyOf`) — 후속 [RD-016](../history/roadmap.md)(완료, [ADR 0015](0015-rpc-request-lifecycle.md)). sender admission 통합, `recordAdapterRejection` Symbol, version-mismatch 도달 불가 분기 — 후속 [RD-018](../history/roadmap.md)(완료, [ADR 0016](0016-sender-admission.md)). 와이어 형식·채널·handshake·공개 export 변경(`Subscriptions`는 공개 export가 아니다 — `StreamHub`와 마찬가지로 내부 구현이다).

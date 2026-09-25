@@ -2,7 +2,11 @@
 
 ### Issue tracker
 
-이슈와 명세는 `.scratch/<feature-slug>/` 아래 로컬 마크다운으로 관리한다. See `docs/agents/issue-tracker.md`.
+이슈와 명세는 GitHub issue(`gh` CLI)로 관리한다. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+기본 다섯 역할 라벨(`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`)을 이름 그대로 쓴다. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 
@@ -14,7 +18,7 @@
 
 ### 작업 실행 (rubber-workflow)
 
-확정된 중간 규모 이상 작업은 DELTA 단위로 `docs/agents/rubber-workflow.md` 절차를 따른다. 작업 범위가 ROADMAP 항목이면 해당 항목을 진입점으로 쓴다.
+확정된 중간 규모 이상 작업은 DELTA 단위로 `docs/agents/rubber-workflow.md` 절차를 따른다. 작업이 GitHub issue에서 시작하면 해당 issue를 진입점으로 쓴다. `docs/history/roadmap.md`는 동결된 이력이며 새 RD를 추가하지 않는다.
 
 ### 기존 계획 문서
 

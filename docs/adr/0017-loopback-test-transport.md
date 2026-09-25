@@ -1,6 +1,6 @@
 # `@cp949/rx-bridge-electron/testing`의 `createLoopbackTransport` — test 전용 in-process `BridgeTransport` adapter
 
-- 관련: ROADMAP.md#RD-020
+- 관련: [RD-020](../history/roadmap.md)
 
 ## 상황
 
