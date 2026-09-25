@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AppBridge } from "../bridge/contract.js";
 import type { RelayStatus } from "../bridge/relay-contract.js";
 import {
@@ -31,21 +31,32 @@ export function RelayPanel({ api, readOnly = false }: Props) {
       ? snapshot.value
       : undefined;
   const [fault, setFault] = useState("");
+  const [faultStreamError, setFaultStreamError] = useState("");
   const [operationError, setOperationError] = useState("");
+  const pending = useRef(new Set<AbortController>());
 
   useEffect(() => {
-    const subscription = api.relay.event.fault.subscribe((value) =>
-      setFault(`${value.code}: ${value.message}`),
-    );
-    return () => subscription.unsubscribe();
+    const subscription = api.relay.event.fault.subscribe({
+      next: (value) => setFault(`${value.code}: ${value.message}`),
+      error: (error: unknown) => setFaultStreamError(errorText(error)),
+    });
+    const controllers = pending.current;
+    return () => {
+      subscription.unsubscribe();
+      controllers.forEach((controller) => controller.abort());
+    };
   }, [api]);
 
-  const invoke = async (operation: () => Promise<unknown>) => {
+  const invoke = async (call: (signal: AbortSignal) => Promise<unknown>) => {
+    const controller = new AbortController();
+    pending.current.add(controller);
     try {
       setOperationError("");
-      await operation();
+      await call(controller.signal);
     } catch (error) {
-      setOperationError(errorText(error));
+      if (!controller.signal.aborted) setOperationError(errorText(error));
+    } finally {
+      pending.current.delete(controller);
     }
   };
 
@@ -55,28 +66,57 @@ export function RelayPanel({ api, readOnly = false }: Props) {
       <h2>Relay: {label(status, snapshot.status)}</h2>
       {snapshot.status === "stale" && <p>Relay subscription stale</p>}
       {readOnly ? (
-        <button onClick={() => void invoke(() => api.relay.rpc.turnOff())}>
+        <button
+          onClick={() =>
+            void invoke((signal) =>
+              api.relay.rpc.turnOff(undefined, { signal }),
+            )
+          }
+        >
           Try Relay Off
         </button>
       ) : (
         <div className="button-row">
-          <button onClick={() => void invoke(() => api.relay.rpc.turnOn())}>
+          <button
+            onClick={() =>
+              void invoke((signal) =>
+                api.relay.rpc.turnOn(undefined, { signal }),
+              )
+            }
+          >
             Relay On
           </button>
-          <button onClick={() => void invoke(() => api.relay.rpc.turnOff())}>
+          <button
+            onClick={() =>
+              void invoke((signal) =>
+                api.relay.rpc.turnOff(undefined, { signal }),
+              )
+            }
+          >
             Relay Off
           </button>
           <button
-            onClick={() => void invoke(() => api.relay.rpc.simulateFault())}
+            onClick={() =>
+              void invoke((signal) =>
+                api.relay.rpc.simulateFault(undefined, { signal }),
+              )
+            }
           >
             Simulate Relay Fault
           </button>
-          <button onClick={() => void invoke(() => api.relay.rpc.reset())}>
+          <button
+            onClick={() =>
+              void invoke((signal) =>
+                api.relay.rpc.reset(undefined, { signal }),
+              )
+            }
+          >
             Reset Relay
           </button>
         </div>
       )}
       {fault && <p>Latest relay fault: {fault}</p>}
+      {faultStreamError && <p>Relay fault stream ended: {faultStreamError}</p>}
       {operationError && <p role="alert">{operationError}</p>}
     </section>
   );

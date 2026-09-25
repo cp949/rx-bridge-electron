@@ -53,8 +53,10 @@ function useDeviceView(api: RendererApi<AppBridge>) {
   useEffect(() => {
     const subscription = api.device.state.temperature
       .pipe(sampleTime(100))
-      .subscribe((value) => {
-        setDisplayTemperature(value);
+      .subscribe({
+        next: (value) => setDisplayTemperature(value),
+        // 종료 표시는 같은 State의 useRemoteState(stale)가 맡는다.
+        error: () => {},
       });
     return () => subscription.unsubscribe();
   }, [api]);
@@ -168,34 +170,43 @@ export function MainMonitorApp({ api }: Props) {
   const [command, setCommand] = useState("AT+STATUS");
   const [terminal, setTerminal] = useState<readonly SerialLine[]>([]);
   const [errors, setErrors] = useState<readonly string[]>([]);
-  const pending = useRef<AbortController | undefined>(undefined);
+  const pending = useRef(new Set<AbortController>());
   const report = (error: unknown) =>
     setErrors((current) => [...current.slice(-19), errorText(error)]);
   useEffect(() => {
-    const data = api.device.event.data.subscribe((line) =>
-      setTerminal((lines) => appendTerminalLine(lines, line)),
-    );
-    const error = api.device.event.error.subscribe((value) =>
+    const reportStream = (name: string) => (error: unknown) =>
       setErrors((current) => [
         ...current.slice(-19),
-        `${value.code}: ${value.message}`,
-      ]),
-    );
+        `${name} ended: ${errorText(error)}`,
+      ]);
+    const data = api.device.event.data.subscribe({
+      next: (line) => setTerminal((lines) => appendTerminalLine(lines, line)),
+      error: reportStream("device.event.data"),
+    });
+    const error = api.device.event.error.subscribe({
+      next: (value) =>
+        setErrors((current) => [
+          ...current.slice(-19),
+          `${value.code}: ${value.message}`,
+        ]),
+      error: reportStream("device.event.error"),
+    });
+    const controllers = pending.current;
     return () => {
       data.unsubscribe();
       error.unsubscribe();
-      pending.current?.abort();
+      controllers.forEach((controller) => controller.abort());
     };
   }, [api]);
   const invoke = async (call: (signal: AbortSignal) => Promise<unknown>) => {
     const controller = new AbortController();
-    pending.current = controller;
+    pending.current.add(controller);
     try {
       await call(controller.signal);
     } catch (error) {
       if (!controller.signal.aborted) report(error);
     } finally {
-      if (pending.current === controller) pending.current = undefined;
+      pending.current.delete(controller);
     }
   };
   return (
@@ -230,17 +241,27 @@ export function MainMonitorApp({ api }: Props) {
           </button>
           <button
             onClick={() =>
-              void invoke(() => api.device.rpc.simulateCableDisconnect())
+              void invoke((signal) =>
+                api.device.rpc.simulateCableDisconnect(undefined, { signal }),
+              )
             }
           >
             Simulate Cable Disconnect
           </button>
           <button
-            onClick={() => void invoke(() => api.device.rpc.triggerError())}
+            onClick={() =>
+              void invoke((signal) =>
+                api.device.rpc.triggerError(undefined, { signal }),
+              )
+            }
           >
             Trigger Error
           </button>
-          <button onClick={() => pending.current?.abort()}>
+          <button
+            onClick={() =>
+              pending.current.forEach((controller) => controller.abort())
+            }
+          >
             Cancel Pending
           </button>
         </div>
@@ -274,8 +295,11 @@ export function MainMonitorApp({ api }: Props) {
                   ({ value }) => String(value) === event.target.value,
                 );
                 if (selected === undefined) return;
-                void invoke(() =>
-                  api.device.rpc.setRate({ messagesPerSecond: selected.value }),
+                void invoke((signal) =>
+                  api.device.rpc.setRate(
+                    { messagesPerSecond: selected.value },
+                    { signal },
+                  ),
                 );
               }}
             >
@@ -296,10 +320,11 @@ export function MainMonitorApp({ api }: Props) {
                   ({ value }) => String(value) === event.target.value,
                 );
                 if (selected === undefined) return;
-                void invoke(() =>
-                  api.device.rpc.setSourceSampling({
-                    milliseconds: selected.value,
-                  }),
+                void invoke((signal) =>
+                  api.device.rpc.setSourceSampling(
+                    { milliseconds: selected.value },
+                    { signal },
+                  ),
                 );
               }}
             >
@@ -352,11 +377,17 @@ export function SensorMonitorApp({ api }: Props) {
   const [rxCount, setRxCount] = useState(0);
   const [lastError, setLastError] = useState("");
   useEffect(() => {
-    const data = api.device.event.data.subscribe((line) => {
-      if (line.kind === "rx") setRxCount((count) => count + 1);
+    const reportStream = (name: string) => (error: unknown) =>
+      setLastError(`${name} ended: ${errorText(error)}`);
+    const data = api.device.event.data.subscribe({
+      next: (line) => {
+        if (line.kind === "rx") setRxCount((count) => count + 1);
+      },
+      error: reportStream("device.event.data"),
     });
-    const errors = api.device.event.error.subscribe((error) => {
-      setLastError(`${error.code}: ${error.message}`);
+    const errors = api.device.event.error.subscribe({
+      next: (error) => setLastError(`${error.code}: ${error.message}`),
+      error: reportStream("device.event.error"),
     });
     return () => {
       data.unsubscribe();
