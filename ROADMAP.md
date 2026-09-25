@@ -279,6 +279,39 @@
 
   계획: `_works/20260925-12-renderer-fake-helpers/`. **결과:** 완료 조건 전부 충족, 편차 1건(prettier 재정렬, 허용). DELTA-01(`test/renderer/fake-transport.ts`에 생성자 옵션 `{ manifest }`, 자유 함수 `streamMessage`·`rpcSuccess`·`rpcError`, `FakeTransport.subscribeCommands()`·`subscriptionIdFor(key, nth)` 추가, 기존 test 불변 — 6 files/136 tests GREEN, check-types 통과) → DELTA-02(6개 파일에서 로컬 helper 약 15벌 삭제, 새 helper 호출로 이전, 파일 단위 커밋 — rpc-calls 21·create-renderer-api 33·remote-state 17·remote-event 7·renderer-dispose 19·renderer-diagnostics 39 = 136 tests 전부 GREEN) → DELTA-03(전체 검증·문서 반영) 순으로 진행. 검증 수치: `npx vitest list test/renderer` 출력이 DELTA-01 시작 전 기준(`baseline-renderer-list.txt`)과 `diff` 빈 출력. 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 37 files/686 tests 통과(RD-034 기준 686 그대로, 이 RD는 test 수 증감 없음). 루트 `pnpm lint` 통과, `pnpm format:check`는 1차 실행에서 DELTA-02가 이전한 4개 파일(`remote-event`·`remote-state`·`renderer-diagnostics`·`renderer-dispose`)의 줄바꿈 불일치를 지적해 `prettier --write`로 재정렬(값·순서 변경 없음) 후 통과. demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: 로컬 helper 정의(`message`·`streamMessage`·`success`·`subscriptions`·`firstSubscriptionId`·`subscriptionIdFor`·`subscribeCommands`·`eventTransport`·`stateTransport`·`streamTransport`·`bridgeTransport`, `StreamMessageBody` 타입) `test/renderer/*.test.ts` 0건. `protocolVersion: 1` 잔존 10건, 계획 시점 예상과 정확히 일치 — `create-renderer-api.test.ts` 6건(deferred resolve 1·잘못된 manifest `test.each` 4·malformed 1), `renderer-diagnostics.test.ts` 3건(handshake 실패 2·다른 clientId stream 1), `remote-event.test.ts` 1건(`"old-client"`, C3). 단언 변경: `git diff dev -U0 -- test/renderer/*.test.ts`에서 `expect(...)` 등 관련 줄 3건뿐이며 전부 `expect(subscriptions(transport))` → `expect(transport.subscribeCommands())`(C4 허용, 관측 대상 식만 변경, matcher·기대값 불변). `git diff dev --stat -- packages/rx-bridge-electron/src` 빈 출력. 리뷰 `02.html` 카드 07 근거 교정·완료(범위 B) 표시, 기각한 원안(key 단위 가짜 Main) 1줄 반영. **발견:** 없음 — `pending-issues/`·`pending-traps/` 모두 비어 있다. **리뷰:** DELTA-02가 handshake factory를 지우면서 manifest literal을 test마다 인라인해 같은 manifest가 43곳에 복제됐다(test 파일 순증 143줄). 파일 상수 manifest(`CONNECTION_MANIFEST`·`FAULT_MANIFEST`·`STREAM_MANIFEST`·`BRIDGE_MANIFEST`)를 생성자 옵션으로 넘기도록 고쳤다. remote-state에 남은 인라인 subscribe 필터 7곳(완료 조건 grep은 helper 정의만 봐서 놓침)을 `transport.subscribeCommands()`로 바꿨다 — `expect` 3곳은 C4와 같은 관측 식 교체, matcher·기대값 불변. `fake-transport.ts`의 기본 handshake와 옵션 분기의 envelope 중복을 생성자 1회 조립으로, 옵션 타입을 `Partial<HandshakeManifest>`로 정리했다. 순변화 -180줄, `xvfb-run -a pnpm verify` 37 files/686 tests, `vitest list` 기준 diff 빈 출력, lint·format 통과.
 
+### upstream 연결 module과 구독 frame sequence 단일화 (출처: 아키텍처 리뷰 `_works/arch-review/03.html` 후보 01·03)
+
+- [ ] **RD-036 — upstream 연결(key별 공유·scoped 개별)을 `Subscriptions` 안 내부 module `Upstreams`로 분리하고, 시작 전 거부 frame의 sequence도 `DeliveryWindow`가 매기게 한다.** 지금 `subscriptions.ts`(623줄, src 최대)는 admission·`authorize` 대기·consumer 수명·종료 통지 판정과 함께 key별 upstream 공유까지 소유한다. 공유 상태가 `Consumer`에 필드 3개(`shared`·`own`·`sourceDetached`)로 새고, readonly 필드를 캐스트로 대입한다(`(consumer as { shared?: SharedSource }).shared = shared`). fan-out 결함 test(`subscriptions.test.ts`의 옛 consumer evict·같은 fan-out 재진입 3건)는 server 전체와 ack 왕복으로만 재현된다. 별개로 `DeliveryWindow`는 "sequence를 모두 창이 매긴다"고 하지만 `#endUnstarted`는 `subscribed`(0)·`error`(1)를 리터럴로 조립하고, `withEnvelope(clientId, { subscriptionId, … })` 조립이 3곳에 있다. 출처: 아키텍처 리뷰 `_works/arch-review/03.html` 후보 01·03, 2026-09-25 그릴링. **구조:**
+  - 신규 `src/main/upstreams.ts`의 `Upstreams`가 State·broadcast Event의 key별 공유, scoped Event의 구독별 upstream, 늦게 합류한 State의 `getValue()` 현재값, scoped factory 결과의 Observable 검사, 동기 완료, 마지막 해제 시 upstream 정리, 옛 연결 해제가 같은 key의 새 공유를 지우지 않는 identity 검사를 소유한다.
+  - interface는 연결 1개와 해제 1개다. 연결은 호출자 토큰(consumer 객체)·registration·완성된 `BridgeContext`·observer 모양 sink를 받는다. 해제는 같은 토큰으로 하고, 연결 요청이 아직 반환되지 않은 동기 재진입 중에도 불러도 되며 멱등이다. 집계·dispose·조회는 없다.
+  - upstream `error`는 원래 값을 sink에 넘기고 `Subscriptions`가 `internalError`로 바꾼다(지금의 `serializeError(error, [], limits)`는 선언 목록이 비어 항상 `internalError`다). scoped factory 예외·non-Observable 반환과 늦은 합류 `getValue()` 예외는 연결 요청이 동기로 throw하고, `Subscriptions`의 기존 `try/catch`가 `INTERNAL` terminal로 번역한다. throw한 연결의 토큰은 연결되지 않은 상태로 남는다.
+  - fan-out 도중 해제된 토큰에는 다음 값·terminal을 전달하지 않는다(`Upstreams` 불변식). `Subscriptions#next`의 `window.accepting` 검사도 유지한다.
+  - `Upstreams`는 `DocumentSession`·`authorization.ts`·`DeliveryWindow`·진단·envelope를 모른다. `Consumer`의 `shared`·`own`·`sourceDetached`, `SharedSource`, `#shared`·`#startShared`·`#observer`·`#detachSource`를 삭제한다.
+  - 시작 전 거부(`#endUnstarted`)도 buffer 없는 전용 창(`createRejectionDeliveryWindow`, 이름은 예시)을 열어 `open()`→`preempt(error)`로 sequence 0·1을 받는다. `endNotice` 전후 2회 평가는 `Subscriptions`에 남는다. envelope 조립은 순수 함수 1개로 모으고, 전송 실패 처리(활성 consumer는 close, 시작 전 거부는 무시)는 각 호출부에 남는다.
+  - 관측 가능한 동작을 모두 보존한다: wire 메시지 순서·sequence·코드·문구, 진단 종류·순서, `getDiagnosticsSnapshot()` 값, slot 반환 시점, upstream 구독·해제 횟수와 시점. 생성자 시그니처·`create-bridge-server.ts` 배선·공개 API를 바꾸지 않는다. 새 ADR·ADR 개정 note는 만들지 않는다.
+  - test 표면: RD-015 그릴링 결정 5("구독 모듈 직접 test 없음")의 예외로 `Upstreams`를 `test/main/upstreams.test.ts`에서 직접 test한다(RD-034 `DeliveryWindow`와 같은 근거). 기존 server-level fan-out test는 삭제하지 않는다.
+
+  **범위 밖(보류):** 리뷰 03 후보 02(retire 통지 typed interface)·04(payload limits 해석)·05(`LocalGeneration` kind 분기). 리뷰 03 잔재 중 이동 범위 밖 항목(`BridgeServer`·`CommonServerOptions`·`buildBridgeServer`·`TransportErrorCode`·registration manifest 재조립·`RemoteError` 변환 2벌). 동작 변경이 필요한 결함이 나오면 이 RD에 섞지 않고 별도 RD로 등록한다.
+
+  **완료 기준:**
+  - refactor 전에 `createBridgeServer` seam characterization test 4건을 추가하고 수정 전 코드에서 GREEN을 확인한다. 대상:
+    - 늦게 합류한 State의 `getValue()` throw → 합류자만 `subscribed`·`error INTERNAL`, 기존 consumer·upstream 유지
+    - scoped factory throw·non-Observable 반환 → `subscribed`·`error INTERNAL`, slot 반환
+    - 첫 State `batch` 송신이 throw(upstream 동기 subscribe 도중 close) → upstream 구독 해제
+    - broadcast upstream `error` → 두 consumer 모두 `error INTERNAL`, upstream 해제
+
+    이 test들은 refactor 뒤에도 GREEN이다.
+
+  - `upstreams.test.ts`가 공유·마지막 해제·늦은 합류·scoped 분리·factory 예외·factory 실행 중 해제·동기 방출 중 해제·fan-out 중 뒤 토큰 해제·error/complete 전파·옛 토큰 evict 방지·해제 멱등을 고정한다.
+  - `delivery-window.test.ts`에 시작 전 거부 창(`open`→`preempt` = 0·1, 이후 무출력) test를 추가한다.
+  - 기존 test 단언 변경 0건이다(`git diff dev -- packages/rx-bridge-electron/test`는 추가 줄만).
+  - `src/main/subscriptions.ts`의 `SharedSource`·`#shared`·`#startShared`·`#observer`·`#detachSource`·`sourceDetached`·`serializeError`·`from "rxjs"`·`sequence: 0`·`sequence: 1` 0건, `withEnvelope(` 1건. `src/main/upstreams.ts`의 `./subscriptions`·`./document-sessions`·`./authorization`·`./delivery-window`·`./diagnostics`·`withEnvelope`·`internalError` 0건.
+  - `git diff dev -- packages/rx-bridge-electron/src/main/create-bridge-server.ts` 빈 출력.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - `CONTEXT.md` "구독"·"Event 전달 방식" 항목, `docs/architecture.md` 구독·Event 전달 방식 서술에 `Upstreams`를 반영하고, 리뷰 03.html 카드 01·03 완료를 표시한다.
+
+  계획: `_works/20260925-13-upstreams/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
