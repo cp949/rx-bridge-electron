@@ -11,7 +11,7 @@ import {
   operationKeyCases,
   type OperationKeyCase,
 } from "../protocol/operation-key-cases.js";
-import { FakeTransport, deferred } from "./fake-transport.js";
+import { FakeTransport, deferred, rpcSuccess } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
@@ -32,19 +32,6 @@ interface InferredBridgeShape {
     readonly event: {
       readonly fault: string;
     };
-  };
-}
-
-function success(
-  requestId: string,
-  result: { readonly connected: boolean } = { connected: true },
-) {
-  return {
-    protocolVersion: 1 as const,
-    clientId: "client-1",
-    type: "success" as const,
-    requestId,
-    result,
   };
 }
 
@@ -171,12 +158,7 @@ describe("renderer handshake and API proxy", () => {
   test.each(operationKeyCases.filter(isTrieCollisionCase))(
     "rejects a colliding manifest with the path trie verdict: $label",
     async (caseEntry) => {
-      const transport = new FakeTransport();
-      transport.handshake = Promise.resolve({
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: caseEntry.manifest,
-      });
+      const transport = new FakeTransport({ manifest: caseEntry.manifest });
 
       await expect(
         createRendererApi<AppBridge>({ transport }),
@@ -247,19 +229,15 @@ describe("renderer handshake and API proxy", () => {
       key: "rpc:hardware/connect",
       input: { deviceId: "demo" },
     });
-    transport.resolveInvocation(0, success(invocation!.requestId));
+    transport.resolveInvocation(0, rpcSuccess(invocation!.requestId));
     await expect(resultPromise).resolves.toEqual({ connected: true });
   });
 
   test("groups manifest entries by category under each domain path", async () => {
-    const transport = new FakeTransport();
-    transport.handshake = Promise.resolve({
-      protocolVersion: 1,
-      clientId: "client-1",
+    const transport = new FakeTransport({
       manifest: {
         rpc: ["rpc:hardware/connect", "rpc:hardware/serial/open"],
         state: ["state:hardware/status"],
-        event: [],
       },
     });
     const api = await createRendererApi<{
@@ -291,14 +269,9 @@ describe("renderer handshake and API proxy", () => {
   });
 
   test("exposes root dispose without listing it and keeps nested dispose operations", async () => {
-    const transport = new FakeTransport();
-    transport.handshake = Promise.resolve({
-      protocolVersion: 1,
-      clientId: "client-1",
+    const transport = new FakeTransport({
       manifest: {
         rpc: ["rpc:hardware/connect", "rpc:hardware/dispose"],
-        state: [],
-        event: [],
       },
     });
     const api = await createRendererApi<{
@@ -313,7 +286,7 @@ describe("renderer handshake and API proxy", () => {
     const invocation = transport.invocations[0];
     expect(invocation).toMatchObject({ key: "rpc:hardware/dispose" });
     transport.resolveInvocation(0, {
-      ...success(invocation!.requestId),
+      ...rpcSuccess(invocation!.requestId),
       result: "disposed",
     });
     await expect(resultPromise).resolves.toBe("disposed");
@@ -342,7 +315,7 @@ describe("renderer handshake and API proxy", () => {
     expect(transport.invocations[0]?.input).toEqual({ deviceId: "demo" });
     transport.resolveInvocation(
       0,
-      success(transport.invocations[0]!.requestId),
+      rpcSuccess(transport.invocations[0]!.requestId),
     );
     await resultPromise;
   });
@@ -436,10 +409,7 @@ describe("Renderer API object tree", () => {
     readonly api: RendererApi<TreeBridge>;
     readonly transport: FakeTransport;
   }> {
-    const transport = new FakeTransport();
-    transport.handshake = Promise.resolve({
-      protocolVersion: 1,
-      clientId: "client-1",
+    const transport = new FakeTransport({
       manifest: {
         rpc: ["rpc:hardware/connect", "rpc:hardware/serial/open"],
         state: ["state:hardware/status"],
