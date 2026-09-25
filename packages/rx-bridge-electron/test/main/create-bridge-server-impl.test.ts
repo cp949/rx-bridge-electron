@@ -168,6 +168,15 @@ describe("createBridgeServer(impl, options): impl 형태 오류는 생성 시점
       /Event source 'device\/data' must be an Observable or source adapter\./,
     );
   });
+
+  test("잘못된 registration과 잘못된 resourceLimits가 함께면 registration 오류가 먼저 난다", () => {
+    expect(() =>
+      createBridgeServer(
+        { device: { rpc: { connect: "not-a-function" } } },
+        { resourceLimits: { maxConcurrentRpc: 0 } },
+      ),
+    ).toThrow(/RPC handler 'device\/connect' must be a function\./);
+  });
 });
 
 describe("createBridgeServer(impl, options): registration이 event source의 buffer·타입을 검증한다(RD-029)", () => {

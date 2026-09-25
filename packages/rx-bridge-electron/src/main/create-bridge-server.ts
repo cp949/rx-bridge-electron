@@ -66,62 +66,73 @@ export interface StreamBridgeServer extends BridgeServer {
   getDiagnosticsSnapshot(): DiagnosticsSnapshot;
 }
 
-interface CommonServerOptions {
+/** `createBridgeServer(impl, options)`의 옵션(RD-011). */
+export interface ImplServerOptions<B> {
   readonly authorize?: Authorize;
   readonly diagnostics?: DiagnosticsSink;
   readonly resourceLimits?: Partial<ResourceLimits>;
-}
-
-/** `createBridgeServer(impl, options)`의 옵션(RD-011). */
-export interface ImplServerOptions<B> extends CommonServerOptions {
   readonly schemas?: SchemasFor<B>;
   readonly errors?: ErrorsFor<B>;
   readonly payloadLimits?: Partial<PayloadLimits>;
+}
+
+/** 옵션 해석을 마친 값만 담는다. `buildBridgeServer`는 이 형태만 받는다. */
+interface ResolvedServerConfig {
+  readonly payloadLimits: PayloadLimits;
+  readonly resourceLimits: ResourceLimits;
+  readonly authorize: Authorize | undefined;
+  readonly diagnostics: DiagnosticsSink | undefined;
 }
 
 export function createBridgeServer<B>(
   impl: BridgeImpl<B>,
   options?: ImplServerOptions<B>,
 ): StreamBridgeServer {
-  const limits = resolvePayloadLimits(options?.payloadLimits);
+  const payloadLimits = resolvePayloadLimits(options?.payloadLimits);
   const table = buildRegistrationTableFromImpl(
     impl,
     options?.schemas,
     options?.errors,
   );
-  return buildBridgeServer(table, limits, options ?? {});
+  const resourceLimits = resolveResourceLimits(options?.resourceLimits);
+  return buildBridgeServer(table, {
+    payloadLimits,
+    resourceLimits,
+    authorize: options?.authorize,
+    diagnostics: options?.diagnostics,
+  });
 }
 
 /**
  * `RegistrationTable`로부터 실제 `StreamBridgeServer`를 만드는 코어.
- * dispatch·session·stream 로직은 테이블을 만드는 방법(impl 트리 순회)과
- * 분리되어 있다.
+ * 옵션 해석(`createBridgeServer`)과 배선(`buildBridgeServer`)을 나눈다.
+ * 배선은 해석을 마친 값만 받는다.
  */
 function buildBridgeServer(
   table: RegistrationTable,
-  limits: PayloadLimits,
-  options: CommonServerOptions,
+  config: ResolvedServerConfig,
 ): StreamBridgeServer {
-  const resourceLimits = resolveResourceLimits(options.resourceLimits);
+  const { payloadLimits: limits, resourceLimits, authorize, diagnostics } =
+    config;
   let disposed = false;
-  const sessions = new DocumentSessions(resourceLimits, options.diagnostics);
+  const sessions = new DocumentSessions(resourceLimits, diagnostics);
   const manifest = manifestFromTable(table);
   const subscriptions = new Subscriptions(
     table,
     limits,
     resourceLimits,
-    options.diagnostics,
-    options.authorize,
+    diagnostics,
+    authorize,
   );
   const rpcRequests = new RpcRequests(
     table,
     limits,
     resourceLimits,
-    options.diagnostics,
-    options.authorize,
+    diagnostics,
+    authorize,
   );
   const reject = (reason: RejectReason): void => {
-    recordDiagnostic(options.diagnostics, { type: "rejected", reason });
+    recordDiagnostic(diagnostics, { type: "rejected", reason });
   };
   return {
     handshake(sender: SenderIdentity, value: unknown) {
