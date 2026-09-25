@@ -70,8 +70,6 @@ function stateRegistration(
 ): StateRegistrationEntry {
   return {
     kind: "state",
-    domainName: "d",
-    operation: "op",
     bridgeOperation: { key, category: "state", domain: ["d"], operation: "op" },
     source,
   };
@@ -83,8 +81,6 @@ function broadcastRegistration(
 ): EventRegistrationEntry {
   return {
     kind: "event",
-    domainName: "d",
-    operation: "op",
     bridgeOperation: { key, category: "event", domain: ["d"], operation: "op" },
     delivery: { mode: "broadcast", source },
     buffer: { capacity: 100, overflow: "error" },
@@ -97,8 +93,6 @@ function scopedRegistration(
 ): EventRegistrationEntry {
   return {
     kind: "event",
-    domainName: "d",
-    operation: "op",
     bridgeOperation: { key, category: "event", domain: ["d"], operation: "op" },
     delivery: { mode: "scoped", factory },
     buffer: { capacity: 100, overflow: "error" },

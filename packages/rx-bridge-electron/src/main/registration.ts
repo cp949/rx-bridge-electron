@@ -126,8 +126,6 @@ function assertNoPathCollision(
  */
 export interface RpcRegistrationEntry {
   readonly kind: "rpc";
-  readonly domainName: string;
-  readonly operation: string;
   readonly bridgeOperation: BridgeOperation;
   readonly handler: RpcHandler;
   readonly input?: Schema<BridgeValue>;
@@ -137,8 +135,6 @@ export interface RpcRegistrationEntry {
 
 export interface StateRegistrationEntry {
   readonly kind: "state";
-  readonly domainName: string;
-  readonly operation: string;
   readonly bridgeOperation: BridgeOperation;
   readonly source: CurrentValueSource<BridgeValue>;
   readonly output?: Schema<BridgeValue>;
@@ -160,8 +156,6 @@ export type EventDelivery =
 
 export interface EventRegistrationEntry {
   readonly kind: "event";
-  readonly domainName: string;
-  readonly operation: string;
   readonly bridgeOperation: BridgeOperation;
   readonly delivery: EventDelivery;
   readonly output?: Schema<BridgeValue>;
@@ -181,35 +175,36 @@ export interface RegistrationTable {
  * 등록 테이블 한 카테고리의 항목들을 도메인명 정렬 → 도메인 내부 operation명
  * 정렬 순서로 나열한다. 테이블은 Map이라 삽입 순서를 보존하지만 여기서는
  * 순서를 다시 정렬해 항상 같은 manifest 형식·값을 보장한다 — 테이블 생성
- * 순서(impl 트리 순회 순서)에 기대지 않는다.
+ * 순서(impl 트리 순회 순서)에 기대지 않는다. 이 정렬은 wire key 정렬과 다르다.
  */
 function manifestCategoryList(
-  category: "rpc" | "state" | "event",
-  entries: ReadonlyMap<
-    string,
-    { readonly domainName: string; readonly operation: string }
-  >,
+  entries: ReadonlyMap<string, { readonly bridgeOperation: BridgeOperation }>,
 ): readonly string[] {
-  const byDomain = new Map<string, string[]>();
+  const byDomain = new Map<string, { operation: string; key: string }[]>();
   for (const entry of entries.values()) {
-    const operations = byDomain.get(entry.domainName);
+    const { domain, operation, key } = entry.bridgeOperation;
+    const domainName = domain.join("/");
+    const operations = byDomain.get(domainName);
     if (operations === undefined)
-      byDomain.set(entry.domainName, [entry.operation]);
-    else operations.push(entry.operation);
+      byDomain.set(domainName, [{ operation, key }]);
+    else operations.push({ operation, key });
   }
   const list: string[] = [];
   for (const domainName of [...byDomain.keys()].sort())
-    for (const operation of byDomain.get(domainName)!.slice().sort())
-      list.push(formatWireKey(category, domainName.split("/"), operation));
+    for (const { key } of byDomain
+      .get(domainName)!
+      .slice()
+      .sort((a, b) => (a.operation < b.operation ? -1 : 1)))
+      list.push(key);
   return list;
 }
 
 /** 등록 테이블로부터 공개 manifest를 만든다. */
 export function manifestFromTable(table: RegistrationTable): HandshakeManifest {
   return Object.freeze({
-    rpc: Object.freeze(manifestCategoryList("rpc", table.rpc)),
-    state: Object.freeze(manifestCategoryList("state", table.state)),
-    event: Object.freeze(manifestCategoryList("event", table.event)),
+    rpc: Object.freeze(manifestCategoryList(table.rpc)),
+    state: Object.freeze(manifestCategoryList(table.state)),
+    event: Object.freeze(manifestCategoryList(table.event)),
   });
 }
 
@@ -389,8 +384,6 @@ function walkImplNode(
         }
         rpcTable.set(key, {
           kind: "rpc",
-          domainName,
-          operation,
           bridgeOperation,
           handler: value as RpcHandler,
           ...(schemaEntry.input === undefined
@@ -416,8 +409,6 @@ function walkImplNode(
           Schema<BridgeValue> | undefined;
         stateTable.set(key, {
           kind: "state",
-          domainName,
-          operation,
           bridgeOperation,
           source: value as CurrentValueSource<BridgeValue>,
           ...(stateOutput === undefined ? {} : { output: stateOutput }),
@@ -463,8 +454,6 @@ function walkImplNode(
           Schema<BridgeValue> | undefined;
         eventTable.set(key, {
           kind: "event",
-          domainName,
-          operation,
           bridgeOperation,
           delivery,
           ...(eventOutput === undefined ? {} : { output: eventOutput }),
