@@ -300,9 +300,9 @@ const scopedDataEvent = scopedEvent(
 `RemoteState<T>`는 읽기 전용 Observable이며 `.snapshot`을 제공합니다.
 
 - `uninitialized`: 값이 없고 활성 원격 구독도 없습니다.
-- `connecting`: 첫 로컬 구독자가 원격 구독을 열었습니다.
+- `connecting`: 첫 로컬 구독자가 원격 구독을 열었습니다. 이전 `stale` 값은 이때 버려지므로, 첫 값 전에 generation이 끝나면 `uninitialized`로 돌아갑니다.
 - `current`: Main의 현재값을 받았습니다. 구독자에게 알리기 전에 snapshot에 반영됩니다.
-- `stale`: 값이 존재한 상태에서 마지막 구독자가 구독을 해제했습니다. 오래된 데이터는 이후 generation의 새 값으로 재생하지 않습니다.
+- `stale`: 값이 존재한 상태에서 generation이 끝났습니다(마지막 구독자 해제, 원격 complete 또는 error). 오래된 데이터는 이후 generation의 새 값으로 재생하지 않습니다.
 
 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 1회 받습니다. `undefined`도 유효한 현재값으로 전달됩니다. 아직 값을 받지 못한 `connecting` 상태(첫 로컬 구독자가 원격 구독을 열었지만 첫 값이 도착하기 전)에서 늦게 구독하면 즉시 아무 값도 받지 않고 첫 값을 기다립니다.
 
