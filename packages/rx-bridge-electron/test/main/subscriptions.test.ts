@@ -1217,6 +1217,56 @@ describe("Main stream lifecycle and ordering", () => {
     events.next(3);
     expect(messages).toHaveLength(2);
   });
+
+  test("detach from the diagnostics sink during a post-shift stream-queue diagnostic discards the flushed value", async () => {
+    const { server, events, diagnostics, messages, send } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const detach = server.attach(new FakeTarget());
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      send,
+    );
+    diagnostics.record.mockImplementation(
+      (event: { type: string; depth?: number }) => {
+        if (event.type === "stream-queue" && event.depth === 0) detach();
+      },
+    );
+    events.next(1);
+    events.next(2);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "error", sequence: 1 },
+    ]);
+    expect(messages.at(-1)).toMatchObject({
+      error: { code: "CANCELLED", message: "Bridge session ended." },
+    });
+    expect(
+      diagnostics.record.mock.calls
+        .slice(-3)
+        .map(([event]) => event as { type: string; depth?: number }),
+    ).toEqual([
+      expect.objectContaining({ type: "stream-queue", depth: 0 }),
+      expect.objectContaining({ type: "session-closed" }),
+      expect.objectContaining({ type: "subscription-closed" }),
+    ]);
+    expect(server.getDiagnosticsSnapshot()).toMatchObject({
+      subscriptions: 0,
+      queuedEvents: 0,
+    });
+  });
 });
 
 describe("Main stream terminal notify on retire", () => {
