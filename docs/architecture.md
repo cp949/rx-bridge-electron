@@ -88,7 +88,7 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 
 ## Payload 및 제한
 
-v1 payload는 `undefined`, `null`, boolean, number, bigint, string, 배열, 일반 객체로 제한한다. 함수, symbol, 순환 참조, 사용자 정의 prototype, accessor/non-enumerable property, symbol key는 거부한다. 기본 한도는 깊이 32, 전체 항목 10,000개, 문자열 및 key UTF-8 길이 1,000,000 byte, 전체 크기 16 MiB(16,777,216 byte, `maxTotalBytes`)다. 서버 옵션 `payloadLimits`를 지정하면 해당 필드만 기본값을 덮어쓴다(병합).
+v1 payload는 `undefined`, `null`, boolean, number, bigint, string, 배열, 일반 객체로 제한한다. 함수, symbol, 순환 참조, 사용자 정의 prototype, accessor/non-enumerable property, symbol key는 거부한다. 기본 한도는 깊이 32, 전체 항목 10,000개, 문자열 및 key UTF-8 길이 1,000,000 byte, 전체 크기 16 MiB(16,777,216 byte, `maxTotalBytes`)다. 서버 옵션 `payloadLimits`를 지정하면 해당 필드만 기본값을 덮어쓴다(병합). 명시적 `undefined`는 생략과 달리 거부한다(생성 시점 `TypeError`) — 전체 크기를 사실상 풀려면 `Number.MAX_SAFE_INTEGER`를 쓴다. 기본값은 `/main`의 `DEFAULT_PAYLOAD_LIMITS`(동결)이고, 해석은 `src/main/payload-limits.ts`의 `resolvePayloadLimits`가 한다(`resource-limits.ts`와 같은 모양).
 
 전체 크기는 순회 중 근사 byte를 누적해 계산한다: 노드마다(원시값·배열·객체·`null`·`undefined` 모두) 8 byte, 문자열은 추가로 UTF-8 byte 길이, object key는 UTF-8 byte 길이(배열 `length`는 제외하지만 배열 원소의 index 문자열 키는 포함), bigint는 추가로 `ceil(abs(value).toString(16).length / 2)` byte. 실제 V8 structured clone 크기와는 다를 수 있는 근사값이다. 누적값이 `maxTotalBytes`를 넘으면 다른 payload 규칙과 같은 실패 분류를 따른다: RPC 입력은 `INVALID_ARGUMENT`, RPC 출력·stream 값·도메인 에러 `details`는 `INTERNAL`.
 

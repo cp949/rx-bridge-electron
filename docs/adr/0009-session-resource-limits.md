@@ -11,6 +11,9 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 3. **오류 코드**: 개수·동시성 초과(`maxConcurrentRpc`, `maxSubscriptions`)는 새 코드 `RESOURCE_EXHAUSTED`. 입력 크기 초과는 기존 `INVALID_ARGUMENT`, 출력(RPC 결과·stream 값·도메인 에러 details) 크기 초과는 기존 `INTERNAL`(ADR 0004의 출력 검증 실패 분류를 따른다).
 4. **timeout 상한**: Main 서버 옵션 `maxRpcDurationMs`. 만료 시 handler에 넘긴 `AbortSignal`을 abort하고 `DEADLINE_EXCEEDED`로 즉시 응답한다. 와이어 프로토콜과 Renderer `timeoutMs`(`rpc-client.ts`의 로컬 timeout)는 바꾸지 않는다 — 둘은 독립적으로 동작하며 먼저 확정되는 쪽이 이긴다.
 5. **전체 크기**: `PayloadLimits.maxTotalBytes`(선택 필드). `parseBridgeValue` 순회 중 근사 byte를 누적해 초과 시 즉시 실패시킨다.
+
+   _(개정: RD-038 — 서버 옵션 `payloadLimits`에서 `maxTotalBytes`에 명시적 `undefined`를 넣으면 다른 세 필드와 같이 생성 시점에 `TypeError`다. 이전에는 통과해 기본값 16 MiB를 지우고 전체 크기 검사를 껐다. 필드의 선택성은 `PayloadLimits` 타입에 남는다 — 서버가 해석한 한도(`resolvePayloadLimits`, `packages/rx-bridge-electron/src/main/payload-limits.ts`)는 네 필드가 항상 있고, 선택성은 envelope parse 단계(`ENVELOPE_LIMITS`)가 전체 크기 무제한을 표현하는 데만 쓰인다. 무제한이 필요하면 `Number.MAX_SAFE_INTEGER`를 쓴다.)_
+
 6. **사용 완료 stream ID**: 세션별 워터마크(마지막으로 수락한 subscriptionId sequence). `subscriptionId`에서 sequence를 파싱해 워터마크보다 큰 것만 받는다. `DocumentSessions.usedStreamIds`와 `StreamHub`의 `#used`/`#usedBySession`/`#reserve`를 대체한다.
 7. **retired clientId**: `destroyed` 수명 사건에 해당 `webContentsId` 기록 전체를 삭제한다. 살아 있는 `webContents`에서는 최근 `maxRetiredClientsPerWebContents`개만 보관한다(초과 시 가장 오래된 항목부터 제거). ADR 0006의 "retire된 client ID 기록은 서버 dispose 후에도 지우지 않는다" 문구를 이 규칙으로 갱신한다.
 8. **범위**: 세션별 한도만 둔다. 서버 전역(모든 세션 합계) 상한은 두지 않는다.
