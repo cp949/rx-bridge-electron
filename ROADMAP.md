@@ -395,6 +395,30 @@
 
   계획: `_works/20260925-17-dropped-queue-tail/`. **결과:** 완료 조건 전부 충족, 편차 없음(TRP-001·TRP-004 미사용). DELTA-01(`DeliveryWindow.accept()`에서 `onDropped` 호출 직후 `#closed`·`#concluded` 재확인 guard 추가 — RED 먼저 확인: 수정 전 `npx vitest run test/main/subscriptions.test.ts test/main/delivery-window.test.ts` 2 files/93 tests 중 6 failed(seam 기존 1 + seam 신규 retire 2 case + seam 신규 unsubscribe 1 + 창 기존 1 + 창 신규 1), wire 단언은 4곳 모두 수정 전 GREEN(진단 꼬리만 RED) → guard 추가 후 GREEN 전환, doc 주석(`:226-232`) 갱신 — 40 files/790 tests) → DELTA-02(ADR 0010 결정 13에 `_(개정: RD-040 — …)_` 주석, `docs/architecture.md` "운영 진단" 절 1문장 추가, `.scratch` 이슈 `Status: closed (RD-040)`) → DELTA-03(전체 검증, ROADMAP 완료 표시) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 40 files/790 tests 통과(기준 786+신규 4), 1회 통과. 루트 `pnpm lint`·`pnpm format:check` 통과. demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: `delivery-window.ts`의 `현재 진단 순서 보존` 0건. `git diff dev --stat -- src`는 `delivery-window.ts`(+9/-4) 1파일뿐. `git diff dev -- test`의 삭제 줄(파일 헤더 제외) 4줄 전부 계획한 두 test(`delivery-window.test.ts` 제목·events 단언, `subscriptions.test.ts`의 `.slice(-4)`→`.slice(-3)`·`stream-queue` expect)에 속한다. `subscriptions.test.ts:1226`·`:1371`의 재진입 test는 라인만 `:1337`·`:1482`로 이동, 내용 무변경. **발견:** 계획과의 차이 없음.
 
+### 세션 slot 회계 단일 소유 (출처: 아키텍처 리뷰 `_works/arch-review/04.html` 후보 01)
+
+- [ ] **RD-041 — 세션 소유 자원 1건의 slot 회계와 retire 연동을 `RpcRequests`·`Subscriptions` 안 내부 module `SessionSlots`로 모은다.** 동작을 보존하는 refactor이며 버그 수정이 아니다. 2026-09-25 확인 기준(`dev` @ `f981884`): `RpcRequests`는 세션별 `running` 카운터와 전역 `#inFlight`를 따로 증감한다(`src/main/rpc-requests.ts:98-104`, `:235-247`). `Subscriptions`는 `pending.size + consumers.size`로 한도를 판정하고 `#liveStates` 순회로 집계한다(`src/main/subscriptions.ts:171-176`, `:243-245`). retire handle 규약(no-op 초기값 `releaseRetire`, 등록 직후 identity 재확인, `window.closed` 뒤 해제)은 등록 3곳(RPC entry, 구독 pending, 구독 consumer)이 각자 지킨다. 리뷰 02 slot 누수와 ADR 0023 리뷰 수정(닫힌 consumer에 남은 listener의 stray `CANCELLED`)이 이 틈에서 나왔다. **구조:**
+  - 신규 `src/main/session-slots.ts`의 `SessionSlots`(세션당 한도를 받는 class)와 `SlotLease`. `acquire(session)`은 한도를 넘으면 `undefined`다. `count()`는 release 전 lease 수이며 retire된 세션도 센다(ADR 0010 §10). lease는 `onRetire(listener)`·`offRetire()`·`release()`·`released`를 가진다. 이미 retire된 세션이면 `onRetire`가 즉시 동기 호출한다(ADR 0023 결정 2 유지). release된 lease의 `onRetire`는 no-op이다. 이중 등록은 throw한다. `offRetire()`는 slot을 유지하고 listener만 뗀다.
+  - 인스턴스는 2개다. `RpcRequests`가 `maxConcurrentRpc`용, `Subscriptions`가 `maxSubscriptions`용을 각자 생성자 안에서 만든다. 생성자 시그니처와 `create-bridge-server.ts` 배선은 바꾸지 않는다.
+  - RPC: `#cancelActive`는 `offRetire()`(slot 유지, ADR 0009 §10), `finally`는 `release()`. `running`·`#inFlight`·`#tryAcquire`·`#release`·`releaseRetire`를 삭제한다. id map과 중복 `requestId` 선취소는 남는다.
+  - 구독: 1건 = lease 1개(pending 등록부터 consumer close까지). pending → consumer 이음에서 listener만 교체한다. 한도 판정식·`releaseRetire`·`#start`의 `window.closed` 뒤 해제를 삭제한다. watermark·id map·`#liveStates`·`#pruneIfEmpty`는 `queuedEvents`·`dispose` 순회용으로 남는다.
+  - `SessionSlots`는 `type DocumentSession`만 import한다. 진단 sink·wire를 모른다. 한도 초과 진단과 응답은 호출자에 남는다(리뷰 04 후보 03 범위).
+  - 관측 가능한 동작을 모두 보존한다: wire 메시지 순서·sequence·코드·문구, 진단 종류·순서, snapshot 값(동기 sink 안에서 읽은 값 포함), slot 반환 시점, retire listener 등록·호출 순서.
+  - test 표면: RD-015 그릴링 결정 5의 예외로 `test/main/session-slots.test.ts`에서 직접 test한다(RD-034·RD-036과 같은 근거).
+
+  **진행 순서:** 리뷰 04 후보 02(registration leaf reader, 재현된 설정 결함)를 먼저 한다. 가치 순서이며 기술 의존은 없다(파일 겹침 없음).
+
+  **범위 밖:** 리뷰 04 후보 02~06. `#liveStates`·watermark·id map 제거. `create-bridge-server.ts`·`document-sessions.ts`·공개 API·wire·오류 코드·문구·진단 종류.
+
+  **완료 기준:**
+  - refactor 전에 server seam characterization test 5건(C1 중복 `requestId` 뒤 앞 slot 유지, C2 pending+active 혼합 한도와 pending → consumer 전환 뒤 slot 유지, C3 pending이 있는 `server.dispose()` 뒤 `subscriptions`·`queuedEvents` 0, C4 detach 시 pending slot 즉시 반환, C5 session-opened sink retire RPC 뒤 `rpcInFlight` 0)을 추가하고 수정 전 코드에서 GREEN을 확인한다.
+  - `session-slots.test.ts`가 lease 규칙(한도·격리·retire 뒤 집계·release 멱등·즉시 호출·release 뒤 무시·이중 등록 throw·`offRetire`·listener 안 재진입·등록 순서)을 고정한다.
+  - 기존 test 단언 변경은 0건이다. `git diff dev -- create-bridge-server.ts document-sessions.ts` 빈 출력이다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - 새 ADR은 쓰지 않는다. ADR 0010 §10·0015·0023 "범위 밖"에 개정 note를 달고, `CONTEXT.md` "구독"·"RPC 요청"과 `docs/architecture.md` slot 서술에 1문장씩 반영하고, 리뷰 04.html 카드 01 완료를 표시한다.
+
+  계획: `_works/20260925-18-session-slots/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
