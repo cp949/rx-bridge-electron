@@ -1,5 +1,6 @@
 import type { BridgeTransport } from "../../src/renderer/index.js";
 import type {
+  HandshakeManifest,
   HandshakeResponse,
   RendererRpcRequest,
   RendererStreamCommand,
@@ -30,28 +31,18 @@ export function deferred<T>(): Deferred<T> {
   return { promise, resolve, reject };
 }
 
-const defaultHandshake: HandshakeResponse = {
-  protocolVersion: 1,
-  clientId: "client-1",
-  manifest: {
-    rpc: ["rpc:hardware/connect"],
-    state: [],
-    event: [],
-  },
+const defaultManifest: Partial<HandshakeManifest> = {
+  rpc: ["rpc:hardware/connect"],
 };
 
 /** 생성자에 넘겨 handshake manifest를 지정하는 옵션. 지정하지 않은 종류는 빈 배열이다. */
 export interface FakeTransportOptions {
-  readonly manifest?: {
-    readonly rpc?: readonly string[];
-    readonly state?: readonly string[];
-    readonly event?: readonly string[];
-  };
+  readonly manifest?: Partial<HandshakeManifest>;
 }
 
 export class FakeTransport implements BridgeTransport {
   public connectCalls = 0;
-  public handshake: Promise<unknown> = Promise.resolve(defaultHandshake);
+  public handshake: Promise<unknown>;
   public readonly invocations: RendererRpcRequest[] = [];
   public readonly invocationResults: Deferred<RpcResponse>[] = [];
   public readonly cancellations: string[] = [];
@@ -61,18 +52,17 @@ export class FakeTransport implements BridgeTransport {
   public controlHook?: (command: RendererStreamCommand) => void;
 
   public constructor(options?: FakeTransportOptions) {
-    const manifest = options?.manifest;
-    if (manifest !== undefined) {
-      this.handshake = Promise.resolve({
-        protocolVersion: 1,
-        clientId: "client-1",
-        manifest: {
-          rpc: manifest.rpc ?? [],
-          state: manifest.state ?? [],
-          event: manifest.event ?? [],
-        },
-      });
-    }
+    const manifest = options?.manifest ?? defaultManifest;
+    const response: HandshakeResponse = {
+      protocolVersion: 1,
+      clientId: "client-1",
+      manifest: {
+        rpc: manifest.rpc ?? [],
+        state: manifest.state ?? [],
+        event: manifest.event ?? [],
+      },
+    };
+    this.handshake = Promise.resolve(response);
   }
 
   public connect(): Promise<never> {
