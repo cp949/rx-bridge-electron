@@ -236,10 +236,11 @@
   - `stream-dropped`·`stream-queue` 진단은 창 생성 시 주입한 callback(`onDropped`·`onQueueDepth`)을 발생 지점에서 동기 호출한다. 창은 callback 뒤마다 자기 상태를 다시 확인한다. 효과 목록 반환형은 sink 재진입 시 선점 `error` sequence를 바꾸므로 쓰지 않는다.
   - 선점 종료는 `preempt(error)`다. 쌓인 값·기록된 terminal을 버리고 다음 sequence로 `error`를 반환한다. `onSessionAbort`는 반환 메시지를 보내고 `#close`만 한다.
   - `Subscriptions`에 남는 것: admission·`authorize` 대기, fan-out(kind 분기 `#start` 시작 경로 선택·늦게 합류한 State의 `getValue()` 2곳 유지), `parseOutput`·`validation-failed`, envelope 조립·`send`·send 예외 시 close, 수명 정리(listener 해제·slot·`subscription-closed`·controller·source 분리). `#endUnstarted`의 `subscribed`(0)+`error`(1)는 창 생성 전 경로라 그대로 둔다.
-  - 동작 변경 없음: wire 메시지 순서, sequence 번호, 진단 종류·순서, `getDiagnosticsSnapshot()` 값을 보존한다. 생성자 시그니처·`create-bridge-server.ts` 배선을 바꾸지 않는다. 새 ADR·ADR 개정 note는 만들지 않는다.
+  - **동작 변경(이것만):** 진단 sink가 `#flush`의 shift 뒤 `stream-queue` 진단을 받는 중 동기로 detach·dispose하면, 지금은 선점 `error`(1) 뒤에 `batch`(2)를 보낸다(`#flush`가 진단 뒤 `closed`를 다시 확인하지 않는다, ADR 0020 결정 3 위반). 현재 구조에서 test-first로 먼저 고쳐 `subscribed`(0)·`error`(1)로 끝나게 한다.
+  - 그 외 wire 메시지 순서, sequence 번호, 진단 종류·순서, `getDiagnosticsSnapshot()` 값을 보존한다. `stream-dropped` 도중 retire 시 `subscription-closed` 뒤에 `stream-queue`가 1건 더 기록되는 현재 순서도 보존한다. 생성자 시그니처·`create-bridge-server.ts` 배선을 바꾸지 않는다. 새 ADR·ADR 개정 note는 만들지 않는다.
   - test 표면: RD-015 그릴링 결정 5("구독 모듈 직접 test 없음")의 예외로, `BoundedQueue`와 같은 등급의 순수 module인 `DeliveryWindow`만 `test/main/delivery-window.test.ts`에서 직접 test한다. `Subscriptions`는 계속 `createBridgeServer` seam으로만 test한다.
 
-  **범위 밖(보류):** 리뷰 02 카드 07·08. fan-out 쪽 kind 분기 2곳. 동작 변경이 필요한 결함이 나오면 이 RD에 섞지 않고 별도 RD로 등록한다.
+  **범위 밖(보류):** 리뷰 02 카드 07·08. fan-out 쪽 kind 분기 2곳. close 뒤 `stream-queue` 꼬리 제거. 위 1건 외에 동작 변경이 필요한 결함이 나오면 이 RD에 섞지 않고 별도 RD로 등록한다.
 
   **완료 기준:**
   - refactor 전에 `createBridgeServer` seam characterization test 4건을 추가하고 GREEN을 확인한다. 대상:
@@ -250,6 +251,7 @@
 
     이 test들은 refactor 뒤에도 GREEN이다.
 
+  - 위 동작 변경은 RED test 1건(shift 뒤 `stream-queue` 도중 detach → wire `subscribed`·`error`만)을 수정 전 코드에서 확인한 뒤 고친다.
   - `delivery-window.test.ts`가 창 불변식을 표 형식으로 고정한다: ack 게이트, State 최신값 교체, Event overflow 3정책, 대기 값 drain 뒤 terminal, `preempt`의 대기 값·기록된 terminal 폐기, `close` 뒤 무출력, 진단 callback 안 `preempt`·`close` 재진입.
   - 기존 test 단언 변경 0건이다.
   - `src/main/subscriptions.ts`의 `consumer.sequence`·`inFlight`·`pendingState`·`hasPendingState`·`pendingEvents`·`closed: ` 0건. `src/main/delivery-window.ts`의 `rxjs`·`./subscriptions`·`./document-sessions` import 0건, `kind ===` 0건.
