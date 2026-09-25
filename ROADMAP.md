@@ -428,6 +428,27 @@
 
   계획: `_works/20260925-19-stream-test-driver/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(드라이버 `test/main/renderer-document.ts`와 직접 test 10개, mutation 3종 RED 확인. 이관 전 코드에서 test별 server 호출 기록을 떴다 — 임시 vitest setup이 `createBridgeServer`를 감싸 (method, sender, value)를 기록, 커밋하지 않음) → DELTA-02~05(파일별 이관 커밋 + 제목·주석 커밋 분리) → DELTA-06(검증·문서) 순으로 진행. 파일별 수치(test 수 전후 동일, `expect(` 개수 동일, 호출 기록 diff): `subscription-watermark` 7/7·11/11·diff 0, 271→130줄; `subscription-limits` 18/18·51/51·diff 0, 802→394줄; `diagnostics-lifecycle` 23/23·49/49·diff 0, 522→429줄; `subscriptions` 69/69·186/186·diff 0, 2,142→1,477줄(합계 3,737→2,430줄). 단언은 값 변경 0건이고 대상 변수만 handle의 `frames`·`types()`로 바뀌었다. 파일마다 단언 3~7개를 틀리게 바꿔 RED를 확인했다. 드라이버를 거치지 않는 raw 호출: 형식 오류 id 2건, `subscription-opened` 진단 안의 unsubscribe 1건(handle 반환 전 동기 진단), handshake·dispatchRpc 전부. 한글 없는 제목은 0건이다(`subscriptions` 65건·`diagnostics-lifecycle` 2건 번역). 검증: 패키지 `xvfb-run -a pnpm verify` 43 files/826 tests(기준 816 + 드라이버 10) 통과, 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types` 통과, `git diff dev -- packages/rx-bridge-electron/src` 빈 출력. **발견:** 계획 시점의 "영어 제목 79건"은 첫 글자가 영문자인 제목을 센 값이었다(`maxSubscriptions`·`authorize`로 시작하는 한글 제목 포함). 한글이 없는 제목 기준으로 다시 세면 watermark 0, limits 0, lifecycle 1, subscriptions 60(+describe 5)이다. architecture·ADR에는 Main test seam 서술이 없어 문서 변경은 없다.
 
+### RemoteState 프레임워크 연동 adapter (출처: 2026-09-25 그릴링 "실제 사용처를 위한 편의 함수 제공 검토")
+
+- [ ] **RD-043 — `/renderer`에 `RemoteState`를 외부 store 계약으로 옮기는 프레임워크 중립 adapter `snapshotStore`를 추가하고, React는 README 레시피로 안내한다.** 공개 export 추가이며 기존 호출 형태는 바뀌지 않는다(이전 작업 불필요). 2026-09-25 확인 기준(`dev` @ `50fb265`): React 사용처는 `apps/demo/src/renderer/use-remote-state.ts`(26줄, 사용 6곳: `App.tsx` 5·`RelayPanel.tsx` 1)를 직접 작성해야 하고, 패키지·README는 "Observable + `.snapshot`"만 안내한다. 직접 작성할 때 틀리기 쉬운 지점은 셋이다: (1) `error`·`complete`도 변경 알림으로 받지 않으면 `stale` 전이가 렌더되지 않고 rxjs가 미처리 error를 보고한다. (2) subscribe 함수 참조가 렌더마다 바뀌면 재구독으로 generation이 새로 열린다. (3) 원격 종료 뒤에는 재구독하지 않는다. `snapshot`은 `LocalGeneration#snapshot` 필드를 그대로 돌려주므로(`src/renderer/local-generation.ts:49`) 변경이 없으면 같은 참조다. **구조:**
+  - `snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T>`. 반환 모양은 `{ subscribe(onChange: () => void): () => void; getSnapshot(): RemoteStateSnapshot<T> }`이다. `subscribe`는 `state`를 구독해 `next`·`error`·`complete`마다 `onChange`를 부르고, error는 알림으로만 쓰고 삼킨다. 반환 함수는 그 구독을 해제한다.
+  - `WeakMap` 캐시로 같은 `state` 객체에는 같은 store(같은 `subscribe`·`getSnapshot` 참조)를 돌려준다. React는 `useCallback` 없이 `useSyncExternalStore(s.subscribe, s.getSnapshot)`로 쓴다.
+  - 입력은 공개 인터페이스 `RemoteState<T>`다(`RemoteStateClient`에 묶지 않는다 — 사용자 fake도 받는다). `RemoteState`·`RemoteStateSnapshot` 타입은 바꾸지 않는다.
+  - 원격 complete/error 뒤 재구독하지 않는다(`stale`/`uninitialized`에서 멈춤). 종료 원인(`RemoteError`)은 노출하지 않는다 — 필요하면 Observable을 직접 구독한다.
+  - React 의존성·`/react` subpath·별도 패키지는 만들지 않는다. "현재 범위 밖의 확장"의 "React 전용 패키지" 제외를 유지하고, 중립 adapter와 레시피는 그 제외에 해당하지 않는다고 새 ADR 0024에 기록한다.
+  - demo `use-remote-state.ts`는 유지하되 `snapshotStore` 위에서 다시 쓰고, `useSyncExternalStore`의 세 번째 인자(getServerSnapshot)를 뺀다(Electron renderer에 SSR 없음). README 레시피와 같은 코드다.
+
+  **범위 밖:** Event·RPC 편의 기능, TanStack Query 연동 예제 문서화(후속 이슈 `.scratch/renderer-framework-integration/issues/`에 등록 — TanStack은 demo 의존성에 넣지 않고 문서 예제로만 둔다). 자동 재구독·`retry()`. `RemoteStateSnapshot`에 error 추가. Svelte·Vue 레시피. `src/renderer/local-generation.ts` 동작 변경.
+
+  **완료 기준:**
+  - `test/renderer/`의 `snapshotStore` 단위 test가 다음을 검증한다: `next`·`error`·`complete`마다 `onChange` 호출, 같은 state에 같은 store·함수 참조, error가 rxjs 미처리 오류로 보고되지 않음, 반환 함수 호출 시 구독 해제(generation 종료), `getSnapshot`이 `state.snapshot`과 같은 참조. RED 먼저 확인한다.
+  - `test/renderer/create-renderer-api.test.ts`의 공개 런타임 export 봉인 test는 목록에 `snapshotStore`를 더하는 것만 바뀐다(의도한 단언 변경 1건).
+  - demo `use-remote-state.ts`가 `snapshotStore` 기반으로 줄고, 기존 demo test 2건(rerender 뒤 upstream 구독 1회, current → stale 렌더)이 단언 변경 없이 통과한다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - 새 ADR 0024(중립 adapter 결정, 재구독·error 비노출, React 전용 제외 해석), README "프레임워크 연동" 절(`RemoteState` 설명 뒤, React 레시피 1개와 종료 후 멈춤·원인 확인 방법, 다른 프레임워크는 adapter 모양만 한 줄), `docs/architecture.md` 패키지 경계 표의 `/renderer` 행과 "RPC와 스트림 계약" State 항목 1문장, 후속 `.scratch` 이슈를 반영한다.
+
+  계획: `_works/20260925-20-remote-state-store/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
