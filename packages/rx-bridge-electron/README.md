@@ -15,17 +15,15 @@
 
 `rxjs`와 `electron`은 peer dependency입니다. Electron 런타임은 애플리케이션이 소유하며, 대상 Electron 버전에 맞게 preload를 번들링하고 준비해야 합니다.
 
-## 설치 / Installation
+## 설치
 
 ```sh
 npm install @cp949/rx-bridge-electron rxjs electron
 ```
 
-GitHub repository: <https://github.com/cp949/rx-bridge-electron>
+저장소: <https://github.com/cp949/rx-bridge-electron>
 
-Install the package and its peer dependencies with npm. The source repository is <https://github.com/cp949/rx-bridge-electron>.
-
-## Hello world (RPC 1개, State 1개)
+## 시작하기 (RPC 1개, State 1개)
 
 계약은 rpc·state·event 카테고리를 갖는 도메인들의 중첩 객체 타입입니다. 스키마도 zod도 필요 없습니다.
 
@@ -112,7 +110,7 @@ api.device.state.connection.subscribe({
 
 `bindElectronBridge({ ipcMain?, server, namespace?, allowedOrigins })`로 서버를 연결하고, 허용한 각 최상위 창에 `attach(webContents, role?)`을 호출합니다. `ipcMain`·`namespace`·`role`은 생략 가능하며 기본값은 아래 표를 참고하세요. `allowedOrigins`는 origin 검증이라는 보안 경계 자체이므로 생략할 수 없습니다. Main을 종료하기 전에 `bridge.dispose()`로 연결을 해제해야 합니다. `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색 및 창 생성 제한, 명시적 신뢰 origin 허용 목록을 사용하세요. `dispose()` 뒤 서버와 bind는 다시 쓸 수 없습니다 — 되돌릴 수 없는 종료이므로, 다시 연결하려면 새 `createBridgeServer`와 `bindElectronBridge`를 만드세요.
 
-`api.dispose()`(`api[Symbol.dispose]`와 같은 함수)는 진행 중 RPC를 취소하고 활성 구독을 정리하는 명시적 teardown입니다. hello-world처럼 창이 떠 있는 동안에는 호출할 필요가 없습니다 — 창을 닫거나 reload하면 Main이 이미 그 문서 세션을 회수합니다. `dispose()`는 브리지가 살아있는 동안 Renderer 스스로 정리를 끝내고 싶을 때(SPA 라우팅으로 화면을 벗어나며 그 화면의 구독을 끊는 경우 등) 쓰는 용도입니다. 근거는 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.
+`api.dispose()`(`api[Symbol.dispose]`와 같은 함수)는 진행 중 RPC를 취소하고 활성 구독을 정리하는 명시적 teardown입니다. 시작하기 예제처럼 창이 떠 있는 동안에는 호출할 필요가 없습니다 — 창을 닫거나 reload하면 Main이 이미 그 문서 세션을 회수합니다. `dispose()`는 브리지가 살아있는 동안 Renderer 스스로 정리를 끝내고 싶을 때(SPA 라우팅으로 화면을 벗어나며 그 화면의 구독을 끊는 경우 등) 쓰는 용도입니다. 근거는 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.
 
 ### 배선 기본값
 
@@ -128,7 +126,7 @@ api.device.state.connection.subscribe({
 
 ### 명시 형태
 
-기본값을 그대로 쓰면 위 hello-world로 충분합니다. 아래는 명시적으로 지정해야 하는 경우입니다.
+기본값을 그대로 쓰면 위 "시작하기" 예제로 충분합니다. 아래는 명시적으로 지정해야 하는 경우입니다.
 
 **여러 namespace(다중 브리지)** — 서로 다른 도메인을 별도 채널로 격리하려면 `namespace`를 각각 지정합니다. 한 브리지 안에서 창마다 다른 `role`로 인가를 나누는 것(예: 데모의 `main`/`monitor`)과는 다른 상황입니다 — namespace는 채널 자체를 분리합니다.
 
@@ -207,7 +205,7 @@ const api = await createRendererApi<AppBridge>({ transport: fakeTransport });
 
 ## 스키마 점진 도입
 
-도메인 스키마는 선택이며 operation 단위로 부분·점진 도입합니다. 위 hello world는 스키마 없이 동작합니다 — 구조·크기 검사(`parseBridgeValue`)는 스키마 유무와 무관하게 항상 적용됩니다(아래 "검증, 한도, 범위 밖 기능" 참고).
+도메인 스키마는 선택이며 operation 단위로 부분·점진 도입합니다. 위 "시작하기" 예제는 스키마 없이 동작합니다 — 구조·크기 검사(`parseBridgeValue`)는 스키마 유무와 무관하게 항상 적용됩니다(아래 "검증, 한도, 범위 밖 기능" 참고).
 
 검증하고 싶은 operation만 `options.schemas`에 채웁니다. 타입은 `SchemasFor<AppBridge>`에서 도출되어 경로 오타와 스키마 출력 타입 불일치를 컴파일 에러로 잡습니다. 스키마는 `Schema<T>`(`parse(value: unknown): T`) 구조면 되고 zod에 의존하지 않습니다.
 
@@ -488,7 +486,7 @@ export function useSaveNote() {
 - **재시도 간격.** Renderer의 `timeoutMs` 만료는 Main slot을 즉시 비우지 않습니다 — slot은 handler가 끝날 때 반환됩니다([ADR 0015](../../docs/adr/0015-rpc-request-lifecycle.md)). `AbortSignal`을 무시하는 handler 뒤로 곧바로 재시도하면 `DEADLINE_EXCEEDED`가 `RESOURCE_EXHAUSTED`로 바뀔 수 있으므로 `retryDelay`를 0으로 두지 않습니다(기본값은 지수 backoff).
 - **mutation.** TanStack의 mutation 기본값은 재시도 0회이며 `mutationFn`에 `signal`을 주지 않습니다. 재시도를 켜지 않습니다 — `DEADLINE_EXCEEDED`는 handler가 부작용을 이미 냈는지 알려주지 않습니다. 취소가 필요하면 직접 만든 `AbortController`의 `signal`을 `CallOptions`로 넘깁니다.
 
-검증 범위: 위 예제는 `@tanstack/react-query` 5.103.2로 타입 검사했고, `@tanstack/query-core` 5.103.2의 `QueryClient`와 `createLoopbackTransport`(아래 "Testing")로 실제 server에 대해 성공·취소·코드별 재시도 횟수를 1회 실행해 확인했습니다. 이 저장소의 test와 CI에는 포함되지 않으므로 TanStack Query 버전이 바뀌면 다시 확인해야 합니다.
+검증 범위: 위 예제는 `@tanstack/react-query` 5.103.2로 타입 검사했고, `@tanstack/query-core` 5.103.2의 `QueryClient`와 `createLoopbackTransport`(아래 "테스트")로 실제 server에 대해 성공·취소·코드별 재시도 횟수를 1회 실행해 확인했습니다. 이 저장소의 test와 CI에는 포함되지 않으므로 TanStack Query 버전이 바뀌면 다시 확인해야 합니다.
 
 ### Renderer 진단
 
@@ -547,7 +545,7 @@ const { sessions, rpcInFlight, subscriptions, queuedEvents } =
 
 대용량 바이너리 전송과 지속적인 고속 스트림은 현재 범위에 포함되지 않습니다. 향후 이 기능이 필요하면 이 API에서 원시 IPC를 노출하지 말고 별도의 MessagePort 어댑터 뒤에 구현합니다. 이벤트 종류 전체와 각 `RejectReason`의 판정 지점은 [ADR 0010](../../docs/adr/0010-operational-diagnostics.md)에 있습니다.
 
-## Testing
+## 테스트
 
 라이브러리 사용자의 test에서 preload/IPC 대신 실제 `server` + 실제 `createRendererApi`를 함께 쓰고 싶다면 `@cp949/rx-bridge-electron/testing`의 `createLoopbackTransport`를 씁니다. wire 형식(envelope·opaque ID·manifest)을 손으로 만들 필요가 없습니다 — 실제 server를 거치므로 wire 형식이 바뀌어도 이 방식으로 작성한 test는 바뀌지 않습니다.
 
