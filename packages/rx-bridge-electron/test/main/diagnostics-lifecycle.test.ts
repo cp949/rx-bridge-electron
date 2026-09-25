@@ -11,14 +11,9 @@ import type {
   DiagnosticsSnapshot,
   StreamBridgeServer,
 } from "../../src/main/index.js";
-import type {
-  BridgeValue,
-  StreamMessage,
-  WireRpcRequest,
-  WireStreamCommand,
-} from "../../src/protocol/index.js";
+import type { BridgeValue, WireRpcRequest } from "../../src/protocol/index.js";
 import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
-import { testSubscriptionId } from "./subscription-ids.js";
+import { rendererDocument } from "./renderer-document.js";
 
 type HardwareBridge = {
   hardware: {
@@ -36,27 +31,6 @@ const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   input: undefined,
   ...overrides,
 });
-
-function subscribeCommand(
-  subscriptionId: string,
-  key: string,
-  clientId = "document-1",
-): Extract<WireStreamCommand, { type: "subscribe" }> {
-  return {
-    protocolVersion: 1,
-    clientId,
-    type: "subscribe",
-    subscriptionId,
-    key,
-  };
-}
-
-function unsubscribeCommand(
-  subscriptionId: string,
-  clientId = "document-1",
-): Extract<WireStreamCommand, { type: "unsubscribe" }> {
-  return { protocolVersion: 1, clientId, type: "unsubscribe", subscriptionId };
-}
 
 function harness(
   options: {
@@ -194,10 +168,8 @@ describe("구독 수명주기 진단", () => {
   test("subscribe는 subscription-opened 1을 남긴다", async () => {
     const { server, records } = harness();
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "state:hardware/current$",
     );
     expect(opened(records, "subscription-opened")).toBe(1);
     expect(opened(records, "subscription-closed")).toBe(0);
@@ -206,39 +178,20 @@ describe("구독 수명주기 진단", () => {
   test("unsubscribe는 subscription-closed 1을 남긴다", async () => {
     const { server, records } = harness();
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
-    );
-    await server.controlStream(
-      sender(),
-      unsubscribeCommand(testSubscriptionId(1)),
-      () => {},
-    );
+    const sub = await rendererDocument(server, {
+      clientId: "document-1",
+    }).subscribe("state:hardware/current$");
+    await sub.unsubscribe();
     expect(opened(records, "subscription-closed")).toBe(1);
   });
 
   test("source complete는 subscription-closed 1을 남긴다", async () => {
     const { server, currentSource, records } = harness();
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      (message) => messages.push(message),
-    );
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "document-1",
-        type: "acknowledge",
-        subscriptionId: testSubscriptionId(1),
-        sequence: 1,
-      },
-      (message) => messages.push(message),
-    );
+    const sub = await rendererDocument(server, {
+      clientId: "document-1",
+    }).subscribe("state:hardware/current$");
+    await sub.ack(1);
     currentSource.complete();
     expect(opened(records, "subscription-closed")).toBe(1);
   });
@@ -246,10 +199,8 @@ describe("구독 수명주기 진단", () => {
   test("source error는 subscription-closed 1을 남긴다", async () => {
     const { server, events, records } = harness();
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "event:hardware/change$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "event:hardware/change$",
     );
     events.error(new Error("boom"));
     expect(opened(records, "subscription-closed")).toBe(1);
@@ -258,31 +209,16 @@ describe("구독 수명주기 진단", () => {
   test("overflow(error 정책)는 subscription-closed 1을 남긴다", async () => {
     const { server, events, records } = harness({ overflow: "error" });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "event:hardware/change$"),
-      (message) => messages.push(message),
-    );
+    const sub = await rendererDocument(server, {
+      clientId: "document-1",
+    }).subscribe("event:hardware/change$");
     events.next(1);
     events.next(2);
     events.next(3);
     events.next(4);
-    const ack = (sequence: number) =>
-      server.controlStream(
-        sender(),
-        {
-          protocolVersion: 1,
-          clientId: "document-1",
-          type: "acknowledge",
-          subscriptionId: testSubscriptionId(1),
-          sequence,
-        },
-        (message) => messages.push(message),
-      );
-    await ack(1);
-    await ack(2);
-    await ack(3);
+    await sub.ack(1);
+    await sub.ack(2);
+    await sub.ack(3);
     expect(opened(records, "subscription-closed")).toBe(1);
   });
 
@@ -290,10 +226,8 @@ describe("구독 수명주기 진단", () => {
     const { server, records } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "state:hardware/current$",
     );
     target.endDocument();
     expect(opened(records, "subscription-closed")).toBe(1);
@@ -302,10 +236,8 @@ describe("구독 수명주기 진단", () => {
   test("unknown-operation(NOT_FOUND)은 opened/closed를 남기지 않는다", async () => {
     const { server, records } = harness();
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/unknown$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "state:hardware/unknown$",
     );
     expect(opened(records, "subscription-opened")).toBe(0);
     expect(opened(records, "subscription-closed")).toBe(0);
@@ -315,10 +247,8 @@ describe("구독 수명주기 진단", () => {
     const denyAll: Authorize = () => false;
     const { server, records } = harness({ authorize: denyAll });
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "state:hardware/current$",
     );
     expect(opened(records, "subscription-opened")).toBe(0);
     expect(opened(records, "subscription-closed")).toBe(0);
@@ -329,17 +259,10 @@ describe("구독 수명주기 진단", () => {
       resourceLimits: { maxSubscriptions: 1 },
     });
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
-    );
+    const doc = rendererDocument(server, { clientId: "document-1" });
+    await doc.subscribe("state:hardware/current$");
     expect(opened(records, "subscription-opened")).toBe(1);
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(2), "event:hardware/change$"),
-      () => {},
-    );
+    await doc.subscribe("event:hardware/change$");
     expect(opened(records, "subscription-opened")).toBe(1);
     expect(opened(records, "subscription-closed")).toBe(0);
   });
@@ -382,18 +305,12 @@ describe("getDiagnosticsSnapshot", () => {
     server.handshake(sender(), handshakeRequest("client-1"));
     expect(server.getDiagnosticsSnapshot().sessions).toBe(1);
 
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
-    );
+    const sub = await rendererDocument(server, {
+      clientId: "document-1",
+    }).subscribe("state:hardware/current$");
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
 
-    await server.controlStream(
-      sender(),
-      unsubscribeCommand(testSubscriptionId(1)),
-      () => {},
-    );
+    await sub.unsubscribe();
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
 
     target.endDocument();
@@ -407,37 +324,23 @@ describe("getDiagnosticsSnapshot", () => {
     });
     const { server } = harness({ authorize: () => pending });
     server.attach(new FakeTarget());
-    const subscribed = server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
+    const sub = rendererDocument(server, { clientId: "document-1" }).begin(
+      "state:hardware/current$",
     );
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
     releaseAuthorize(true);
-    await subscribed;
+    await sub.ready;
   });
 
   test("queuedEvents는 모든 consumer의 대기 이벤트 길이 합이다", async () => {
     const { server, events } = harness({ overflow: "drop-oldest" });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "event:hardware/change$"),
-      (message) => {
-        messages.push(message);
-        if (message.type === "batch")
-          void server.controlStream(
-            sender(),
-            {
-              protocolVersion: 1,
-              clientId: "document-1",
-              type: "acknowledge",
-              subscriptionId: testSubscriptionId(1),
-              sequence: message.sequence,
-            },
-            () => {},
-          );
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "event:hardware/change$",
+      {
+        onFrame: (frame, subscription) => {
+          if (frame.type === "batch") void subscription.ack(frame.sequence);
+        },
       },
     );
     events.next(1);
@@ -466,10 +369,8 @@ describe("getDiagnosticsSnapshot", () => {
     server.handshake(sender(), handshakeRequest("client-1"));
     void server.dispatchRpc(sender(), request());
     await vi.waitFor(() => expect(handlers).toHaveLength(1));
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "state:hardware/current$"),
-      () => {},
+    await rendererDocument(server, { clientId: "document-1" }).subscribe(
+      "state:hardware/current$",
     );
     handlers[0]?.(undefined);
     await vi.waitFor(() =>
@@ -496,16 +397,9 @@ describe("getDiagnosticsSnapshot", () => {
     };
     const { server, events } = harness({ authorize });
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(1), "event:hardware/change$"),
-      () => {},
-    );
-    const pending = server.controlStream(
-      sender(),
-      subscribeCommand(testSubscriptionId(2), "state:hardware/current$"),
-      () => {},
-    );
+    const doc = rendererDocument(server, { clientId: "document-1" });
+    await doc.subscribe("event:hardware/change$");
+    const pending = doc.begin("state:hardware/current$");
     await vi.waitFor(() => expect(allow).toBeDefined());
     events.next(1);
     events.next(2);
@@ -517,6 +411,6 @@ describe("getDiagnosticsSnapshot", () => {
     expect(server.getDiagnosticsSnapshot().queuedEvents).toBe(0);
     expect(pendingSignal?.aborted).toBe(true);
     allow(true);
-    await pending;
+    await pending.ready;
   });
 });
