@@ -16,6 +16,7 @@ export type {
   ElectronBridgeChannels,
 } from "./electron-adapter.js";
 export type { StreamBridgeServer } from "./create-bridge-server.js";
+export { DEFAULT_PAYLOAD_LIMITS } from "./payload-limits.js";
 export { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 export type { ResourceLimits } from "./resource-limits.js";
 export { broadcastEvent, currentValueSource, scopedEvent } from "./sources.js";

@@ -22,6 +22,7 @@ import {
   manifestFromTable,
   type RegistrationTable,
 } from "./registration.js";
+import { resolvePayloadLimits } from "./payload-limits.js";
 import {
   resolveResourceLimits,
   type ResourceLimits,
@@ -37,13 +38,6 @@ import type {
   SenderIdentity,
 } from "./types.js";
 
-const defaultLimits: PayloadLimits = {
-  maxDepth: 32,
-  maxEntries: 10_000,
-  maxStringBytes: 1_000_000,
-  maxTotalBytes: 16_777_216,
-};
-
 /**
  * envelope parse 실패를 사유로 분류한다. `BridgeProtocolError`이고
  * `VERSION_MISMATCH`면 `version-mismatch`, 그 외 모든 throw는
@@ -56,39 +50,6 @@ function classifyParseFailure(
     error.code === "VERSION_MISMATCH"
     ? "version-mismatch"
     : "malformed-envelope";
-}
-
-const PAYLOAD_LIMIT_KEYS = [
-  "maxDepth",
-  "maxEntries",
-  "maxStringBytes",
-  "maxTotalBytes",
-] as const;
-
-/**
- * `options.payloadLimits`를 검증한다. 부분 지정을 허용한다(`ResourceLimits`와
- * 같은 패턴) — 생략한 필드는 `defaultLimits`를 그대로 쓴다. 명시적
- * `undefined`는 네 필드(`maxDepth`·`maxEntries`·`maxStringBytes`·
- * `maxTotalBytes`) 모두 거부한다(생략과 다르다).
- */
-function assertPartialPayloadLimits(
-  payloadLimits: Partial<PayloadLimits> | undefined,
-): void {
-  if (payloadLimits === undefined) return;
-  for (const key of Object.keys(payloadLimits)) {
-    if (!(PAYLOAD_LIMIT_KEYS as readonly string[]).includes(key)) {
-      throw new TypeError(`Unknown payload limit '${key}'.`);
-    }
-  }
-  for (const key of PAYLOAD_LIMIT_KEYS) {
-    if (!Object.hasOwn(payloadLimits, key)) continue;
-    const value = payloadLimits[key];
-    if (!Number.isSafeInteger(value) || (value as number) < 0) {
-      throw new TypeError(
-        `Payload limit '${key}' must be a non-negative safe integer.`,
-      );
-    }
-  }
 }
 
 export interface StreamBridgeServer extends BridgeServer {
@@ -122,11 +83,7 @@ export function createBridgeServer<B>(
   impl: BridgeImpl<B>,
   options?: ImplServerOptions<B>,
 ): StreamBridgeServer {
-  assertPartialPayloadLimits(options?.payloadLimits);
-  const limits: PayloadLimits = {
-    ...defaultLimits,
-    ...options?.payloadLimits,
-  };
+  const limits = resolvePayloadLimits(options?.payloadLimits);
   const table = buildRegistrationTableFromImpl(
     impl,
     options?.schemas,
