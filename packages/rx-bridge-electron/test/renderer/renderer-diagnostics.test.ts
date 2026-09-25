@@ -5,11 +5,13 @@ import {
   type RendererDiagnostic,
   type RendererDiagnosticsSink,
 } from "../../src/renderer/index.js";
-import type {
-  RendererStreamCommand,
-  StreamMessage,
-} from "../../src/protocol/index.js";
-import { FakeTransport } from "./fake-transport.js";
+import type { StreamMessage } from "../../src/protocol/index.js";
+import {
+  FakeTransport,
+  rpcError,
+  rpcSuccess,
+  streamMessage,
+} from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
@@ -32,49 +34,6 @@ interface StreamBridge {
   };
 }
 
-function streamTransport(): FakeTransport {
-  const transport = new FakeTransport();
-  transport.handshake = Promise.resolve({
-    protocolVersion: 1,
-    clientId: "client-1",
-    manifest: {
-      rpc: [],
-      state: ["state:hardware/connection$"],
-      event: ["event:hardware/fault$"],
-    },
-  });
-  return transport;
-}
-
-type StreamMessageBody = StreamMessage extends infer Message
-  ? Message extends StreamMessage
-    ? Omit<Message, "protocolVersion" | "clientId" | "subscriptionId">
-    : never
-  : never;
-
-function streamMessage(
-  subscriptionId: string,
-  value: StreamMessageBody,
-): StreamMessage {
-  return {
-    protocolVersion: 1,
-    clientId: "client-1",
-    subscriptionId,
-    ...value,
-  } as StreamMessage;
-}
-
-function subscriptions(transport: FakeTransport) {
-  return transport.controls.filter(
-    (
-      command,
-    ): command is Extract<
-      RendererStreamCommand,
-      { readonly type: "subscribe" }
-    > => command.type === "subscribe",
-  );
-}
-
 /**
  * `record` 호출을 그대로 쌓아 두는 sink. 이벤트 자체(순서·개수·페이로드)를
  * 검증하는 test에서 쓴다.
@@ -91,19 +50,6 @@ function recordingSink(): {
         events.push(event);
       },
     },
-  };
-}
-
-function success(
-  requestId: string,
-  result: { readonly connected: boolean } = { connected: true },
-) {
-  return {
-    protocolVersion: 1 as const,
-    clientId: "client-1",
-    type: "success" as const,
-    requestId,
-    result,
   };
 }
 
@@ -207,7 +153,7 @@ describe("sink exception isolation (ADR 0022 결정 11)", () => {
     const okPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     transport.resolveInvocation(
       0,
-      success(transport.invocations[0]!.requestId),
+      rpcSuccess(transport.invocations[0]!.requestId),
     );
     await expect(okPromise).resolves.toEqual({ connected: true });
 
@@ -217,7 +163,12 @@ describe("sink exception isolation (ADR 0022 결정 11)", () => {
   });
 
   test("a throwing sink does not change subscription delivery or cleanup", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const api = await createRendererApi<StreamBridge>({
       transport,
       diagnostics: {
@@ -231,7 +182,7 @@ describe("sink exception isolation (ADR 0022 결정 11)", () => {
     const subscription = api.hardware.event.fault$.subscribe((value) => {
       values.push(value);
     });
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     transport.emitStream(
       streamMessage(id, { type: "subscribed", sequence: 0 }),
     );
@@ -285,7 +236,7 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     transport.resolveInvocation(
       0,
-      success(transport.invocations[0]!.requestId),
+      rpcSuccess(transport.invocations[0]!.requestId),
     );
     await expect(resultPromise).resolves.toEqual({ connected: true });
 
@@ -313,13 +264,13 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
     });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
-    transport.resolveInvocation(0, {
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "error",
-      requestId: transport.invocations[0]!.requestId,
-      error: { code: "DEVICE_BUSY", message: "Device is busy." },
-    });
+    transport.resolveInvocation(
+      0,
+      rpcError(transport.invocations[0]!.requestId, {
+        code: "DEVICE_BUSY",
+        message: "Device is busy.",
+      }),
+    );
     await expect(resultPromise).rejects.toMatchObject({ code: "DEVICE_BUSY" });
 
     expect(events).toEqual([
@@ -540,7 +491,7 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
     });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
-    transport.invocationResults[0]!.resolve(success("mismatched-request-id"));
+    transport.invocationResults[0]!.resolve(rpcSuccess("mismatched-request-id"));
     await expect(resultPromise).rejects.toMatchObject({ code: "INTERNAL" });
 
     expect(events).toEqual([
@@ -571,7 +522,7 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
       code: "DEADLINE_EXCEEDED",
     });
     await vi.advanceTimersByTimeAsync(25);
-    transport.resolveInvocation(0, success(requestId));
+    transport.resolveInvocation(0, rpcSuccess(requestId));
     await rejection;
     await Promise.resolve();
 
@@ -662,7 +613,12 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
 
 describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   test("records one opened/closed pair per generation even with two local subscribers, cause unsubscribed", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -692,7 +648,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   });
 
   test("records subscription-closed(disposed) for a generation still open at dispose", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -713,7 +674,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   });
 
   test("does not send subscribe when the sink disposes the API inside subscription-opened", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const events: RendererDiagnostic[] = [];
     let api: Awaited<ReturnType<typeof createRendererApi<StreamBridge>>>;
     api = await createRendererApi<StreamBridge>({
@@ -750,7 +716,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   });
 
   test("records subscription-closed(completed) on a complete message", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -758,7 +729,7 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
     });
 
     api.hardware.event.fault$.subscribe(() => {});
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     transport.emitStream(
       streamMessage(id, { type: "subscribed", sequence: 0 }),
     );
@@ -775,7 +746,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   });
 
   test("records subscription-closed(remote-error) with the protocol code, including ADR 0020 retire (CANCELLED)", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -783,7 +759,7 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
     });
 
     api.hardware.event.fault$.subscribe({ error: () => {} });
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     transport.emitStream(
       streamMessage(id, { type: "subscribed", sequence: 0 }),
     );
@@ -807,7 +783,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
   });
 
   test("records subscription-closed(transport-failed) with no separate transport-failed event when the subscribe control throws", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     transport.control = () => {
       throw new Error("control channel is gone");
     };
@@ -834,7 +815,12 @@ describe("subscription-opened/closed diagnostics (ADR 0022 결정 6)", () => {
 
 describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
   test("records malformed when a raw stream message fails to parse", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -851,7 +837,12 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
   });
 
   test("records envelope-mismatch when clientId does not match the session", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -859,7 +850,7 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
     });
 
     api.hardware.event.fault$.subscribe(() => {});
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     transport.emitStream({
       protocolVersion: 1,
       clientId: "other-client",
@@ -875,7 +866,12 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
   });
 
   test("records out-of-order for pre-subscribed data, a duplicate subscribed, and a non-increasing sequence", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -883,7 +879,7 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
     });
 
     api.hardware.event.fault$.subscribe(() => {});
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
 
     transport.emitStream(
       streamMessage(id, { type: "batch", sequence: 1, values: ["too-early"] }),
@@ -914,7 +910,12 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
   });
 
   test("does not record for an unknown subscriptionId", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -935,7 +936,12 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
   });
 
   test("does not record after dispose", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -943,7 +949,7 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
     });
 
     api.hardware.event.fault$.subscribe(() => {});
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     api.dispose();
     events.length = 0;
     transport.emitStream(
@@ -956,7 +962,12 @@ describe("message-dropped diagnostics (ADR 0022 결정 7)", () => {
 
 describe("transport-failed(control) diagnostics (ADR 0022 결정 8)", () => {
   test("records transport-failed(control) when unsubscribe throws on close, and the generation still closes locally", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     transport.control = (command) => {
       if (command.type === "unsubscribe") {
         throw new Error("control channel is gone");
@@ -983,7 +994,12 @@ describe("transport-failed(control) diagnostics (ADR 0022 결정 8)", () => {
   });
 
   test("records transport-failed(control) when unsubscribe throws during dispose", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     transport.control = (command) => {
       if (command.type === "unsubscribe") {
         throw new Error("control channel is gone");
@@ -1010,7 +1026,12 @@ describe("transport-failed(control) diagnostics (ADR 0022 결정 8)", () => {
   });
 
   test("records transport-failed(control) when acknowledge throws", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
@@ -1018,7 +1039,7 @@ describe("transport-failed(control) diagnostics (ADR 0022 결정 8)", () => {
     });
 
     api.hardware.event.fault$.subscribe(() => {});
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$");
     transport.controlHook = (command) => {
       if (command.type === "acknowledge") {
         throw new Error("control channel is gone");
@@ -1038,7 +1059,12 @@ describe("transport-failed(control) diagnostics (ADR 0022 결정 8)", () => {
   });
 
   test("never includes subscriptionId in a recorded field", async () => {
-    const transport = streamTransport();
+    const transport = new FakeTransport({
+      manifest: {
+        state: ["state:hardware/connection$"],
+        event: ["event:hardware/fault$"],
+      },
+    });
     const { sink, events } = recordingSink();
     const api = await createRendererApi<StreamBridge>({
       transport,
