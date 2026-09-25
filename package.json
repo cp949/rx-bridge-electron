@@ -10,7 +10,8 @@
     "format": "prettier --write \"**/*.{ts,tsx,md,json,yml}\"",
     "format:check": "prettier --check \"**/*.{ts,tsx,md,json,yml}\"",
     "check-types": "turbo run check-types",
-    "verify": "pnpm format:check && pnpm lint && pnpm check-types && pnpm test && pnpm build"
+    "verify": "pnpm format:check && pnpm lint && pnpm check-types && pnpm test && pnpm build",
+    "release-it": "pnpm --filter @cp949/rx-bridge-electron exec release-it"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
