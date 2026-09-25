@@ -15,8 +15,9 @@
 | `@cp949/rx-bridge-electron/preload`  | preload       | 고정 IPC 채널 어댑터와 `contextBridge` 노출                                    |
 | `@cp949/rx-bridge-electron/renderer` | Renderer      | 비동기 API, RPC 클라이언트, `RemoteState`, RxJS Event, `snapshotStore`         |
 | `@cp949/rx-bridge-electron/testing`  | test 전용     | `createLoopbackTransport` — in-process `BridgeTransport` 두 번째 adapter       |
+| `@cp949/rx-bridge-electron/protocol` | 모든 프로세스 | envelope·payload parse 함수, `PROTOCOL_VERSION`, wire 메시지 타입              |
 
-`src/contract/`는 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다(eslint `no-restricted-imports`가 강제한다). `BridgeImpl`이 참조하는 구현 측 타입(`BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 그 구성 타입)은 `contract/impl-types.ts`가 소유하고 `main`이 re-export한다 — 공개 export 이름과 진입점은 그대로다.
+`src/contract/`는 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다(eslint `no-restricted-imports`가 강제한다). `BridgeImpl`이 참조하는 구현 측 타입(`BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 그 구성 타입)은 `contract/impl-types.ts`가 소유한다. `main`은 `BridgeContext`·`SenderIdentity`·`CurrentValueSource`를 re-export한다. `EventSource`와 그 구성 타입(`BroadcastEventSource`·`ScopedEventSource`·`EventSourceBuffer`·`OverflowPolicy`)은 어느 진입점에서도 공개 export하지 않는다.
 
 계약은 런타임 값이 아니라 순수 TS 타입 `B`다. handler, Electron 객체, 자격증명, Node API, 함수, Observable/Subject는 preload 경계를 건너지 않는다. Renderer에는 고정된 `BridgeTransport`만 노출하며 `ipcRenderer`, 임의 채널, raw Electron event를 공개하지 않는다.
 
@@ -61,14 +62,14 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 
 문서가 살아있는 채로 세션이 끝나면(detach 또는 서버 dispose) 그 세션의 활성 State/Event 구독과 `authorize` 대기 중이던 구독에 `error CANCELLED "Bridge session ended."`를 즉시 보낸다 — 쌓인 값(ACK 대기 포함)은 버린다. navigation(commit 시점)·renderer process 종료·`webContents` 파괴·새 `clientId`로 인한 retire(`replaced`)는 통지하지 않는다: 옛 문서 자신이 이미 없거나(navigation·process 종료·파괴) 재연결 흐름의 일부(새 clientId)이기 때문이다. 전송 실패는 삼킨다(best-effort) — 전송 실패가 세션·구독 정리를 막지 않는다. 통지 여부·코드는 `Subscriptions` 한 곳이 원인(admission 거부·시작 전 거부·대기 중 retire·활성 retire)과 retire 사유로 판정한다 — 시작 전 거부 응답을 보내기 직전(진단 sink의 동기 호출)이나 `subscribed` 전송 도중(동기 `send`) detach·dispose retire가 끼면 원래 거부 대신 `error CANCELLED`로 마감한다. `session-opened`·`subscription-opened` 진단을 기록하는 중에 동기로 detach·dispose가 일어나 등록 시점에 이미 retire된 pending 구독·consumer(`subscribed` 송신 전)도 같은 규칙을 따른다 — 사유가 detach·dispose면 `subscribed`(0) 뒤 `error CANCELLED`로 마감하고, 그 외 사유(navigation·`render-process-gone`·`destroyed`·`replaced`)는 무출력이다.
 
-| retire 원인                           | 활성·`authorize` 대기 구독 통지 |
-| ------------------------------------- | ------------------------------- |
-| detach                                | `error CANCELLED`               |
-| `server.dispose()` / bind `dispose()` | `error CANCELLED`               |
-| navigation(commit)                    | 없음                            |
-| `render-process-gone`                 | 없음                            |
-| `destroyed`                           | 없음                            |
-| 새 `clientId`(`replaced`)             | 없음                            |
+| retire 원인                   | 활성·`authorize` 대기 구독 통지 |
+| ----------------------------- | ------------------------------- |
+| detach(bind `dispose()` 포함) | `error CANCELLED`               |
+| `server.dispose()`            | `error CANCELLED`               |
+| navigation(commit)            | 없음                            |
+| `render-process-gone`         | 없음                            |
+| `destroyed`                   | 없음                            |
+| 새 `clientId`(`replaced`)     | 없음                            |
 
 근거는 [ADR 0020](adr/0020-stream-terminal-on-retire.md)에 있다.
 
@@ -79,7 +80,7 @@ Main은 연결된 `webContents`별로 현재 main-frame 문서와 client ID를 �
 ## RPC와 스트림 계약
 
 - **RPC**: 하나의 clone-safe 입력과 결과를 주고받는다. `AbortSignal`과 `timeoutMs`는 입력값과 분리된 호출 옵션이며 취소·timeout·응답 중 하나만 최종 결과가 된다.
-- **State**: 현재값을 나타낸다. Renderer의 `RemoteState`는 `uninitialized`, `connecting`, `current`, `stale` snapshot을 제공한다. 값이 있던 generation이 끝나면(마지막 로컬 구독자 해제, 원격 complete 또는 error) snapshot은 `stale`가 되며, 새 구독 generation에 예전 값을 현재값처럼 재생하지 않는다. 새 generation이 열리면 `connecting`이 이전 값을 버리므로, 첫 값 전에 끝나면 `uninitialized`로 돌아간다. `undefined`도 유효한 값이다. 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 받는다. 아직 값을 받지 못한 `connecting` 상태에서는 첫 값을 기다린다. `snapshotStore`는 snapshot 변경(값·complete·error)을 인자 없는 알림으로 바꾸는 외부 store adapter다. listener들이 `state` 구독 하나를 공유하고, 종료 뒤 스스로 재구독하지 않으며, listener가 있는 동안 새로 열린 generation에 합류해 알린다(RD-044, ADR 0024 개정)([ADR 0024](adr/0024-remote-state-snapshot-store.md)).
+- **State**: 현재값을 나타낸다. Renderer의 `RemoteState`는 `uninitialized`, `connecting`, `current`, `stale` snapshot을 제공한다. 값이 있던 generation이 끝나면(마지막 로컬 구독자 해제, 원격 complete 또는 error) snapshot은 `stale`가 되며, 새 구독 generation에 예전 값을 현재값처럼 재생하지 않는다. 새 generation이 열리면 `connecting`이 이전 값을 버리므로, 첫 값 전에 끝나면 `uninitialized`로 돌아간다. `undefined`도 유효한 값이다. 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 받는다. 아직 값을 받지 못한 `connecting` 상태에서는 첫 값을 기다린다. `snapshotStore`는 snapshot 변경(값·complete·error)을 인자 없는 알림으로 바꾸는 외부 store adapter다. listener들이 `state` 구독 하나를 공유하고, 종료 뒤 스스로 재구독하지 않으며, listener가 있는 동안 새로 열린 generation에 합류해 알린다([ADR 0024](adr/0024-remote-state-snapshot-store.md)).
 - **Event**: 과거 값을 재생하지 않는 발생 스트림이다. 명시적인 buffer capacity와 `error`, `drop-oldest`, `drop-newest` 중 overflow 정책을 source 생성 옵션(`broadcastEvent`/`scopedEvent`의 `buffer`)에 둔다(생략 시 기본값). `error` 정책 overflow의 `STREAM_OVERFLOW`는 대기 값 전달 뒤에 도착한다. 구독 확인 이후 sequence와 acknowledgement로 전송을 제어한다.
 - 같은 Renderer 문서의 여러 로컬 구독자는 하나의 local generation을 공유한다. Main의 non-scoped State/Event source는 operation key별로 활성 consumer 사이에서 공유한다. 문서별 Event source는 각 구독 context로 생성한다. 마지막 consumer가 나가면 더는 쓰지 않는 upstream을 정리한다.
 - Event의 전달 방식은 등록 시점에 `broadcast`/`scoped` 둘 중 하나로 정규화된다: `broadcast`는 key당 upstream `Observable` 하나를 구독자들이 공유한다(plain `Observable`을 그대로 넘겨도 `broadcast`와 기본 buffer로 정규화된다). `scoped`는 구독마다 factory가 upstream을 새로 만들어 구독 사이에 값이 섞이지 않는다. 정규화는 registration 하나가 등록 시점에 수행하고, `Subscriptions` 내부 module `Upstreams`가 정규화된 두 갈래를 읽는다.
@@ -105,11 +106,11 @@ Main은 연결된 `webContents`의 현재 문서 세션 단위로 진행 중 RPC
 | `maxRpcDurationMs`                | 300,000 | handler `signal` abort 후 `DEADLINE_EXCEEDED`(`Infinity`면 없음, 유한값 최대 2,147,483,647) |
 | `maxRetiredClientsPerWebContents` | 32      | 가장 오래된 retired clientId부터 기록에서 제거                                              |
 
-RPC 슬롯은 취소나 deadline으로 응답을 먼저 보내도 handler Promise가 실제로 끝날 때 반환한다 — `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유한다. 구독 슬롯은 unsubscribe·거부·세션 retire 뒤 즉시 반환한다. 구독 시작 자체가 내부에서 실패해도(예: Event consumer 초기화 예외) 슬롯은 그대로 새지 않는다 — terminal error를 보낸 뒤 slot을 반환한다. source 쪽 종료(완료·오류·`error` 정책 overflow)는 source를 즉시 분리하지만, 이미 대기 중인 값을 ack 순서대로 모두 보낸 뒤 terminal(`complete` 또는 `error`, overflow는 `STREAM_OVERFLOW`)을 보내고 그 뒤에 슬롯을 반환한다. ack를 보내지 않는 소비자는 unsubscribe·세션 retire 전까지 슬롯 1개와 대기 값(Event는 최대 buffer capacity)을 계속 점유한다 — 그 세션의 한도 안에서만 영향이 있다. 두 슬롯 한도의 세션별 판정·전역 집계(`rpcInFlight`·`subscriptions`)는 같은 내부 module `SessionSlots`가 계산한다 — `RpcRequests`·`Subscriptions`가 각자 생성자 안에서 인스턴스 하나씩 만든다.
+RPC 슬롯은 handler Promise가 실제로 끝날 때 반환한다. Main deadline으로 응답을 먼저 보내거나 Renderer가 취소·timeout으로 로컬에서 먼저 확정해도 같다. `AbortSignal`을 무시하는 handler는 자기 세션의 슬롯만 계속 점유한다. 구독 슬롯은 unsubscribe·거부·세션 retire 뒤 즉시 반환한다. 구독 시작 자체가 내부에서 실패해도(예: Event consumer 초기화 예외) 슬롯은 그대로 새지 않는다 — terminal error를 보낸 뒤 slot을 반환한다. source 쪽 종료(완료·오류·`error` 정책 overflow)는 source를 즉시 분리하지만, 이미 대기 중인 값을 ack 순서대로 모두 보낸 뒤 terminal(`complete` 또는 `error`, overflow는 `STREAM_OVERFLOW`)을 보내고 그 뒤에 슬롯을 반환한다. ack를 보내지 않는 소비자는 unsubscribe·세션 retire 전까지 슬롯 1개와 대기 값(Event는 최대 buffer capacity)을 계속 점유한다 — 그 세션의 한도 안에서만 영향이 있다. 두 슬롯 한도의 세션별 판정·전역 집계(`rpcInFlight`·`subscriptions`)는 같은 내부 module `SessionSlots`가 계산한다 — `RpcRequests`·`Subscriptions`가 각자 생성자 안에서 인스턴스 하나씩 만든다.
 
 stream `subscriptionId`의 재사용·늦은 도착은 ID별 저장소 대신 세션별 워터마크(마지막으로 수락한 sequence)로 판정한다. `subscriptionId`는 `<nonce>:<scope>:<seq base36>` 형식(`createOpaqueId` 산출 형식, 조립은 `src/protocol/opaque-id.ts`의 pure 함수 `formatOpaqueId`가 하고 `renderer/ids.ts`의 `createOpaqueId`가 nonce·sequence 상태를 쥔 채 호출한다)이어야 하며, 형식 오류는 같은 파일의 `parseOpaqueIdSequence`가 판정해 `INVALID_ARGUMENT`, 워터마크 이하는 메시지 없이 무시한다. RPC `requestId`는 워터마크 대상이 아니다.
 
-stream 구독 요청은 ID 형식 → 세션별 워터마크 → 등록 조회 → 구독 슬롯 → `authorize` 순서로 판정한다(RPC와 같은 순서). 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`이고, `authorize`는 등록된 key만 받는다. 구독 슬롯 한도 초과(`subscription-limit`)는 등록 조회를 통과한 뒤 판정되므로 진단에 key를 포함한다. 이 수명주기(admission부터 terminal·slot 반환까지)는 Main의 `Subscriptions` 모듈 하나가 소유한다. 근거는 [ADR 0014](adr/0014-stream-lookup-before-authorize.md)에 있다. consumer 1건의 전달 창(수락 → ack 대기 → 다음 값 | terminal, 선점 종료 포함, sequence 번호)은 `Subscriptions` 내부 module `DeliveryWindow`가 단독 소유한다. State/Event upstream 연결(key별 공유·scoped 개별, 늦게 합류한 State 현재값)은 내부 module `Upstreams`가 소유한다. 시작 전 거부 frame의 sequence도 `DeliveryWindow`가 매긴다. `authorize` 호출과 예외·거부 분류, `authorize-denied` 진단은 RPC·stream이 공유하는 단계 하나가 맡고, 각 경로는 그 판정을 응답·프레임으로 번역만 한다([ADR 0011](adr/0011-authorize-exception-internal.md)).
+stream 구독 요청은 ID 형식 → 세션별 워터마크 → 등록 조회 → 구독 슬롯 → `authorize` 순서로 판정한다(등록 조회 → 슬롯 → `authorize`는 RPC와 같은 순서다). 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`이고, `authorize`는 등록된 key만 받는다. 구독 슬롯 한도 초과(`subscription-limit`)는 등록 조회를 통과한 뒤 판정되므로 진단에 key를 포함한다. 이 수명주기(admission부터 terminal·slot 반환까지)는 Main의 `Subscriptions` 모듈 하나가 소유한다. 근거는 [ADR 0014](adr/0014-stream-lookup-before-authorize.md)에 있다. consumer 1건의 전달 창(수락 → ack 대기 → 다음 값 | terminal, 선점 종료 포함, sequence 번호)은 `Subscriptions` 내부 module `DeliveryWindow`가 단독 소유한다. State/Event upstream 연결(key별 공유·scoped 개별, 늦게 합류한 State 현재값)은 내부 module `Upstreams`가 소유한다. 시작 전 거부 frame의 sequence도 `DeliveryWindow`가 매긴다. `authorize` 호출과 예외·거부 분류, `authorize-denied` 진단은 RPC·stream이 공유하는 단계 하나가 맡고, 각 경로는 그 판정을 응답·프레임으로 번역만 한다([ADR 0011](adr/0011-authorize-exception-internal.md)).
 
 RPC 요청은 envelope parse(version 포함) → 세션 해석(sender admission, `establish`) → 등록 조회 → RPC 슬롯 → `authorize` → pipeline(`parseBridgeValue` → 입력 스키마 → handler → 출력 경계) 순서로 판정한다. 미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`다. 이 다섯 단계 경계(`authorize` 뒤, `parseBridgeValue` 실패, 입력 스키마 실패, handler 뒤, 출력 스키마 실패) 각각에서 요청이 이미 취소된 상태(signal aborted)면 `CANCELLED`가 그 단계의 원래 실패 분류보다 우선한다 — 이 규칙은 guard 함수 하나로 정의되고 다섯 지점에 적용된다(삭제하는 분기는 없다). 이 수명주기(등록 조회부터 handler 종료와 슬롯 반환까지)는 Main의 `RpcRequests` 모듈 하나가 소유한다. `authorize` 뒤에는 세션이 여전히 현재인지 별도로 재해석하지 않는다 — 요청 signal(세션 retire 시 abort)만 본다. 근거와 이 가설이 깨졌을 때의 위험은 [ADR 0015](adr/0015-rpc-request-lifecycle.md)에 있다. `authorize` 호출과 예외·거부 분류, `authorize-denied` 진단은 RPC·stream이 공유하는 단계 하나가 맡고, 각 경로는 그 판정을 응답·프레임으로 번역만 한다([ADR 0011](adr/0011-authorize-exception-internal.md)).
 

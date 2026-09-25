@@ -400,7 +400,7 @@ function FaultView() {
 }
 ```
 
-TanStack Query 없이 RPC를 부를 때는 호출마다 `AbortController`를 만들고 unmount 때 진행 중인 호출을 모두 abort하세요. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다.
+TanStack Query 없이 RPC를 부를 때는 호출마다 `AbortController`를 만들고 unmount 때 진행 중인 호출을 모두 abort하세요. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다(handler가 `signal`을 무시하면 handler가 끝날 때까지).
 
 ```tsx
 const controllers = useRef(new Set<AbortController>());
@@ -480,7 +480,7 @@ export function useSaveNote() {
 }
 ```
 
-- **`signal` 전달.** TanStack이 query를 취소하면(`cancelQueries`, 결과를 기다리는 observer가 없는 채 unmount 등) RPC가 즉시 `RemoteError("CANCELLED")`로 끝나고 Main에 cancel을 보내 handler의 `context.signal`이 abort됩니다. query는 error 상태가 되지 않고 이전 상태로 돌아갑니다. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다.
+- **`signal` 전달.** TanStack이 query를 취소하면(`cancelQueries`, 결과를 기다리는 observer가 없는 채 unmount 등) RPC가 즉시 `RemoteError("CANCELLED")`로 끝나고 Main에 cancel을 보내 handler의 `context.signal`이 abort됩니다. query는 error 상태가 되지 않고 이전 상태로 돌아갑니다. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다(handler가 `signal`을 무시하면 handler가 끝날 때까지).
 - **`queryKey`.** 입력값을 key에 포함합니다. RPC 입력은 structured clone 가능한 값이라 TanStack의 key hash에 그대로 쓸 수 있습니다.
 - **retry 판정.** TanStack의 query 기본값은 어떤 오류든 3회 재시도입니다. 재시도해도 결과가 같은 코드는 제외합니다: `FORBIDDEN`·`INVALID_ARGUMENT`·`NOT_FOUND`·`VERSION_MISMATCH`, handler 예외·출력 검증 실패의 `INTERNAL`, `errors` map으로 선언한 도메인 코드, `api.dispose()` 뒤의 `CANCELLED`. 재시도할 가치가 있는 것은 세션 동시 RPC 한도 초과(`RESOURCE_EXHAUSTED`)와 deadline 경과(`DEADLINE_EXCEEDED`)뿐입니다. `RemoteError`가 아닌 오류(`queryFn` 자체 코드의 예외)도 재시도하지 않습니다.
 - **재시도 간격.** Renderer의 `timeoutMs` 만료는 Main slot을 즉시 비우지 않습니다 — slot은 handler가 끝날 때 반환됩니다([ADR 0015](../../docs/adr/0015-rpc-request-lifecycle.md)). `AbortSignal`을 무시하는 handler 뒤로 곧바로 재시도하면 `DEADLINE_EXCEEDED`가 `RESOURCE_EXHAUSTED`로 바뀔 수 있으므로 `retryDelay`를 0으로 두지 않습니다(기본값은 지수 backoff).
@@ -507,9 +507,9 @@ const api = await createRendererApi<AppBridge>({
 
 ## 검증, 한도, 범위 밖 기능
 
-Main은 핸들러를 호출하기 전에 RPC 입력을, 전송하기 전에 출력을, 전달하기 전에 스트림 값을 검증합니다. v1 payload는 `undefined`, `null`, 원시 값, 배열, 일반 객체 트리만 허용합니다. 순환 참조, 함수, symbol, 사용자 정의 prototype, typed array, transferable을 거부합니다. 기본 한도는 깊이 32, 항목 10,000개, 문자열당 UTF-8 1,000,000 byte, 전체 크기 16 MiB(`maxTotalBytes`)입니다. 전체 크기는 노드·문자열 byte·bigint 자릿수를 순회하며 근사 계산한 값이라 실제 V8 structured clone 크기와 다를 수 있습니다. `createBridgeServer`의 `payloadLimits` 서버 옵션으로 필드별 상향·하향이 가능하며, 이 한도는 서버가 강제합니다(Electron 어댑터·preload는 envelope 구조만 검사합니다). 기본값은 `@cp949/rx-bridge-electron/main`의 `DEFAULT_PAYLOAD_LIMITS`(동결)로 가져올 수 있습니다. 필드를 생략하면 기본값을 쓰지만 필드에 `undefined`를 넣으면 생성 시점에 `TypeError`가 발생합니다 — 전체 크기 한도를 사실상 끄려면 `maxTotalBytes: Number.MAX_SAFE_INTEGER`를 씁니다. 이 구조·크기 검사는 도메인 스키마(`options.schemas`) 유무와 무관하게 모든 operation에 항상 적용됩니다 — 줄어드는 것은 사용자가 손으로 쓰는 코드량이지 이 검사가 아닙니다.
+Main은 핸들러를 호출하기 전에 RPC 입력을, 전송하기 전에 출력을, 전달하기 전에 스트림 값을 검증합니다. v1 payload는 `undefined`, `null`, 원시 값, 배열, 일반 객체 트리만 허용합니다. 순환 참조, 함수, symbol, 사용자 정의 prototype, typed array, transferable을 거부합니다. 기본 한도는 깊이 32, 항목 10,000개, 문자열당 UTF-8 1,000,000 byte, 전체 크기 16 MiB(`maxTotalBytes`)입니다. 전체 크기는 노드·문자열 byte·bigint 자릿수를 순회하며 근사 계산한 값이라 실제 V8 structured clone 크기와 다를 수 있습니다. `createBridgeServer`의 `payloadLimits` 서버 옵션으로 필드별 상향·하향이 가능하며, 이 한도는 서버가 강제합니다(preload와 Renderer는 envelope 구조만 검사하고, Electron 어댑터는 검사하지 않습니다). 기본값은 `@cp949/rx-bridge-electron/main`의 `DEFAULT_PAYLOAD_LIMITS`(동결)로 가져올 수 있습니다. 필드를 생략하면 기본값을 쓰지만 필드에 `undefined`를 넣으면 생성 시점에 `TypeError`가 발생합니다 — 전체 크기 한도를 사실상 끄려면 `maxTotalBytes: Number.MAX_SAFE_INTEGER`를 씁니다. 이 구조·크기 검사는 도메인 스키마(`options.schemas`) 유무와 무관하게 모든 operation에 항상 적용됩니다 — 줄어드는 것은 사용자가 손으로 쓰는 코드량이지 이 검사가 아닙니다.
 
-입력과 출력의 검증 실패는 서로 다른 오류 코드로 응답합니다. 요청 envelope나 RPC 입력이 이 규칙을 어기면 `INVALID_ARGUMENT`로 거부됩니다. 반면 RPC 출력과 스트림(State/Event) 값의 검증 실패는 `INTERNAL`입니다 — handler나 출력 스키마가 만든 값도 전송 전에 같은 규칙으로 다시 검증하며, 출력 스키마가 변환한 결과도 예외 없이 재검사 대상입니다. handler가 선언되지 않은 예외를 던지거나 출력 스키마 자체가 예외를 던져도(선언된 오류 코드를 가진 예외라도) `INTERNAL`로 응답하고, 선언된 도메인 에러라도 `message`나 `details`가 위 한도를 넘으면 `INTERNAL`로 대체됩니다. `authorize` 콜백이 예외를 던지거나 reject해도 RPC·State·Event 모두 `INTERNAL`입니다. 검증 실패 시점에 요청이 이미 취소된 상태라면 `CANCELLED`가 우선합니다.
+입력과 출력의 검증 실패는 서로 다른 오류 코드로 응답합니다. 요청 envelope나 RPC 입력이 이 규칙을 어기면 `INVALID_ARGUMENT`로 거부됩니다. 반면 RPC 출력과 스트림(State/Event) 값의 검증 실패는 `INTERNAL`입니다 — handler나 출력 스키마가 만든 값도 전송 전에 같은 규칙으로 다시 검증하며, 출력 스키마가 변환한 결과도 예외 없이 재검사 대상입니다. handler가 선언되지 않은 예외를 던지거나 출력 스키마 자체가 예외를 던져도(선언된 오류 코드를 가진 예외라도) `INTERNAL`로 응답하고, 선언된 도메인 에러라도 `message`나 `details`가 위 한도를 넘으면 `INTERNAL`로 대체됩니다. `authorize` 콜백이 예외를 던지거나 reject해도 RPC·State·Event 모두 `INTERNAL`입니다. RPC는 검증 실패 시점에 요청이 이미 취소된 상태라면 `CANCELLED`가 우선합니다(stream 값 검증 실패는 항상 `INTERNAL`입니다).
 
 Main은 세션(연결된 `webContents`의 현재 문서)별로 진행 중 RPC 수, 구독 수, RPC 실행 시간, retired client ID 보관량도 제한합니다. `createBridgeServer`의 `resourceLimits` 옵션으로 설정하며, 지정하지 않은 필드는 기본값을 씁니다.
 
