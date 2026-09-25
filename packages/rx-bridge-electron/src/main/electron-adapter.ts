@@ -115,6 +115,15 @@ function targetFor(
   };
 }
 
+/**
+ * dispose된 bind의 IPC handler·listener 해제 함수. `ipcMain`별, handshake 채널
+ * (namespace마다 유일)별로 하나다. dispose된 bind는 listener를 남겨 폐기된
+ * server가 뒤이은 요청을 거부하게 하고, 같은 `ipcMain`·namespace의 새 bind가
+ * 등록 전에 이 함수로 그 listener를 인수한다(ADR 0026). 활성 bind는 여기 없으므로
+ * 중복 bind는 지금처럼 `ipcMain.handle`이 throw한다.
+ */
+const disposedBindings = new WeakMap<IpcMain, Map<string, () => void>>();
+
 /** Binds fixed Electron channels; renderer code receives no Electron objects. */
 export function bindElectronBridge(options: BindElectronBridgeOptions): {
   readonly channels: ElectronBridgeChannels;
@@ -134,6 +143,7 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
     );
   }
   const channels = ELECTRON_BRIDGE_CHANNELS(options.namespace);
+  disposedBindings.get(ipcMain)?.get(channels.handshake)?.();
   const attached = new Map<number, () => void>();
   const streamSender =
     (event: IpcMainEvent): StreamSender =>
@@ -200,11 +210,17 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
       disposed = true;
       for (const detach of attached.values()) detach();
       attached.clear();
-      ipcMain.removeHandler(channels.handshake);
-      ipcMain.removeHandler(channels.rpc);
-      ipcMain.removeListener(channels.cancel, onCancel);
-      ipcMain.removeListener(channels.control, onControl);
       options.server.dispose();
+      const bindings =
+        disposedBindings.get(ipcMain) ?? new Map<string, () => void>();
+      disposedBindings.set(ipcMain, bindings);
+      bindings.set(channels.handshake, () => {
+        bindings.delete(channels.handshake);
+        ipcMain.removeHandler(channels.handshake);
+        ipcMain.removeHandler(channels.rpc);
+        ipcMain.removeListener(channels.cancel, onCancel);
+        ipcMain.removeListener(channels.control, onControl);
+      });
     },
   };
 }

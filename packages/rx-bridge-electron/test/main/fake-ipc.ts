@@ -87,10 +87,15 @@ export class FakeIpcMain extends EventEmitter {
     (event: unknown, value: unknown) => unknown
   >();
 
+  // Electron `ipcMain.handle`처럼 같은 채널의 두 번째 등록은 throw한다.
   public handle(
     channel: string,
     listener: (event: unknown, value: unknown) => unknown,
   ): void {
+    if (this.handlers.has(channel))
+      throw new Error(
+        `Attempted to register a second handler for '${channel}'`,
+      );
     this.handlers.set(channel, listener);
   }
 

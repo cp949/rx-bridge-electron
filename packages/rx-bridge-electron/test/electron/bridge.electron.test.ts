@@ -152,6 +152,82 @@ describe("Electron bridge process seam", () => {
     );
   });
 
+  test("bind dispose 뒤 요청은 FORBIDDEN으로 끝나고 같은 namespace 재bind 뒤 다시 연결된다", async () => {
+    app = await electron.launch({
+      executablePath: electronExecutable,
+      args: [fixtureMain],
+      env: {
+        ...process.env,
+        RX_BRIDGE_PRELOAD: fixturePreload,
+        RX_BRIDGE_RENDERER: fixtureRenderer,
+      },
+    });
+    const page = await app.firstWindow();
+    await page.evaluate(() =>
+      (globalThis as unknown as BridgeGlobal).rxBridge.connect(),
+    );
+
+    await app.evaluate(() => globalThis.rxBridgeFixture!.disposeBridge());
+    const afterDispose = await page.evaluate(async () => {
+      const bridge = (globalThis as unknown as BridgeGlobal).rxBridge;
+      const messages: unknown[] = [];
+      const remove = bridge.onStreamMessage((message) =>
+        messages.push(message),
+      );
+      bridge.control({
+        type: "subscribe",
+        subscriptionId: "test:subscription:1",
+        key: "state:device/status",
+      });
+      const rpc = await bridge.invoke({
+        requestId: "after-dispose",
+        key: "rpc:device/ping",
+        input: "late",
+      });
+      const deadline = Date.now() + 2000;
+      while (messages.length < 2 && Date.now() < deadline)
+        await new Promise((resolve) => setTimeout(resolve, 20));
+      remove();
+      return { rpc, messages };
+    });
+
+    expect(afterDispose.rpc).toMatchObject({
+      type: "error",
+      error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
+    });
+    expect(afterDispose.messages).toEqual([
+      expect.objectContaining({
+        type: "subscribed",
+        subscriptionId: "test:subscription:1",
+      }),
+      expect.objectContaining({
+        type: "error",
+        subscriptionId: "test:subscription:1",
+        error: {
+          code: "FORBIDDEN",
+          message: "Bridge sender is not authorized.",
+        },
+      }),
+    ]);
+
+    await app.evaluate(() => globalThis.rxBridgeFixture!.rebind());
+    await page.reload();
+    const afterRebind = await page.evaluate(async () => {
+      const bridge = (globalThis as unknown as BridgeGlobal).rxBridge;
+      await bridge.connect();
+      return bridge.invoke({
+        requestId: "after-rebind",
+        key: "rpc:device/ping",
+        input: "again",
+      });
+    });
+
+    expect(afterRebind).toMatchObject({
+      type: "success",
+      result: "pong:again",
+    });
+  });
+
   test("rejects child frames, unattached windows, and disallowed origins after a reload", async () => {
     app = await electron.launch({
       executablePath: electronExecutable,

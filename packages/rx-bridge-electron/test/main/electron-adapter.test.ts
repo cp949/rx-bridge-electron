@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from "vitest";
 import type { IpcMain, WebContents } from "electron";
+import { BehaviorSubject } from "rxjs";
 
 import type { BridgeImpl, Schema } from "../../src/contract/index.js";
 import { BridgeProtocolError } from "../../src/protocol/index.js";
@@ -10,9 +11,11 @@ import {
   FakeWebContents,
   sender,
 } from "./fake-ipc.js";
+import { testSubscriptionId } from "./subscription-ids.js";
 import {
   bindElectronBridge,
   createBridgeServer,
+  currentValueSource,
   DEFAULT_ELECTRON_BRIDGE_NAMESPACE,
   ELECTRON_BRIDGE_CHANNELS,
   type BridgeContext,
@@ -36,7 +39,7 @@ function makeBridge(ipcMain: FakeIpcMain) {
 }
 
 describe("bindElectronBridge dispose", () => {
-  test("removes only its own cancel/control listeners and invoke handlers", () => {
+  test("dispose 뒤에도 자기 handler·listener를 남기고 외부 listener를 건드리지 않는다", () => {
     const ipcMain = new FakeIpcMain();
     const channels = ELECTRON_BRIDGE_CHANNELS("test");
     const externalCancel = () => {};
@@ -47,12 +50,12 @@ describe("bindElectronBridge dispose", () => {
     const { bridge } = makeBridge(ipcMain);
     bridge.dispose();
 
-    expect(ipcMain.listenerCount(channels.cancel)).toBe(1);
-    expect(ipcMain.listeners(channels.cancel)).toEqual([externalCancel]);
-    expect(ipcMain.listenerCount(channels.control)).toBe(1);
-    expect(ipcMain.listeners(channels.control)).toEqual([externalControl]);
-    expect(ipcMain.handlers.has(channels.handshake)).toBe(false);
-    expect(ipcMain.handlers.has(channels.rpc)).toBe(false);
+    expect(ipcMain.listenerCount(channels.cancel)).toBe(2);
+    expect(ipcMain.listeners(channels.cancel)[0]).toBe(externalCancel);
+    expect(ipcMain.listenerCount(channels.control)).toBe(2);
+    expect(ipcMain.listeners(channels.control)[0]).toBe(externalControl);
+    expect(ipcMain.handlers.has(channels.handshake)).toBe(true);
+    expect(ipcMain.handlers.has(channels.rpc)).toBe(true);
   });
 
   test("is idempotent and disposes the underlying server exactly once", () => {
@@ -126,6 +129,197 @@ describe("bindElectronBridge dispose", () => {
 
     expect(callsBeforeDispose).toBe(0);
     expect(second).toHaveBeenCalledTimes(1);
+  });
+});
+
+/*
+ * bind `dispose()` 뒤 요청 거부와 같은 namespace 재bind 인수(ADR 0026).
+ * dispose된 bind는 IPC handler·listener를 남겨 폐기된 server가 기존 거부
+ * 경로로 응답하고, 같은 `ipcMain`·namespace의 새 bind가 그 listener를 인수한다.
+ */
+describe("bind dispose 뒤 요청 거부와 재bind 인수", () => {
+  type StatusBridge = {
+    device: {
+      rpc: { ping(input: string): string };
+      state: { status: string };
+    };
+  };
+
+  /** 새 server와 bind를 만든다. 두 번째 bind 비교용으로 server를 따로 돌려준다. */
+  function bindStatus(ipcMain: FakeIpcMain, namespace = "test") {
+    const impl: BridgeImpl<StatusBridge> = {
+      device: {
+        rpc: { ping: (input) => `pong:${input}` },
+        state: { status: currentValueSource(new BehaviorSubject("ready")) },
+      },
+    };
+    const server = createBridgeServer(impl);
+    const bridge = bindElectronBridge({
+      ipcMain: ipcMain as unknown as IpcMain,
+      server,
+      namespace,
+      allowedOrigins: ["app://local"],
+    });
+    return { server, bridge };
+  }
+
+  /** stream 전송을 받는 main frame을 가진 문서. `isMainFrame`은 frame 동일성으로 판정한다. */
+  function documentWithStream(id = 1) {
+    const contents = new FakeWebContents(id);
+    const send = vi.fn<(channel: string, message: unknown) => void>();
+    Object.assign(contents.mainFrame, { send });
+    const event = { sender: contents, senderFrame: contents.mainFrame };
+    return { contents, send, event };
+  }
+
+  async function handshake(
+    ipcMain: FakeIpcMain,
+    event: unknown,
+    clientId: string,
+  ) {
+    return ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").handshake)!(
+      event,
+      { protocolVersion: 1, clientId },
+    );
+  }
+
+  function ping(ipcMain: FakeIpcMain, event: unknown, clientId: string) {
+    return ipcMain.handlers.get(ELECTRON_BRIDGE_CHANNELS("test").rpc)!(event, {
+      protocolVersion: 1,
+      clientId,
+      requestId: "request-1",
+      key: "rpc:device/ping",
+      input: "x",
+    });
+  }
+
+  function subscribeStatus(
+    ipcMain: FakeIpcMain,
+    event: unknown,
+    clientId: string,
+    n: number,
+  ) {
+    ipcMain.emit(ELECTRON_BRIDGE_CHANNELS("test").control, event, {
+      protocolVersion: 1,
+      clientId,
+      type: "subscribe",
+      subscriptionId: testSubscriptionId(n),
+      key: "state:device/status",
+    });
+  }
+
+  function streamMessages(send: ReturnType<typeof vi.fn>) {
+    return send.mock.calls.map(([, message]) => message);
+  }
+
+  test("dispose 뒤 새 구독은 subscribed 뒤 error FORBIDDEN으로 끝난다", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge } = bindStatus(ipcMain);
+    const doc = documentWithStream();
+    bridge.attach(doc.contents as unknown as WebContents, "main");
+    await handshake(ipcMain, doc.event, "client-1");
+
+    bridge.dispose();
+    subscribeStatus(ipcMain, doc.event, "client-1", 1);
+
+    await vi.waitFor(() =>
+      expect(streamMessages(doc.send)).toEqual([
+        expect.objectContaining({
+          type: "subscribed",
+          subscriptionId: testSubscriptionId(1),
+        }),
+        expect.objectContaining({
+          type: "error",
+          subscriptionId: testSubscriptionId(1),
+          error: {
+            code: "FORBIDDEN",
+            message: "Bridge sender is not authorized.",
+          },
+        }),
+      ]),
+    );
+  });
+
+  test("dispose 뒤 RPC는 FORBIDDEN, handshake는 INVALID_ARGUMENT 응답을 받는다", async () => {
+    const ipcMain = new FakeIpcMain();
+    const { bridge } = bindStatus(ipcMain);
+    const doc = documentWithStream();
+    bridge.attach(doc.contents as unknown as WebContents, "main");
+    await handshake(ipcMain, doc.event, "client-1");
+
+    bridge.dispose();
+
+    await expect(ping(ipcMain, doc.event, "client-1")).resolves.toMatchObject({
+      type: "error",
+      error: { code: "FORBIDDEN", message: "Bridge sender is not authorized." },
+    });
+    await expect(
+      handshake(ipcMain, doc.event, "client-2"),
+    ).resolves.toMatchObject({
+      type: "error",
+      error: { code: "INVALID_ARGUMENT", message: "Invalid bridge request." },
+    });
+  });
+
+  test("같은 namespace로 다시 bind하면 폐기된 bind의 handler·listener를 인수한다", async () => {
+    const ipcMain = new FakeIpcMain();
+    const channels = ELECTRON_BRIDGE_CHANNELS("test");
+    const externalControl = () => {};
+    ipcMain.on(channels.control, externalControl);
+    const first = bindStatus(ipcMain);
+    const firstControl = vi.spyOn(first.server, "controlStream");
+    first.bridge.dispose();
+
+    const second = bindStatus(ipcMain);
+    const doc = documentWithStream();
+    second.bridge.attach(doc.contents as unknown as WebContents, "main");
+
+    expect(ipcMain.listeners(channels.control)).toHaveLength(2);
+    expect(ipcMain.listeners(channels.control)[0]).toBe(externalControl);
+    expect(ipcMain.listenerCount(channels.cancel)).toBe(1);
+    await expect(
+      handshake(ipcMain, doc.event, "client-1"),
+    ).resolves.toMatchObject({ manifest: expect.any(Object) });
+    await expect(ping(ipcMain, doc.event, "client-1")).resolves.toMatchObject({
+      type: "success",
+      result: "pong:x",
+    });
+    subscribeStatus(ipcMain, doc.event, "client-1", 1);
+    await vi.waitFor(() =>
+      expect(streamMessages(doc.send)).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({ type: "subscribed" }),
+          expect.objectContaining({ type: "batch", values: ["ready"] }),
+        ]),
+      ),
+    );
+    expect(firstControl).not.toHaveBeenCalled();
+    expect(streamMessages(doc.send)).not.toContainEqual(
+      expect.objectContaining({ type: "error" }),
+    );
+  });
+
+  test("활성 bind가 있는 채 같은 namespace로 bind하면 throw한다", () => {
+    const ipcMain = new FakeIpcMain();
+    bindStatus(ipcMain);
+
+    expect(() => bindStatus(ipcMain)).toThrow(
+      "Attempted to register a second handler for 'rx-bridge-electron:v1:test:handshake'",
+    );
+  });
+
+  test("다른 namespace bind는 폐기된 bind의 handler·listener를 지우지 않는다", () => {
+    const ipcMain = new FakeIpcMain();
+    const channels = ELECTRON_BRIDGE_CHANNELS("test");
+    const first = bindStatus(ipcMain);
+    first.bridge.dispose();
+
+    bindStatus(ipcMain, "other");
+
+    expect(ipcMain.handlers.has(channels.handshake)).toBe(true);
+    expect(ipcMain.handlers.has(channels.rpc)).toBe(true);
+    expect(ipcMain.listenerCount(channels.cancel)).toBe(1);
+    expect(ipcMain.listenerCount(channels.control)).toBe(1);
   });
 });
 

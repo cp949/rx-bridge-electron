@@ -38,11 +38,21 @@ const schemas = {
     event: { notice: string },
   },
 } satisfies SchemasFor<FixtureBridge>;
-const server = createBridgeServer(impl, { schemas });
+declare global {
+  // bind `dispose()`·재bind를 test가 `app.evaluate`로 부르는 main process 훅.
+  var rxBridgeFixture: { disposeBridge(): void; rebind(): void } | undefined;
+}
+
+type Bind = ReturnType<typeof bindElectronBridge>;
+
+function bind(): Bind {
+  const server = createBridgeServer(impl, { schemas });
+  return bindElectronBridge({ server, allowedOrigins: ["file://"] });
+}
 
 async function start(): Promise<void> {
   await app.whenReady();
-  const bridge = bindElectronBridge({ server, allowedOrigins: ["file://"] });
+  let bridge = bind();
   const window = new BrowserWindow({
     show: false,
     webPreferences: {
@@ -56,6 +66,14 @@ async function start(): Promise<void> {
   });
   bridge.attach(window.webContents);
   window.on("closed", () => bridge.dispose());
+  globalThis.rxBridgeFixture = {
+    disposeBridge: () => bridge.dispose(),
+    // 같은 기본 namespace로 새 server·bind를 만들어 같은 창을 attach한다.
+    rebind() {
+      bridge = bind();
+      bridge.attach(window.webContents);
+    },
+  };
   await window.loadFile(
     process.env.RX_BRIDGE_RENDERER ??
       fileURLToPath(new URL("./renderer.html", import.meta.url)),
