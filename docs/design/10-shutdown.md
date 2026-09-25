@@ -23,7 +23,7 @@
 | ------------------ | --------------------------------------------------------------- | ---------------------------------------------- | -------------------------------------------------- |
 | `api.dispose()`    | `ApiLifetime` (`src/renderer/api-lifetime.ts`)                  | `#terminated`                                  | Renderer API 인스턴스 하나(RPC 확정, stream 정리)  |
 | `server.dispose()` | `buildBridgeServer` 반환 객체, `DocumentSessions`               | 서버의 `disposed`, `DocumentSessions#disposed` | 모든 attach, 모든 문서 세션(retire 사유 `dispose`) |
-| bind `dispose()`   | `bindElectronBridge` 반환 객체 (`src/main/electron-adapter.ts`) | bind의 `disposed`                              | 자기 attach, 자기 IPC handler·listener, 서버       |
+| bind `dispose()`   | `bindElectronBridge` 반환 객체 (`src/main/electron-adapter.ts`) | bind의 `disposed`                              | 자기 attach, 서버                                  |
 
 `api.dispose`와 `api[Symbol.dispose]`는 같은 함수 참조다. `RendererApi<B>` 타입은 `Disposable`을 포함한다.
 
@@ -36,7 +36,7 @@
 5. Renderer는 종료 뒤 control 메시지를 새로 시작하지 않는다. 예외는 종료 절차의 일부인 unsubscribe뿐이다(4.1).
 6. 종료된 Renderer API 인스턴스의 RPC 결과와 stream 메시지는 호출자·구독자에게 전달되지 않는다.
 7. `server.dispose()`는 retired client ID 기록을 지우지 않는다.
-8. bind `dispose()`는 자기가 등록한 IPC listener만 제거한다.
+8. bind `dispose()`는 IPC handler·listener를 남긴다. 같은 `ipcMain`·namespace의 새 bind가 등록 전에 옛 bind가 등록한 handler·listener만 제거한다.
 
 ## 4. 흐름
 
@@ -129,10 +129,12 @@ retired client ID 기록은 dispose 뒤에도 남는다. `destroyed` 수명 사�
 1. bind의 `disposed`가 이미 `true`면 반환한다. 아니면 `true`로 둔다.
 2. bind가 attach한 `webContents`마다 server detach를 호출한다(retire 사유 `detach`). lifecycle listener가 제거되고 활성 구독은 `error CANCELLED`를 받는다.
 3. attach 표를 비운다.
-4. handshake·rpc 채널은 `ipcMain.removeHandler`로, cancel·control 채널은 자기가 등록한 `onCancel`·`onControl` 참조만 `ipcMain.removeListener`로 제거한다.
-5. `server.dispose()`를 호출한다. bind를 거치지 않고 `server.attach`로 붙은 세션은 여기서 사유 `dispose`로 retire된다.
+4. `server.dispose()`를 호출한다. bind를 거치지 않고 `server.attach`로 붙은 세션은 여기서 사유 `dispose`로 retire된다.
+5. 해제 함수를 `ipcMain`별·handshake 채널별 module 내부 registry에 둔다. IPC handler·listener는 제거하지 않는다.
 
-종료 뒤 bind의 `attach()`는 server를 부르기 전에 동기 throw `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`한다. 채널 handler가 제거됐으므로 이후 IPC 요청은 server에 도달하지 않는다.
+종료 뒤 bind의 `attach()`는 server를 부르기 전에 동기 throw `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`한다. 남은 handler·listener는 요청을 폐기된 server로 넘긴다. 그래서 결과는 `server.dispose()`만 부른 경우와 같다(4.4): handshake `INVALID_ARGUMENT` 응답, RPC `FORBIDDEN`, subscribe `subscribed` 뒤 `error FORBIDDEN`.
+
+같은 `ipcMain`·namespace로 `bindElectronBridge`를 다시 부르면, 새 bind는 등록 전에 registry의 해제 함수를 호출한다. 해제 함수는 entry를 지우고 handshake·rpc 채널을 `ipcMain.removeHandler`로, cancel·control 채널은 옛 bind가 등록한 `onCancel`·`onControl` 참조만 `ipcMain.removeListener`로 제거한다. dispose되지 않은 bind는 registry에 없으므로 활성 bind가 있는 채 같은 namespace로 bind하면 `ipcMain.handle`이 throw한다.
 
 ### 4.6 dispose가 필요 없는 경우
 
@@ -157,6 +159,8 @@ retired client ID 기록은 dispose 뒤에도 남는다. `destroyed` 수명 사�
 - **플래그 먼저, 부작용 나중**: 진단 sink·`complete` 콜백 재진입이 절반쯤 정리된 상태를 보지 않는다.
 - **retired 기록 유지**: 서버 dispose는 세션이 다시 살아날 수 없게 만드는 사건이라 기록을 지울 이유가 없다. 지우는 경로를 두면 "retire된 client ID는 재사용하지 않는다" 규칙이 종료 경로에 따라 약해진다.
 - **bind가 자기 listener만 제거**: 같은 IPC 채널에 다른 코드가 등록한 listener를 건드리지 않는다. invoke 채널은 채널당 handler가 하나뿐이라 `removeHandler`로 충분하다.
+- **bind `dispose()` 뒤에도 listener 유지**: listener를 지우면 창이 살아 있는 동안 새 구독이 Main에 도달하지 못해 응답이 없다(`RemoteState`가 `connecting`에 머문다). 남겨 두면 폐기된 server가 `server.dispose()`와 같은 오류로 끝낸다([ADR 0026](../adr/0026-bind-dispose-keeps-ipc-listeners.md)).
+- **재bind 인수는 dispose된 bind만**: 활성 bind의 handler를 빼앗으면 cancel·control listener가 두 벌 남아 한 요청에 두 server가 응답한다.
 
 기각한 대안:
 
@@ -166,6 +170,8 @@ retired client ID 기록은 dispose 뒤에도 남는다. `destroyed` 수명 사�
 - **종료 중 활성 generation 합류 허용**: 현재값 재생과 늦은 `complete`를 받아 종료 뒤 규칙이 깨진다.
 - **`finally`에서 풀리는 재진입 가드(`disposing`)**: 종료 후 상태를 표현하지 못해 종료 뒤 `attach()`·요청을 막지 못한다.
 - **`ipcMain.removeAllListeners`**: 같은 채널의 다른 listener까지 지운다.
+- **bind `dispose()`에서 listener 즉시 제거**: 창을 남긴 채 dispose하면 새 구독이 무응답으로 남고, RPC·handshake가 `server.dispose()`와 다른 `INTERNAL` transport 실패가 된다.
+- **Renderer에 서버 종료를 알리는 wire 메시지**: 프로토콜 변경이고 API 전체 끊김 신호를 새로 만든다. 무응답 해소에는 listener 유지로 충분하다.
 - **dispose 때 retired 기록 삭제**: 재사용 방지가 조용히 무력화될 수 있다.
 - **hello-world에서 `pagehide`마다 `api.dispose()` 자동 호출**: Main이 이미 retire로 회수하므로 불필요한 코드다.
 - **종료 절차를 범용 콜백 목록으로 구성**: RPC 먼저·stream 나중 순서가 등록 순서에 의존한다.
@@ -176,6 +182,8 @@ retired client ID 기록은 dispose 뒤에도 남는다. `destroyed` 수명 사�
 - cancel은 best-effort다. 전송이 실패하거나 handler가 `signal`을 무시하면 Main handler는 끝날 때까지(또는 `maxRpcDurationMs`까지) RPC slot을 점유한다([09. 세션 자원 한도](09-resource-limits.md)).
 - API 전체 차원의 끊김 신호(`api.closed`, `onDisconnect`)는 없다. Main 쪽 종료는 개별 stream terminal과 RPC 오류로만 드러난다.
 - bind `dispose()`는 서버도 끝낸다. 서버를 bind보다 오래 살리거나 다른 bind에 다시 연결할 수 없다. 다시 연결하려면 새 `createBridgeServer`와 `bindElectronBridge`를 만든다.
+- dispose된 bind의 IPC handler·listener와 폐기된 server는 같은 `ipcMain`·namespace로 새 bind가 올 때까지 남는다. 재bind하지 않으면 process 종료까지 남는다.
+- 재bind의 해제 함수는 채널 handler가 여전히 옛 bind 것인지 확인하지 못한다(Electron에 handler 조회 API가 없다). dispose 뒤 사용자가 같은 채널에 직접 handler를 등록했다면 다음 재bind가 그것을 지운다.
 - 서버 dispose 뒤 retired 기록은 서버 객체가 수거될 때까지 메모리에 남는다. dispose 뒤 admission은 모두 거부되므로 기록이 판정에 쓰이지는 않는다.
 
 ## 7. 관련 문서

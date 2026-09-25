@@ -222,7 +222,7 @@ State·Event 구독이 어떻게 끝나는지 정리합니다. 끝난 구독은 
 | Main source가 complete                                                                                        | `complete`                                                                                   |
 | `api.dispose()`                                                                                               | `complete`                                                                                   |
 | Main 세션 종료(`attach` 해제, `server.dispose()`, bind `dispose()`)                                           | `error`: `CANCELLED "Bridge session ended."`                                                 |
-| `attach` 해제나 `server.dispose()` 뒤의 새 구독(bind `dispose()` 뒤에는 응답이 없습니다)                      | 구독 확인 직후 `error`: `FORBIDDEN "Bridge sender is not authorized."`(RPC 거부와 같은 문구) |
+| `attach` 해제, `server.dispose()`, bind `dispose()` 뒤의 새 구독                                              | 구독 확인 직후 `error`: `FORBIDDEN "Bridge sender is not authorized."`(RPC 거부와 같은 문구) |
 | `authorize` 거부                                                                                              | `error`: `FORBIDDEN`                                                                         |
 | 세션 구독 한도 초과                                                                                           | `error`: `RESOURCE_EXHAUSTED`                                                                |
 | Event buffer 초과(overflow 정책 `"error"`)                                                                    | `error`: `STREAM_OVERFLOW`                                                                   |
@@ -559,7 +559,7 @@ Main·preload·Renderer를 Electron IPC로 잇는 연결 설정입니다. [시�
 
 - `allowedOrigins`는 생략할 수 없습니다. origin 검증이 보안 경계이기 때문입니다.
 - Main을 종료하기 전에 `bridge.dispose()`를 호출합니다.
-- `dispose()` 뒤의 서버와 bind는 다시 쓸 수 없습니다. 다시 연결하려면 `createBridgeServer`와 `bindElectronBridge`를 새로 만듭니다.
+- `dispose()` 뒤의 서버와 bind는 다시 쓸 수 없습니다. 다시 연결하려면 `createBridgeServer`와 `bindElectronBridge`를 새로 만듭니다. 같은 namespace로 새로 만든 bind는 dispose된 bind의 IPC 연결을 넘겨받습니다. dispose되지 않은 bind가 있는 채 같은 namespace로 다시 만들면 오류가 납니다.
 
 창은 다음 설정으로 만드세요: `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색과 창 생성 제한, 명시적 신뢰 origin 목록. Renderer 코드는 preload가 노출한 동결 transport만 받고 `ipcRenderer`나 채널 이름에 접근하지 못합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)).
 

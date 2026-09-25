@@ -44,6 +44,8 @@ _(개정: RD-031 — `dispose()` 뒤에는 해당 인스턴스가 그 어떤 con
 
 bind `dispose()`(`electron-adapter.ts`의 `bindElectronBridge` 반환값)는 자신의 종료 플래그를 둔다. 반복 호출은 no-op이다. 종료 후 `attach()`는 `BridgeProtocolError("FORBIDDEN", "Electron bridge is disposed.")`를 동기로 throw한다. listener 제거 방식을 바꾼다: 현재 `dispose()`는 `ipcMain.removeAllListeners(channels.cancel)`/`removeAllListeners(channels.control)`를 쓰는데, 이는 같은 채널에 다른 코드가 등록한 listener까지 지운다. bind가 직접 등록한 cancel/control listener의 참조만 `removeListener`로 제거하도록 바꾼다. invoke 채널(handshake, rpc)은 현행대로 `removeHandler`를 쓴다 — 채널당 handler는 하나뿐이라 다른 listener를 오염시킬 여지가 없다.
 
+_(개정: [ADR 0026](0026-bind-dispose-keeps-ipc-listeners.md) — bind `dispose()`는 이제 handler·listener를 dispose 시점에 제거하지 않는다. 남은 listener로 폐기된 server가 뒤이은 요청을 `server.dispose()`와 같은 거부 경로로 응답한다. 같은 `ipcMain`·namespace의 새 bind가 등록 전에 그 handler·listener를 제거한다. 제거할 때는 이 문단의 규칙(자기 참조만 `removeListener`, invoke 채널은 `removeHandler`)을 그대로 쓴다.)_
+
 ## 범위 밖
 
 Main이 스트림을 닫을 때 Renderer에 terminal 메시지를 통지하는 프로토콜 확장은 이 문서의 범위 밖이다. 현재 Main 쪽 종료·retire는 Renderer에 능동적으로 알리지 않으며, 이는 별도 후속 과제로 남긴다. 이 문서는 새 오류 코드를 도입하지 않는다 — Renderer는 `CANCELLED`, Main은 `FORBIDDEN`/`INVALID_ARGUMENT` 기존 코드만 쓴다.

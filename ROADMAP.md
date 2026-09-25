@@ -323,6 +323,24 @@
 
   계획: `_works/20260926-04-readme-restructure/`. **결과:** 완료 조건 충족, 편차 없음. 목차와 제안 구조 10개 절, 진입점 표 `/testing` 행, 오류 코드 표 1개(9개 코드, RPC·구독 적용 열, 재시도 열), 구독 종료 원인 표 1개. 코드 블록·표 밖 300자(문자 수) 초과 줄 20→0건(이슈의 35건은 byte 기준). 내부 용어는 대체어로 바꿨다(남은 것은 ADR 파일명 링크와 진단 이벤트 이름 `handshake-failed`뿐). README 규칙 인벤토리 123건: 유지 102건, 이관 21건(이관처 `docs/design/` 절 확인, MISSING 0). 예제 31블록을 README 추출 harness로 `tsc` 6.0.3 타입 검사 통과(오류 주입 검출 확인). 상대 링크·anchor 깨짐 0건. 옛 절 이름 참조는 ADR 0024·`docs/design/07-renderer-streams.md` 2곳을 고쳤다. 독립 검토 2건(정보 손실 7건, 코드 대조 11건)을 모두 반영했다. 그중 5건은 옛 README부터 있던 오류다: 이름 규칙 누락, "structured clone 가능" 표현, Main 진단 필드, `broadcastEvent` 공유 범위 주석, loopback `clientId` 설명. 그 밖에 값 규칙을 어긴 RPC 입력은 preload가 먼저 거부해 `INTERNAL "RPC transport failed."`가 되고, TanStack 기본 key hash는 `bigint`에서 throw한다. 같은 검토에서 설계 문서 03·04·06의 loopback·`replaced` 서술 오류를 코드 기준으로 고쳤다. 후속 이슈: [bind `dispose()` 뒤 새 구독 무응답](.scratch/bind-dispose-subscribe/issues/01-bind-dispose-subscribe-no-response.md).
 
+### bind `dispose()` 뒤 요청 거부 (출처: [.scratch/bind-dispose-subscribe/issues/01-bind-dispose-subscribe-no-response.md](.scratch/bind-dispose-subscribe/issues/01-bind-dispose-subscribe-no-response.md))
+
+- [x] **RD-048 — bind `dispose()`가 IPC handler·listener를 남겨 폐기된 server가 뒤이은 요청을 거부하게 하고, 같은 `ipcMain`·namespace의 새 bind가 그 listener를 인수한다.** 결함 수정이다(공개 API 변경 없음). 2026-09-26 Electron probe 기준(`dev` @ `f29a75c`): bind `dispose()`는 `ipcMain.removeHandler`·`removeListener`로 채널을 비운다(`src/main/electron-adapter.ts`). 그 뒤 살아 있는 창의 새 State·Event 구독은 Main에 도달하지 않아 응답이 없고 `RemoteState.snapshot`이 `{ status: "connecting" }`에 머문다. RPC는 `INTERNAL "RPC transport failed."`, 재연결은 `INTERNAL "Bridge handshake failed."`이고 Main stderr에 `Error occurred in handler for '...:rpc': Error: No handler registered for ...`가 찍힌다. `server.dispose()`만 한 경우는 구독·RPC 모두 `FORBIDDEN "Bridge sender is not authorized."`로 끝난다. **구조:**
+  - bind `dispose()`는 detach와 `server.dispose()`만 한다. handler·listener는 남아 폐기된 server가 기존 거부 경로로 응답한다.
+  - `electron-adapter.ts` 내부 registry(`WeakMap<IpcMain, Map<handshake 채널, 해제 함수>>`)에 폐기된 bind의 해제 함수를 둔다. `bindElectronBridge`는 등록 전에 같은 `ipcMain`·namespace의 폐기된 bind를 해제한다. 활성 bind 중복은 지금처럼 `ipcMain.handle`이 throw한다.
+
+  **범위 밖:** Renderer에 서버 종료를 능동 통지하는 wire 메시지, `server.dispose()`·detach 경로 변경.
+
+  **완료 기준:**
+  - unit test: dispose 뒤 subscribe `error FORBIDDEN`·RPC `FORBIDDEN`·handshake `INVALID_ARGUMENT` 응답, 같은 namespace 재bind 인수(폐기된 server 응답 0건), 활성 중복 bind throw, 다른 namespace 비간섭, 외부 listener 보존. `FakeIpcMain.handle`은 Electron처럼 중복 등록에 throw한다.
+  - mutation 2종(listener 즉시 제거 복원, 재bind 인수 제거)이 RED.
+  - Electron acceptance: bind `dispose()` 뒤 새 구독 `error FORBIDDEN`, RPC `FORBIDDEN`, 같은 namespace 재bind + reload 뒤 RPC 성공.
+  - `src/` 변경은 `main/electron-adapter.ts` 1파일. 기존 test 단언 변경은 dispose listener 제거 test 1건.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, Electron acceptance, demo `check-types`·`test:unit` 통과.
+  - 새 ADR 0026, ADR 0006 개정 note, `docs/design/10-shutdown.md`, `docs/architecture.md`, 패키지 README, `.scratch` 이슈 Status.
+
+  계획: `_works/20260926-05-bind-dispose-forbidden/`. **결과:** 완료 조건 충족, 편차 없음. DELTA-01(`FakeIpcMain.handle`이 Electron처럼 중복 등록에 throw — 기존 543 tests 영향 0. 새 계약 unit test 추가, 수정 전 4 RED: dispose 뒤 listener 유지(`expected 1 to be 2`), 새 구독 무응답(stream 메시지 0건), RPC handler 없음, 다른 namespace 비간섭. 재bind 인수·활성 중복 throw는 수정 전 characterization GREEN) → DELTA-02(`electron-adapter.ts`에 module 내부 `disposedBindings` registry, `dispose()`는 detach → `server.dispose()` → 해제 함수 등록, `bindElectronBridge`는 등록 전 같은 key 해제. `test/main` 548 GREEN. mutation (a) 해제 즉시 호출 → 4 failed, (b) 인수 제거 → 1 failed, 원복) → DELTA-03(fixture main에 `rxBridgeFixture.disposeBridge()`·`rebind()` 훅, Electron acceptance 1건 추가. adapter만 `dev` 판으로 되돌리면 `No handler registered for 'rx-bridge-electron:v1:default:rpc'`로 RED, 수정 뒤 4/4. 실제 `ipcMain.handle`에서 같은 namespace 재bind 인수 확인) → DELTA-04(ADR 0026 신규, ADR 0006 개정 note, `docs/design/10-shutdown.md` §2·§3·§4.5·§5·§6, `docs/architecture.md`, 패키지 README 종료 원인 표·보안 설정 절, `.scratch` 이슈 승격) → DELTA-05(패키지 `xvfb-run -a pnpm verify` 46 files/881 tests, 루트 `pnpm lint`·`pnpm format:check`, Electron `bridge` 4/4·`multi-window` 13/13, demo `check-types`·`test:unit` 11 files/26 tests 통과. `src/` 변경 `main/electron-adapter.ts` 1파일, 기존 test 단언 변경 1건).
+
 ## 현재 범위 밖의 확장` 제목을 복원했다.
 
 ### 렌더러 문서 세션 retire interface (출처: 아키텍처 리뷰 `_works/arch-review/03.html` 후보 02)
