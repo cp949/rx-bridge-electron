@@ -13,6 +13,7 @@ import type { ApiLifetime } from "./api-lifetime.js";
 import {
   createDisposedError,
   localError,
+  remoteErrorFromPayload,
   RemoteError,
 } from "./remote-error.js";
 import type { BridgeTransport, CallOptions } from "./transport.js";
@@ -193,11 +194,7 @@ export class RpcClient {
             }
             if (response.type === "error") {
               rejectOnce(
-                new RemoteError(
-                  response.error.code,
-                  response.error.message,
-                  response.error.details,
-                ),
+                remoteErrorFromPayload(response.error),
                 "remote-error",
               );
               return;

@@ -270,6 +270,38 @@ describe("renderer remote Event", () => {
     expect(nextValues).toEqual(["fresh"]);
   });
 
+  test("propagates code, message, and details from a stream error frame as RemoteError", async () => {
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
+    const api = await createRendererApi<EventBridge>({ transport });
+    const errors: unknown[] = [];
+    api.hardware.event.fault$.subscribe({
+      error: (error) => errors.push(error),
+    });
+    const id = transport.subscriptionIdFor(FAULT_KEY, 0);
+    transport.emitStream(
+      streamMessage(id, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(id, {
+        type: "error",
+        sequence: 1,
+        error: {
+          code: "SOURCE_FAILED",
+          message: "stream failed",
+          details: { retryable: true },
+        },
+      }),
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toBeInstanceOf(RemoteError);
+    expect(errors[0]).toMatchObject({
+      code: "SOURCE_FAILED",
+      message: "stream failed",
+      details: { retryable: true },
+    });
+  });
+
   test("routes subscribed and a synchronous first batch through the pre-registered generation", async () => {
     const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const wireOrder: string[] = [];

@@ -13,7 +13,7 @@ import {
   type SubscriptionCloseCause,
 } from "./diagnostics.js";
 import { createOpaqueId } from "./ids.js";
-import { localError, RemoteError } from "./remote-error.js";
+import { localError, remoteErrorFromPayload, RemoteError } from "./remote-error.js";
 import type { BridgeTransport } from "./transport.js";
 
 /**
@@ -42,10 +42,6 @@ interface StreamGeneration {
 type GenerationEnd =
   | { readonly cause: Exclude<SubscriptionCloseCause, "remote-error"> }
   | { readonly cause: "remote-error"; readonly error: RpcErrorPayload };
-
-function remoteError(payload: RpcErrorPayload): RemoteError {
-  return new RemoteError(payload.code, payload.message, payload.details);
-}
 
 export class StreamMultiplexer {
   readonly #transport: BridgeTransport;
@@ -164,7 +160,7 @@ export class StreamMultiplexer {
         generation.handlers.complete();
         break;
       case "remote-error":
-        generation.handlers.error(remoteError(end.error));
+        generation.handlers.error(remoteErrorFromPayload(end.error));
         break;
       case "transport-failed":
         generation.handlers.error(
