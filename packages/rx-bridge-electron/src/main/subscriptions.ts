@@ -1,5 +1,3 @@
-import { Observable, Subscriber, type Subscription } from "rxjs";
-
 import {
   parseOpaqueIdSequence,
   withEnvelope,
@@ -22,7 +20,7 @@ import {
   SENDER_UNAUTHORIZED_MESSAGE,
   type DocumentSession,
 } from "./document-sessions.js";
-import { internalError, serializeError } from "./error-serializer.js";
+import { internalError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
 import type {
   EventRegistrationEntry,
@@ -31,18 +29,13 @@ import type {
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
 import type { Authorize, DiagnosticsSink, SenderIdentity } from "./types.js";
+import { Upstreams } from "./upstreams.js";
 
 export type StreamSender = (message: StreamMessage) => void;
 
 type Registration = StateRegistrationEntry | EventRegistrationEntry;
 type SubscribeCommand = Extract<WireStreamCommand, { type: "subscribe" }>;
 type ControlCommand = Exclude<WireStreamCommand, { type: "subscribe" }>;
-
-interface SharedSource {
-  readonly source: Observable<BridgeValue>;
-  readonly consumers: Set<Consumer>;
-  upstream?: Subscription;
-}
 
 /** authorize 대기 중인 구독 하나. 결정되면 제거되고(성공 시) Consumer로 이어진다. */
 interface PendingEntry {
@@ -60,11 +53,8 @@ interface Consumer {
   readonly registration: Registration;
   readonly controller: AbortController;
   readonly onSessionAbort: () => void;
-  readonly shared?: SharedSource;
   /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
   readonly window: DeliveryWindow;
-  sourceDetached: boolean;
-  own?: Subscription;
 }
 
 /** 세션 1개가 소유한 구독 상태. `pending`+`consumers` 합이 slot 점유 수다. */
@@ -118,10 +108,13 @@ function endNotice(
  * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)이 "수락 → ack 대기 → 다음
  * 값 | terminal"과 선점 종료를 소유한다. 이 클래스는 값·ack·세션 종료를
  * 창에 넘기고, 창이 돌려준 메시지를 envelope로 감싸 보낸다.
+ *
+ * upstream 연결(State·broadcast Event 공유, scoped Event 개별)은 내부 module
+ * `Upstreams`가 소유한다. 이 클래스는 consumer를 토큰으로 연결·해제만 한다.
  */
 export class Subscriptions {
   readonly #table: RegistrationTable;
-  readonly #shared = new Map<string, SharedSource>();
+  readonly #upstreams = new Upstreams();
   readonly #sessions = new WeakMap<DocumentSession, SessionState>();
   /**
    * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) — 진단
@@ -411,7 +404,6 @@ export class Subscriptions {
         }
         this.#close(consumer);
       },
-      sourceDetached: false,
     };
     state.consumers.set(command.subscriptionId, consumer);
     this.#liveStates.add(state);
@@ -429,25 +421,18 @@ export class Subscriptions {
     this.#send(consumer, window.open());
     if (window.closed) return;
     try {
-      if (registration.kind === "state") {
-        this.#startShared(consumer, command.key, registration.source);
-      } else if (registration.delivery.mode === "scoped") {
-        const context = bridgeContext(
-          session,
-          sender,
-          { requestId: command.subscriptionId, clientId: command.clientId },
-          controller.signal,
-        );
-        const source = registration.delivery.factory(context);
-        if (window.closed) return;
-        if (!(source instanceof Observable))
-          throw new TypeError("Scoped factory must return an Observable.");
-        const upstream = new Subscriber<BridgeValue>(this.#observer(consumer));
-        consumer.own = upstream;
-        source.subscribe(upstream);
-      } else {
-        this.#startShared(consumer, command.key, registration.delivery.source);
-      }
+      const context = bridgeContext(
+        session,
+        sender,
+        { requestId: command.subscriptionId, clientId: command.clientId },
+        controller.signal,
+      );
+      this.#upstreams.connect(consumer, registration, context, {
+        next: (value) => this.#next(consumer, value),
+        error: () =>
+          this.#terminate(consumer, { type: "error", error: internalError }),
+        complete: () => this.#terminate(consumer, { type: "complete" }),
+      });
     } catch {
       this.#terminate(consumer, { type: "error", error: internalError });
     }
@@ -489,60 +474,6 @@ export class Subscriptions {
     }
   }
 
-  /**
-   * state·broadcast event 공용 fan-out: key 하나에 upstream 구독 하나를 두고
-   * 여러 consumer가 나눠 받는다(scoped는 요청별 factory라 별도 경로).
-   */
-  #startShared(
-    consumer: Consumer,
-    key: string,
-    source: Observable<BridgeValue>,
-  ): void {
-    let shared = this.#shared.get(key);
-    if (shared === undefined) {
-      shared = { source, consumers: new Set() };
-      this.#shared.set(key, shared);
-    }
-    (consumer as { shared?: SharedSource }).shared = shared;
-    const startsUpstream = shared.consumers.size === 0;
-    shared.consumers.add(consumer);
-    if (startsUpstream) {
-      const upstream = new Subscriber<BridgeValue>({
-        next: (value) => {
-          for (const member of [...shared.consumers]) this.#next(member, value);
-        },
-        error: (error: unknown) => {
-          for (const member of [...shared.consumers])
-            this.#terminate(member, {
-              type: "error",
-              error: serializeError(error, [], this.#limits),
-            });
-        },
-        complete: () => {
-          for (const member of [...shared.consumers])
-            this.#terminate(member, { type: "complete" });
-        },
-      });
-      shared.upstream = upstream;
-      source.subscribe(upstream);
-      if (shared.consumers.size === 0) upstream.unsubscribe();
-    } else if (consumer.registration.kind === "state") {
-      this.#next(consumer, consumer.registration.source.getValue());
-    }
-  }
-
-  #observer(consumer: Consumer) {
-    return {
-      next: (value: BridgeValue) => this.#next(consumer, value),
-      error: (error: unknown) =>
-        this.#terminate(consumer, {
-          type: "error",
-          error: serializeError(error, [], this.#limits),
-        }),
-      complete: () => this.#terminate(consumer, { type: "complete" }),
-    };
-  }
-
   #next(consumer: Consumer, raw: unknown): void {
     // fan-out 순회 스냅샷 안에서 앞 consumer의 동기 send가 이 consumer를
     // 닫거나 terminal을 기록할 수 있다. 검증 전에 확인해 버린다.
@@ -559,14 +490,14 @@ export class Subscriptions {
       return;
     }
     const { message, overflowed } = consumer.window.accept(value);
-    if (overflowed) this.#detachSource(consumer);
+    if (overflowed) this.#upstreams.disconnect(consumer);
     if (message !== undefined) this.#send(consumer, message);
   }
 
   #terminate(consumer: Consumer, terminal: WindowTerminal): void {
     const { recorded, message } = consumer.window.end(terminal);
     if (!recorded) return;
-    this.#detachSource(consumer);
+    this.#upstreams.disconnect(consumer);
     if (message !== undefined) this.#send(consumer, message);
   }
 
@@ -587,21 +518,6 @@ export class Subscriptions {
     }
   }
 
-  #detachSource(consumer: Consumer): void {
-    if (consumer.sourceDetached) return;
-    consumer.sourceDetached = true;
-    consumer.own?.unsubscribe();
-    const shared = consumer.shared;
-    if (shared !== undefined) {
-      shared.consumers.delete(consumer);
-      if (shared.consumers.size === 0) {
-        shared.upstream?.unsubscribe();
-        if (this.#shared.get(consumer.key) === shared)
-          this.#shared.delete(consumer.key);
-      }
-    }
-  }
-
   #close(consumer: Consumer): void {
     if (!consumer.window.close()) return;
     recordDiagnostic(this.#diagnostics, {
@@ -618,6 +534,6 @@ export class Subscriptions {
       this.#pruneIfEmpty(state);
     }
     consumer.controller.abort();
-    this.#detachSource(consumer);
+    this.#upstreams.disconnect(consumer);
   }
 }
