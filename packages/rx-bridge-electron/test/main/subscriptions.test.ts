@@ -2063,4 +2063,25 @@ describe("Main stream terminal notify on retire", () => {
     expect(messages).toEqual([]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
+
+  test("unsubscribe inside the subscription-opened diagnostic leaves no retire listener that notifies on a later detach", async () => {
+    const { server, diagnostics, messages, send } = harness();
+    const detach = server.attach(new FakeTarget());
+    diagnostics.record.mockImplementation((event: { type: string }) => {
+      if (event.type === "subscription-opened")
+        void server.controlStream(
+          sender(),
+          command("unsubscribe", testSubscriptionId(1)),
+          send,
+        );
+    });
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    detach();
+    expect(messages).toEqual([]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });

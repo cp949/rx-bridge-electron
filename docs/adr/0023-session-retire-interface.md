@@ -41,6 +41,7 @@ interface DocumentSession {
 - 이미 retire된 세션에 등록하면 `listener`를 반환 **전에** 동기 호출하고 no-op 해제 함수를 돌려준다.
 - listener는 인자를 받지 않는다. 사유는 `retireReason`으로 읽는다 — listener 안에서도 이미 설정돼 있다.
 - 반환된 해제 함수는 자기 등록만 지우고 멱등이다.
+- 즉시 호출은 `EventTarget` dispatch를 거치지 않는다. 그 listener의 예외는 `onRetire` 호출자에게 그대로 전파된다 — 결정 4의 예외 격리는 등록 뒤 retire에만 적용된다. 지금 등록되는 listener 3종은 전송·진단 실패를 스스로 삼킨다.
 
 이 즉시 호출 덕에 세 등록 지점(RPC entry, 구독 pending, 구독 consumer) 모두 "등록 전 retire"와 "등록 후 retire"를 같은 경로로 처리한다 — 호출자의 분기가 사라진다.
 
@@ -78,10 +79,12 @@ class SessionImpl implements DocumentSession {
 
 interface 도입(DELTA-02·03)에 앞서, 기존 raw `signal` 구조 그대로 pending·consumer의 이미-retire 무통지를 고쳤다.
 
-- **pending**: 이미-aborted 분기가 무통지 return하는 대신 `entry.onAbort()`(기존 `onAbort`가 이미 C2가 요구하는 처리 — pending 삭제·prune·`controller.abort()`·`#endUnstarted(retired)` — 를 그대로 구현하고 있어 직접 호출로 충분했다)를 호출한다.
+- **pending**: 이미-aborted 분기가 무통지 return하는 대신 `entry.onAbort()`(기존 `onAbort`가 필요한 처리 — pending 삭제·prune·`controller.abort()`·`#endUnstarted(retired)` — 를 이미 그대로 구현하고 있어 직접 호출로 충분했다)를 호출한다.
 - **consumer**: `Consumer`에 mutable `opened: boolean` 필드를 추가하고 `subscribed` 송신 직전에 켠다. `onSessionAbort`가 이 값으로 갈린다 — open 전이면 `#close(consumer)` 뒤 `#endUnstarted(command, send, { kind: "retired" }, session)`로 거부 전용 창(`DeliveryWindow`)이 `subscribed`(0)·`error`(1) `CANCELLED "Bridge session ended."`를 매긴다. open 후면 기존처럼 `preempt` → `#send` → `#close`다.
 
 consumer 등록 위치(open 송신 앞)는 그대로 뒀다 — open 송신 뒤로 옮기면 동기 `send` 중 `server.dispose()`가 일어나는 경로에서 `CANCELLED` 통지를 잃는다(아래 "기각한 안" 참고).
+
+_(리뷰 수정, 2026-09-25: `subscription-opened` 진단 sink가 동기 unsubscribe로 consumer 창을 먼저 닫으면, `#close`가 부른 해제 handle은 아직 no-op 초기값이다. 그 뒤 `onRetire`가 살아 있는 세션에 등록한 listener가 남아, 나중 detach·dispose에서 해지된 구독으로 `subscribed`(0)·`CANCELLED`를 보냈다. `#start`는 등록 직후 창이 닫혀 있으면 방금 받은 handle을 해제한다. 변경 전 raw `signal` 구조에서는 같은 경로가 unsubscribe 직후 stray `subscribed`(0) 1건을 보냈다 — 이 수정 뒤에는 아무것도 보내지 않는다.)_
 
 이 fix가 등록 시점 이미-retire를 "등록 직후 처리"로 통일해 뒀기 때문에, DELTA-03에서 `onRetire`의 즉시 동기 호출로 자연스럽게 흡수됐다 — `entry.onAbort()`/`consumer.onSessionAbort()` 직접 호출이 `session.onRetire(entry.onAbort)`/`session.onRetire(consumer.onSessionAbort)` 등록으로 바뀌었을 뿐이다.
 

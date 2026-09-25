@@ -15,7 +15,8 @@ export interface DocumentSession {
   readonly retireReason: RetireReason | undefined;
   /**
    * retire 통지를 등록한다. 이미 retire된 세션이면 `listener`를 반환 전에
-   * 동기 호출하고 no-op 해제 함수를 돌려준다. 그 외에는 호출마다 독립
+   * 동기 호출하고 no-op 해제 함수를 돌려준다(이때 listener 예외는 호출자에게
+   * 전파된다 — dispatch 격리는 등록 뒤 retire에만 있다). 그 외에는 호출마다 독립
    * 등록이다 — 같은 함수를 두 번 등록하면 두 번 호출된다. 반환된 해제
    * 함수는 자기 등록만 지우고 멱등이다.
    */

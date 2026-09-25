@@ -452,10 +452,14 @@ export class Subscriptions {
     });
     // 세션이 등록 이전에 이미 retire됐으면 `onRetire`가 여기서
     // `consumer.onSessionAbort`를 즉시 동기 호출해 open 전 분기(`#close` +
-    // `#endUnstarted`)를 태운다 — 이 경우 `window.close()`가 이미 닫혔으므로
-    // handle을 저장하지 않고 그대로 return한다.
+    // `#endUnstarted`)를 태운다 — 이 경우 handle은 no-op이다. 진단 sink가
+    // 동기 unsubscribe로 창을 먼저 닫았으면 `#close`가 부른 `releaseRetire`는
+    // 아직 초기값이었으므로, 방금 등록한 listener를 여기서 해제한다.
     const release = session.onRetire(consumer.onSessionAbort);
-    if (window.closed) return;
+    if (window.closed) {
+      release();
+      return;
+    }
     consumer.releaseRetire = release;
     consumer.opened = true;
     this.#send(consumer, window.open());
