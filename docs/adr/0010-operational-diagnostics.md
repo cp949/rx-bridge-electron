@@ -71,7 +71,7 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 
 10. **스냅샷**: `server.getDiagnosticsSnapshot(): DiagnosticsSnapshot` 공개 메서드, `{ sessions, rpcInFlight, subscriptions, queuedEvents }`.
     - `sessions`: 현재 활성 attachment(현재 세션이 있는 attachment) 수.
-    - `rpcInFlight`: `RpcRequests` 모듈 내부 전역 카운터(옛 `tryAcquireRpc`/`releaseRpc`, [ADR 0015](0015-rpc-request-lifecycle.md) 이후 slot 획득 시 증가, 반환 시 감소)로 계산한다 — handler가 실제로 끝날 때까지 센다. retire된 세션의 handler가 아직 끝나지 않았어도 계속 포함된다(세션별 상태 순회가 아니라 전역 카운터를 쓰는 이유다).
+    - `rpcInFlight`: `RpcRequests` 모듈 내부 전역 카운터(옛 `tryAcquireRpc`/`releaseRpc`, [ADR 0015](0015-rpc-request-lifecycle.md) 이후 slot 획득 시 증가, 반환 시 감소)로 계산한다 — handler가 실제로 끝날 때까지 센다. retire된 세션의 handler가 아직 끝나지 않았어도 계속 포함된다(세션별 상태 순회가 아니라 전역 카운터를 쓰는 이유다). _(개정: RD-041 — 이 전역 카운터는 내부 module `SessionSlots.count()`로 옮겨졌다. 계산 의미(retire된 세션의 미종료 handler 포함)는 그대로다.)_
     - `subscriptions`: 한도 계산 기준과 같은 값(대기 + 활성)의 모든 세션 합. `subscription-opened`/`closed` 이벤트 쌍(활성만 센다)과 값이 다를 수 있다 — authorize 대기 중인 구독은 스냅샷에는 포함되지만 아직 `subscription-opened`를 내지 않는다.
     - `queuedEvents`: 모든 consumer의 대기열(`pendingEvents`) 현재 길이 합.
     - 반환은 매 호출 새 객체다. 누적 카운터는 두지 않는다(아래 "대안과 기각 사유"). 서버 dispose 후에는 `rpcInFlight`를 제외한 세 값이 0이고, 끝나지 않은 handler가 있으면 `rpcInFlight`는 실제 값을 반환한다.
