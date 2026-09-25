@@ -1,7 +1,7 @@
-import { defineConfig, externalizeDepsPlugin } from "electron-vite";
+import { defineConfig } from "electron-vite";
 
 export default defineConfig({
-  main: { plugins: [externalizeDepsPlugin()] },
+  main: {},
   preload: {
     build: {
       externalizeDeps: false,
