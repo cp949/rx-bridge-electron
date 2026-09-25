@@ -140,6 +140,11 @@ export function bindElectronBridge(options: BindElectronBridgeOptions): {
     (message: StreamMessage) => {
       event.senderFrame?.send(channels.stream, message);
     };
+  // 아래 네 catch는 server가 아니라 이 adapter의 Electron 객체 접근을 막는다.
+  // server는 잘못된 `value`를 응답이나 침묵으로 처리하고 throw하지 않는다.
+  // throw할 수 있는 곳은 `senderIdentity()`(`senderFrame`·`frame.url`)와
+  // `targetFor()` target 콜백(`contents.mainFrame`)이다 — 파괴된 frame·
+  // webContents에 접근하면 Electron이 throw할 수 있다.
   ipcMain.handle(channels.handshake, (event, value: unknown) => {
     try {
       return options.server.handshake(senderIdentity(event), value);
