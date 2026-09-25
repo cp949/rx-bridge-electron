@@ -368,7 +368,7 @@ describe("세션별 구독 한도", () => {
 });
 
 describe("직접 작성한 event source의 buffer 결함은 등록 시점에 거부된다", () => {
-  test("capacity 0인 직접 작성 source는 createBridgeServer가 생성 시점에 TypeError를 던진다(DELTA-03 전환: 이전에는 subscribe 시점에 BoundedQueue 생성이 실패해 slot이 샜다)", () => {
+  test("capacity 0인 직접 작성 source는 createBridgeServer가 생성 시점에 TypeError를 던진다(이전에는 subscribe 시점에 BoundedQueue 생성이 실패해 slot이 샜다)", () => {
     const brokenEvents = new Subject<number>();
     const impl: BridgeImpl<AppBridge> = {
       hardware: {

@@ -257,8 +257,8 @@ export function createRemoteState<T>(
 /**
  * 내부 전용 — `renderer/index.ts`에서 재export하지 않는다, `snapshotStore`만
  * 쓴다. `state`가 이 모듈이 만든 `RemoteStateClient`가 아니면(사용자 fake
- * 등) `undefined`를 돌려준다 — 그 경우 `snapshotStore`는 RD-043 그대로
- * 이벤트 기반으로 동작한다.
+ * 등) `undefined`를 돌려준다 — 그 경우 `snapshotStore`는 generation 합류
+ * 없이 이벤트 기반으로만 동작한다.
  */
 export function onGenerationOpened<T>(
   state: RemoteState<T>,

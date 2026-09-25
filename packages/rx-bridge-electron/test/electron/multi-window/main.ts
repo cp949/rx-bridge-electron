@@ -135,8 +135,8 @@ const probe = {
   releaseHolds: () => {
     for (const release of [...holds]) release();
   },
-  // DELTA-01: `will-navigate`를 막아 "문서는 살아 있는데 navigation 이벤트만
-  // 발생하는" case를 재현한다. RED test 전용 — `electron-adapter.ts`는 이 스위치를 모른다.
+  // `will-navigate`를 막아 "문서는 살아 있는데 navigation 이벤트만
+  // 발생하는" case를 재현한다(ADR 0019). test 전용 — `electron-adapter.ts`는 이 스위치를 모른다.
   blockNavigation: (role: Role, enabled: boolean) => {
     const window = windows.get(role);
     if (window === undefined) return;
@@ -156,7 +156,7 @@ const probe = {
     }
   },
   navigationAttempts: (role: Role) => navigationAttempts.get(role) ?? 0,
-  // RD-026: 살아 있는 창을 detach하거나 서버 전체를 dispose했을 때 Renderer가
+  // ADR 0020: 살아 있는 창을 detach하거나 서버 전체를 dispose했을 때 Renderer가
   // 스트림 종료 통지를 실제로 받는지 확인하는 acceptance 시나리오 전용 제어.
   detachWindow: (role: Role) => {
     windowDetach.get(role)?.();

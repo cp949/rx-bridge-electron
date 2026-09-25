@@ -36,7 +36,7 @@ import type {
  *   불러야 정리된다 — `Subscriptions`는 terminal을 기록하면서 해제한다.
  * - `disconnect`는 호출자 identity(토큰 객체)로만 식별하고 멱등이다. 호출자는
  *   handle을 저장하지 않는다.
- * - 사용자 source의 teardown 예외는 이 module 밖으로 나가지 않는다(RD-045).
+ * - 사용자 source의 teardown 예외는 이 module 밖으로 나가지 않는다(ADR 0025).
  *   upstream 해지는 `#release` 한 곳을 거치며, 예외를 잡아 생성자 콜백
  *   `onTeardownError(key)`로 알린다. 공유 entry는 해지 전에 map에서 지운다 —
  *   해지가 던져도 같은 key의 다음 연결은 새 upstream을 만든다. 동기 방출 중

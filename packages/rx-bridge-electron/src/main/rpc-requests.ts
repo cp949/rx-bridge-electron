@@ -88,7 +88,7 @@ interface ActiveRequest {
  * 맡긴다 — 이 클래스는 `DocumentSessions`를 모른다(`DocumentSession` 타입만
  * 참조). "세션이 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부
  * `SessionSlots` lease의 retire listener로 통지하므로(ADR 0015) 요청 signal
- * 판정 하나로 충분하다. slot 한도 판정·반납·전역 집계는 `SessionSlots`(RD-041)
+ * 판정 하나로 충분하다. slot 한도 판정·반납·전역 집계는 `SessionSlots`
  * 소유다 — retire된 세션이라도 handler가 아직 끝나지 않았다면 lease가
  * release되기 전까지 계속 센다(ADR 0010 §10).
  */

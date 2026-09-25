@@ -1,9 +1,8 @@
-// DELTA-04(RD-011): 경량 계약의 새 공개 API `createBridgeServer<B>(impl, options)`를
-// 검증한다. 기존 `createBridgeServer(contract, implementations, options)` 오버로드는
-// 그대로 두고(DELTA-09에서 제거 예정), 이 파일은 descriptor 없이 impl 트리만으로
-// RPC·State·Event가 동작하는지, impl 형태 오류·이름 규칙 위반이 생성 시점에 명확한
-// 에러로 실패하는지, `payloadLimits`·`resourceLimits`·event buffer 옵션이 impl 경로에도
-// 그대로 적용되는지를 다룬다. `.scratch/lightweight-contract/spec.md`의 확정 결정
+// 경량 계약(ADR 0012)의 공개 API `createBridgeServer<B>(impl, options)`를
+// 검증한다. descriptor 없이 impl 트리만으로 RPC·State·Event가 동작하는지,
+// impl 형태 오류·이름 규칙 위반이 생성 시점에 명확한 에러로 실패하는지,
+// `payloadLimits`·`resourceLimits`·event buffer 옵션이 impl 경로에도 그대로
+// 적용되는지를 다룬다. `.scratch/lightweight-contract/spec.md`의 확정 결정
 // 2(Main 구현)·4(event buffer)·5(errors) 참고.
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test } from "vitest";
@@ -29,7 +28,7 @@ type Connection = { readonly ok: boolean };
 type SendResult = { readonly bytesWritten: number };
 type SerialLine = { readonly text: string };
 
-/** DELTA-02 bridge-types.test.ts와 같은 형태의 예시 계약. */
+/** `test/contract/bridge-types.test.ts`와 같은 형태의 예시 계약. */
 type AppBridge = {
   device: {
     rpc: {
@@ -179,7 +178,7 @@ describe("createBridgeServer(impl, options): impl 형태 오류는 생성 시점
   });
 });
 
-describe("createBridgeServer(impl, options): registration이 event source의 buffer·타입을 검증한다(RD-029)", () => {
+describe("createBridgeServer(impl, options): registration이 event source의 buffer·타입을 검증한다", () => {
   test.each([
     [0, "capacity 0"],
     [-1, "음수 capacity"],
@@ -340,7 +339,7 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).toThrow(TypeError);
   });
 
-  test("같은 도메인 안에서 카테고리를 넘나드는 operation 이름 중복은 실패한다(DELTA-07: contract.test.ts의 'duplicate paths'에서 옮김)", () => {
+  test("같은 도메인 안에서 카테고리를 넘나드는 operation 이름 중복은 실패한다", () => {
     const source = new BehaviorSubject(1);
     expect(() =>
       createBridgeServer({
@@ -358,12 +357,9 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
       { then: { rpc: { x: () => 1 } } },
       /reserved segment 'then'/,
     ],
-  ] as const)(
-    "%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)",
-    (_label, impl, pattern) => {
-      expect(() => createBridgeServer(impl)).toThrow(pattern);
-    },
-  );
+  ] as const)("%s는 실패한다", (_label, impl, pattern) => {
+    expect(() => createBridgeServer(impl)).toThrow(pattern);
+  });
 
   // namespace 키의 `/` 거부는 코어가 아니라 Main impl 순회의 책임이라
   // seam에서만 검증된다. 허용하면 `{ "a/b": ... }`와 `{ a: { b: ... } }`가
@@ -384,7 +380,7 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     },
   );
 
-  test("카테고리 이름을 operation 이름으로 쓰는 것은 허용된다(DELTA-07: contract.test.ts의 'allows category names as operation names'에서 옮김)", () => {
+  test("카테고리 이름을 operation 이름으로 쓰는 것은 허용된다", () => {
     expect(() =>
       createBridgeServer({
         device: {
@@ -395,7 +391,7 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).not.toThrow();
   });
 
-  test("'dispose'라는 이름의 operation은 예약되지 않은 도메인 아래에서 허용된다(DELTA-07: contract.test.ts에서 옮김)", () => {
+  test("'dispose'라는 이름의 operation은 예약되지 않은 도메인 아래에서 허용된다", () => {
     expect(() =>
       createBridgeServer({
         device: { rpc: { dispose: () => 1 } },
@@ -614,7 +610,7 @@ describe("createBridgeServer(impl, options): payloadLimits", () => {
     ).toThrow(/Unknown payload limit/);
   });
 
-  test("정수가 아닌 maxTotalBytes는 생성 시점에 실패한다(DELTA-07: contract.test.ts의 'rejects a non-integer maxTotalBytes payload limit'에서 옮김)", () => {
+  test("정수가 아닌 maxTotalBytes는 생성 시점에 실패한다", () => {
     const { impl } = buildImpl();
     expect(() =>
       createBridgeServer(impl, {

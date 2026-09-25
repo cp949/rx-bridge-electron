@@ -1,9 +1,7 @@
-// DELTA-01(RD-020): `createLoopbackTransport`(test 전용 `./testing` subpath)를
+// `createLoopbackTransport`(test 전용 `./testing` subpath)를
 // 검증한다. `BridgeTransport`의 두 번째 in-process adapter로, `structuredClone`
 // 왕복·preload와 같은 parse 경계·microtask 순서·cancel 전달·dispose 후 동작·
-// sender 분리·server throw 노출을 다룬다.
-// RD-020 그릴링 결정 3·4·5·6·8·9·11·13·15와 계획 결정 P1·P2·P3·P5의 구현
-// 확인이 목적이다.
+// sender 분리·server throw 노출을 다룬다(ADR 0017).
 import { BehaviorSubject, Subject, firstValueFrom } from "rxjs";
 import { describe, expect, test } from "vitest";
 

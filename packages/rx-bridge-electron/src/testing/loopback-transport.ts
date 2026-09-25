@@ -1,5 +1,5 @@
 // main에는 타입만 의존한다(`import type`) — `./testing`은 electron·`bindElectronBridge`·
-// `ipcMain`을 런타임에 불러오지 않는다(그릴링 결정 15). envelope 조립(`withEnvelope`)과
+// `ipcMain`을 런타임에 불러오지 않는다(ADR 0017). envelope 조립(`withEnvelope`)과
 // 요청·응답·stream 검사(`parse*`)는 preload adapter(`src/preload/expose-bridge.ts`)와 같은
 // protocol 함수를 값으로 쓴다 — 같은 입력에 preload와 같은 지점에서 실패한다.
 import {

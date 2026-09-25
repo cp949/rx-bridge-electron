@@ -446,7 +446,7 @@ describe("Electron multi-window bridge", () => {
       .toEqual([1, 1]);
   });
 
-  test("notifies subscribers when a live window is detached (RD-026)", async () => {
+  test("notifies subscribers when a live window is detached (ADR 0020)", async () => {
     app = await launch(fixture);
     const editor = await windowFor(app, "editor");
     const viewer = await windowFor(app, "viewer");
@@ -517,7 +517,7 @@ describe("Electron multi-window bridge", () => {
       .toEqual(["after-detach", ["after-detach"]]);
   });
 
-  test("notifies every window's subscribers when the whole server is disposed (RD-026)", async () => {
+  test("notifies every window's subscribers when the whole server is disposed (ADR 0020)", async () => {
     app = await launch(fixture);
     const editor = await windowFor(app, "editor");
     const viewer = await windowFor(app, "viewer");
@@ -554,12 +554,11 @@ describe("Electron multi-window bridge", () => {
     }
   });
 
-  // DELTA-01 (RD-025 결함 재현): main frame `did-start-navigation`은 문서가
-  // 실제로 안 바뀌는 이동(pushState·hash·`will-navigate` 차단)에서도 발생하는데,
-  // `electron-adapter.ts`의 `onLifecycle`이 `_inPlace` 인자를 무시하고 매번
-  // 세션을 retire한다. 아래 세 test는 그 뒤에도 bridge가 계속 동작해야 한다는
-  // 기대를 고정한다 — 수정 전에는 RED다(RPC `FORBIDDEN`, 새 구독 무응답,
-  // `session-closed` 1건).
+  // 문서가 실제로 안 바뀌는 이동(pushState·hash·`will-navigate` 차단)은 세션을
+  // retire하지 않는다(ADR 0019). main frame `did-start-navigation`은 이런
+  // 이동에서도 발생하므로, 그 신호로 retire하면 RPC `FORBIDDEN`, 새 구독 무응답,
+  // `session-closed` 1건이 관측된다. 아래 세 test는 이동 뒤에도 bridge가 계속
+  // 동작한다는 기대를 고정한다.
   test("keeps the bridge alive after history.pushState changes the URL in place", async () => {
     app = await launch(fixture);
     const editor = await windowFor(app, "editor");

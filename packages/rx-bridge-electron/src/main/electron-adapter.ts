@@ -79,14 +79,14 @@ function targetFor(
       // (정의상 main-frame 전용이라 `isMainFrame` 인자가 없다). pushState·hash
       // 변경·204·다운로드 취소·`will-navigate` 차단·beforeunload발 ERR_ABORTED에서는
       // 발생하지 않는다 — 그래서 구 탐색-시작 이벤트 대비 문서가 실제로
-      // 바뀔 때만 retire한다(navigation-commit-retire 작업, DELTA-02 실험).
+      // 바뀔 때만 retire한다(ADR 0019 실험).
       const navigated = () => listener("main-frame-navigation");
       // 오류 페이지 commit(예: ERR_CONNECTION_REFUSED)은 `did-navigate` 없이
       // `did-fail-load`만 온다. `isMainFrame`이 true이고, 콜백 실행 시점에
       // `contents.mainFrame.routingId`가 이 이벤트의 `frameRoutingId`와 같을 때만
       // retire로 본다 — 이 routingId 비교가 없으면 문서가 안 바뀐 취소
       // (`ERR_ABORTED`, `frameRoutingId`가 undefined이거나 옛 routingId)에서도
-      // 오탐이 난다(DELTA-02 실험).
+      // 오탐이 난다(ADR 0019 실험).
       const failedLoad = (
         _event: Electron.Event,
         _errorCode: number,

@@ -1,4 +1,4 @@
-// 경량 계약(DELTA-06): device 도메인은 런타임 descriptor 없이 순수 TS
+// 경량 계약(ADR 0012): device 도메인은 런타임 descriptor 없이 순수 TS
 // 타입으로만 선언한다. 검증은 `src/main/schemas.ts`의 `schemas`/`errors` map이
 // 맡는다(`.scratch/lightweight-contract/spec.md` 확정 결정 1·3).
 //

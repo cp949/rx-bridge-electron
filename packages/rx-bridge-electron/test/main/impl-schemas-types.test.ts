@@ -1,4 +1,4 @@
-// DELTA-05(RD-012): ADR 0012가 문서화한 "파일 분리" 패턴 — `schemas`/`errors`
+// ADR 0012가 문서화한 "파일 분리" 패턴 — `schemas`/`errors`
 // map을 `satisfies SchemasFor<B>`/`satisfies ErrorsFor<B>`로 별도 파일에 두고
 // `createBridgeServer`에 그대로 넘긴다 — 이 실제로 컴파일되는지 확인한다.
 // 값 자체는 `impl-schemas-fixture.ts`에 있다. 런타임 동작 검증은

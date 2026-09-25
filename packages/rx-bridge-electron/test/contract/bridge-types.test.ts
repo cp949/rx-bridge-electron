@@ -15,7 +15,7 @@ import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import type { BridgeContext } from "../../src/main/index.js";
 import type { BridgeValue } from "../../src/protocol/index.js";
 
-// 경량 계약(DELTA-02): 런타임 descriptor 없이 계약 타입 하나에서
+// 경량 계약(ADR 0012): 런타임 descriptor 없이 계약 타입 하나에서
 // BridgeApi/BridgeImpl/SchemasFor/ErrorsFor를 파생할 수 있는지 검증한다.
 // `.scratch/lightweight-contract/spec.md`의 확정 결정 1, 3 참고.
 
@@ -59,9 +59,9 @@ type BadValueBridge = {
   };
 };
 
-/** 카테고리는 있지만 key가 없는(빈) 도메인 — DELTA-07: 옛 descriptor API가
- * 요구하던 "빈 카테고리는 `{}`만 허용" 규칙이 impl 기반 API에도 그대로 있는지
- * 확인한다(옛 test/main/implement-domain-types.test.ts에서 옮김). */
+/** 카테고리는 있지만 key가 없는(빈) 도메인 — 옛 descriptor API가 요구하던
+ * "빈 카테고리는 `{}`만 허용" 규칙이 impl 기반 API에도 그대로 있는지
+ * 확인한다. */
 type EmptyRpcBridge = {
   emptyRpc: { rpc: Record<string, never> };
 };
@@ -152,7 +152,7 @@ test("BridgeImpl: 올바른 구현은 그대로 대입된다(정상 케이스)",
   expectTypeOf(implementation).toEqualTypeOf<BridgeImpl<AppBridge>>();
 });
 
-test("BridgeImpl: BridgeValue로 넓게 선언한 handler도 반환 타입만 맞으면 허용된다(매개변수 반공변성, DELTA-07: implement-domain-types.test.ts에서 옮김)", () => {
+test("BridgeImpl: BridgeValue로 넓게 선언한 handler도 반환 타입만 맞으면 허용된다(매개변수 반공변성)", () => {
   const wideSendHandler: (
     input: BridgeValue,
     context: BridgeContext,
@@ -170,7 +170,7 @@ test("BridgeImpl: BridgeValue로 넓게 선언한 handler도 반환 타입만 �
   void implementation;
 });
 
-test("BridgeImpl: 카테고리는 있지만 key가 없는 도메인은 빈 객체만 허용한다(DELTA-07: implement-domain-types.test.ts에서 옮김)", () => {
+test("BridgeImpl: 카테고리는 있지만 key가 없는 도메인은 빈 객체만 허용한다", () => {
   const emptyImpl: BridgeImpl<EmptyRpcBridge> = { emptyRpc: { rpc: {} } };
   void emptyImpl;
 });
@@ -191,7 +191,7 @@ test("SchemasFor/ErrorsFor: 일부 operation에만 적용해도 대입된다(부
   expectTypeOf(errors).toEqualTypeOf<ErrorsFor<AppBridge>>();
 });
 
-test("RemoteStateSnapshot: status는 uninitialized/connecting/current/stale 리터럴 합집합이다(DELTA-07: contract-types.test.ts에서 옮김 — 계약 스타일과 무관한 공용 타입)", () => {
+test("RemoteStateSnapshot: status는 uninitialized/connecting/current/stale 리터럴 합집합이다(계약 스타일과 무관한 공용 타입)", () => {
   expectTypeOf<RemoteStateSnapshot<string>>().toMatchTypeOf<{
     readonly status: "uninitialized" | "connecting" | "current" | "stale";
   }>();
@@ -199,10 +199,9 @@ test("RemoteStateSnapshot: status는 uninitialized/connecting/current/stale 리�
 
 // 아래 블록은 타입 검사(pnpm check-types) 전용이다. 런타임 실행을 막기 위해
 // if (false)로 감싼다. 각 @ts-expect-error 줄은 지우면 check-types가 그
-// 줄에서 실패하는지(RED) 확인한 뒤 복원했다 — DELTA-02 결과에 근거 기록.
+// 줄에서 실패하는지(RED) 확인한 뒤 복원했다.
 if (false) {
-  // Schema<T extends BridgeValue> 제약 자체(계약 스타일과 무관, DELTA-07:
-  // contract-types.test.ts에서 옮김) — Date/함수/클래스 인스턴스는 v1 bridge
+  // Schema<T extends BridgeValue> 제약 자체(계약 스타일과 무관) — Date/함수/클래스 인스턴스는 v1 bridge
   // payload가 아니라 Schema<T>의 T 자리에 쓸 수 없다.
   class NonBridgeClass {}
   // @ts-expect-error Date는 v1 bridge payload가 아니다.
@@ -296,7 +295,7 @@ if (false) {
   };
   void excessDomain;
 
-  // handler 반환 타입 불일치(DELTA-07: implement-domain-types.test.ts에서 옮김).
+  // handler 반환 타입 불일치.
   const wrongReturnType: BridgeImpl<AppBridge> = {
     device: {
       rpc: {
@@ -313,8 +312,7 @@ if (false) {
   };
   void wrongReturnType;
 
-  // handler 입력 매개변수 타입 불일치(DELTA-07: implement-domain-types.test.ts에서
-  // 옮김) — 반공변성은 "더 넓은 타입을 받는 handler"만 허용하고, 구조적으로
+  // handler 입력 매개변수 타입 불일치 — 반공변성은 "더 넓은 타입을 받는 handler"만 허용하고, 구조적으로
   // 다른 타입(command: number)까지 허용하지는 않는다.
   const wrongInputParamType: BridgeImpl<AppBridge> = {
     device: {
@@ -334,8 +332,8 @@ if (false) {
   };
   void wrongInputParamType;
 
-  // 누락 키: 카테고리 자체는 있지만 그 안의 operation 하나가 빠졌다(DELTA-07:
-  // implement-domain-types.test.ts에서 옮김) — device.rpc는 connect와 send를
+  // 누락 키: 카테고리 자체는 있지만 그 안의 operation 하나가 빠졌다 —
+  // device.rpc는 connect와 send를
   // 모두 요구한다.
   const missingOperationWithinCategory: BridgeImpl<AppBridge> = {
     device: {
@@ -350,8 +348,8 @@ if (false) {
   };
   void missingOperationWithinCategory;
 
-  // 카테고리 자체가 없는 노드에 그 카테고리를 추가했다(DELTA-07:
-  // implement-domain-types.test.ts에서 옮김) — nested.inner는 rpc만 있고
+  // 카테고리 자체가 없는 노드에 그 카테고리를 추가했다 —
+  // nested.inner는 rpc만 있고
   // state 카테고리가 없다.
   const extraCategoryOnRpcOnlyNode: BridgeImpl<AppBridge> = {
     device: {
@@ -374,8 +372,8 @@ if (false) {
   };
   void extraCategoryOnRpcOnlyNode;
 
-  // 빈 카테고리(key 없음)는 빈 객체만 허용한다(DELTA-07:
-  // implement-domain-types.test.ts에서 옮김) — EmptyRpcBridge.emptyRpc.rpc에
+  // 빈 카테고리(key 없음)는 빈 객체만 허용한다 —
+  // EmptyRpcBridge.emptyRpc.rpc에
   // 없는 operation을 추가하면 초과 속성 검사에서 걸린다.
   const extraKeyOnEmptyCategory: BridgeImpl<EmptyRpcBridge> = {
     emptyRpc: {
@@ -385,8 +383,8 @@ if (false) {
   };
   void extraKeyOnEmptyCategory;
 
-  // State source 값 타입 불일치(BridgeValue이긴 하나 선언과 다른 타입,
-  // DELTA-07: implement-domain-types.test.ts에서 옮김) — connection은
+  // State source 값 타입 불일치(BridgeValue이긴 하나 선언과 다른 타입) —
+  // connection은
   // Connection이어야 하는데 string을 흘려보낸다.
   const wrongStateValueType: BridgeImpl<AppBridge> = {
     device: {
@@ -464,8 +462,7 @@ if (false) {
   // @ts-expect-error 입력 없는 RPC(connect)는 인자를 받지 않는다.
   void api.device.rpc.connect({ deviceId: 1 });
 
-  // 입력 있는 RPC(Renderer 쪽)는 값 타입이 계약과 맞아야 한다(DELTA-07:
-  // contract-types.test.ts의 "RPC input must match its schema type"에서 옮김).
+  // 입력 있는 RPC(Renderer 쪽)는 값 타입이 계약과 맞아야 한다.
   // @ts-expect-error send의 command는 string이어야 하는데 number를 넘겼다.
   void api.device.rpc.send({ command: 123 });
 

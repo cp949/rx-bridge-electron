@@ -4,7 +4,7 @@ import { BoundedQueue } from "./bounded-queue.js";
 import type { OverflowPolicy } from "./sources.js";
 
 /**
- * consumer 1건의 전달 창(RD-034, ADR 0020 결정 3)이 반환하는 wire 메시지.
+ * consumer 1건의 전달 창(ADR 0020 결정 3)이 반환하는 wire 메시지.
  * envelope와 `subscriptionId`는 붙어 있지 않다 — 호출자(`Subscriptions`)가
  * `withEnvelope`로 조립한다.
  */

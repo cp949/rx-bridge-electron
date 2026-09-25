@@ -47,8 +47,8 @@ export class FakeTarget implements AttachedTarget {
     );
   }
 
-  // main frame 문서 교체(commit)를 흉내 낸다. commit 이벤트(navigation-commit-retire
-  // 작업, DELTA-02 실험)는 발생 시점에 이미 `contents.mainFrame.routingId`가 새
+  // main frame 문서 교체(commit)를 흉내 낸다. commit 이벤트(ADR 0019
+  // 실험)는 발생 시점에 이미 `contents.mainFrame.routingId`가 새
   // 값으로 바뀌어 있다 — 그래서 frame id를 먼저 바꾸고 나서 lifecycle 알림을 쏜다
   // (구 `did-start-navigation`은 반대로 커밋 전이라 순서가 달랐다).
   public replaceMainFrame(newFrameId: number): void {

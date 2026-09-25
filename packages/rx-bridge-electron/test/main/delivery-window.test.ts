@@ -1,10 +1,10 @@
 /**
- * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)을 `Subscriptions`를
+ * consumer 1건의 전달 창(`DeliveryWindow`)을 `Subscriptions`를
  * 거치지 않고 직접 검증한다. "수락 → ack 대기 → 다음 값 | terminal" 순서, State
  * 최신값 교체, Event `BoundedQueue` overflow 3정책, 선점 종료(`preempt`)의
  * 폐기 규칙, `close()` 멱등, 진단 callback 안 재진입, 대기 값 수 조회를
- * 다룬다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다 —
- * 창은 `BoundedQueue`와 같은 등급의 순수 module이라 직접 검증한다(RD-034).
+ * 다룬다. 이 파일은 "구독 모듈은 직접 test하지 않는다" 원칙의 예외다 —
+ * 창은 `BoundedQueue`와 같은 등급의 순수 module이라 직접 검증한다.
  */
 import { describe, expect, test, vi } from "vitest";
 

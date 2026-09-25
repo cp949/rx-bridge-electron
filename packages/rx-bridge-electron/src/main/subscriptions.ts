@@ -49,7 +49,7 @@ type ControlCommand = Exclude<WireStreamCommand, { type: "subscribe" }>;
 interface PendingEntry {
   readonly controller: AbortController;
   readonly onAbort: () => void;
-  /** slot lease(RD-041). 승인되면 `#start`의 `Consumer`가 이어받는다. */
+  /** slot lease. 승인되면 `#start`의 `Consumer`가 이어받는다. */
   readonly lease: SlotLease;
 }
 
@@ -63,9 +63,9 @@ interface Consumer {
   readonly registration: Registration;
   readonly controller: AbortController;
   readonly onSessionAbort: () => void;
-  /** slot lease(RD-041). pending entry에서 이어받는다. */
+  /** slot lease. pending entry에서 이어받는다. */
   readonly lease: SlotLease;
-  /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
+  /** consumer 1건의 전달 창. "닫힘"은 이 창이 단독 소유한다. */
   readonly window: DeliveryWindow;
   /**
    * `subscribed`(0) 송신 여부. 송신 직전에 켠다. `onSessionAbort`가 이 값으로
@@ -75,7 +75,7 @@ interface Consumer {
   opened: boolean;
 }
 
-/** 세션 1개가 소유한 구독 상태. slot 점유 수·회수는 `SessionSlots`(RD-041)가 lease로 셈한다 — `pending`·`consumers`는 id → entry map일 뿐이다. */
+/** 세션 1개가 소유한 구독 상태. slot 점유 수·회수는 `SessionSlots`가 lease로 셈한다 — `pending`·`consumers`는 id → entry map일 뿐이다. */
 interface SessionState {
   watermark: number;
   readonly pending: Map<string, PendingEntry>;
@@ -120,7 +120,7 @@ function endNotice(
 /**
  * `WindowMessage`를 wire `StreamMessage`로 조립하는 순수 함수. envelope
  * 조립(`withEnvelope`)을 이 함수 하나로 모은다 — 창(`DeliveryWindow`)은
- * envelope도 `subscriptionId`도 모른다(RD-034 결정 3 유지).
+ * envelope도 `subscriptionId`도 모른다.
  */
 function streamFrame(
   clientId: string,
@@ -137,7 +137,7 @@ function streamFrame(
  * `sender-unauthorized`)만 하고, subscriptionId 파싱·watermark·등록 조회·slot·
  * `authorize` 대기·consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
  *
- * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)이 "수락 → ack 대기 → 다음
+ * consumer 1건의 전달 창(`DeliveryWindow`)이 "수락 → ack 대기 → 다음
  * 값 | terminal"과 선점 종료를 소유한다. 이 클래스는 값·ack·세션 종료를
  * 창에 넘기고, 창이 돌려준 메시지를 envelope로 감싸 보낸다.
  *
@@ -150,7 +150,7 @@ export class Subscriptions {
   readonly #sessions = new WeakMap<DocumentSession, SessionState>();
   /**
    * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) —
-   * `queuedEventsCount`·`dispose` 순회에만 쓰인다(RD-041: slot 집계는
+   * `queuedEventsCount`·`dispose` 순회에만 쓰인다(slot 집계는
    * `SessionSlots`가 맡는다). 세션별 상태 자체는 `#sessions`(WeakMap)가 세션
    * 수명에 맞춰 소유한다.
    */
@@ -382,7 +382,7 @@ export class Subscriptions {
    * pending `onAbort`가 retire 통지와 lease 반환을 맡는다. `false`면 이미
    * 취소됐거나(unsubscribe·retire) 세션이 retire된 것이므로 `subscribe()`는
    * 이어서 진행하지 않는다. (등록 시점에 이미 retire된 세션이면 `onRetire`의
-   * 즉시 호출이 그 자리에서 `entry.onAbort`를 대신 실행한다 — RD-037.)
+   * 즉시 호출이 그 자리에서 `entry.onAbort`를 대신 실행한다 — ADR 0023.)
    *
    * lease 처리: 승인(`ok`이고 verdict가 `allowed`)이면 `offRetire()`만
    * 불러 slot을 유지한다 — `#start`가 같은 lease를 이어받아 곧바로
@@ -511,7 +511,7 @@ export class Subscriptions {
 
   /**
    * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire, `subscribed`
-   * 송신 전 retire된 consumer, RD-037)의 통지: `subscribed`(0) 전후로
+   * 송신 전 retire된 consumer, ADR 0023)의 통지: `subscribed`(0) 전후로
    * `endNotice`를 평가해 `error`(1)를 보낸다. 앞 평가는 진단 sink가 동기로
    * 일으킨 retire를, 뒤 평가는 `send` 중 동기 retire를 반영한다. 거부 전용
    * 창(`createRejectionDeliveryWindow`)이 두 sequence를 매긴다. 전송 실패는

@@ -15,12 +15,12 @@ import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import { FakeIpcMain, FakeWebContents } from "./fake-ipc.js";
 
 /**
- * RD-007 통합 시나리오: DELTA-01~05의 계약(진단 이벤트 종류, 거부 사유, 수명주기,
+ * 운영 진단 통합 시나리오(ADR 0010): 진단 계약(이벤트 종류, 거부 사유, 수명주기,
  * 스냅샷, 기록 금지 항목, sink 예외 격리, 기본 무출력)을 두 세션(A·B)의 한 흐름에서
  * 함께 검증한다.
  */
 
-const MARKER = "__RD007_MARKER__";
+const MARKER = "__DIAG_MARKER__";
 
 const stringSchema: Schema<string> = {
   parse(input) {
@@ -372,7 +372,7 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe("RD-007 진단 통합 시나리오", () => {
+describe("운영 진단 통합 시나리오", () => {
   test("이벤트 종류·개수, 기록 금지 항목, 스냅샷 복귀를 함께 검증한다", async () => {
     vi.useFakeTimers();
     const result = await runScenario("record");

@@ -1,6 +1,6 @@
 // payload-limits.ts의 기본값·부분 병합·검증·동결을 다룬다.
 // `createBridgeServer`를 거치는 server 경유 검증은 create-bridge-server-impl.test.ts에
-// 있다(RD-038의 명시적 undefined 거부 test 포함). 이 파일은
+// 있다(명시적 undefined 거부 test 포함). 이 파일은
 // `resolvePayloadLimits`/`DEFAULT_PAYLOAD_LIMITS`를 직접 test한다.
 import { describe, expect, test } from "vitest";
 

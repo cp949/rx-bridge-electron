@@ -59,7 +59,7 @@ export interface StreamBridgeServer {
   ): HandshakeResponse | RpcResponse;
   dispatchRpc(sender: SenderIdentity, value: unknown): Promise<RpcResponse>;
   cancel(sender: SenderIdentity, value: unknown): void;
-  /** 반환된 promise는 reject하지 않는다(RD-029) — adapter가 `void`로 버리기 때문이다. */
+  /** 반환된 promise는 reject하지 않는다 — adapter가 `void`로 버리기 때문이다. */
   controlStream(
     sender: SenderIdentity,
     value: unknown,
@@ -69,7 +69,7 @@ export interface StreamBridgeServer {
   dispose(): void;
 }
 
-/** `createBridgeServer(impl, options)`의 옵션(RD-011). */
+/** `createBridgeServer(impl, options)`의 옵션. */
 export interface ImplServerOptions<B> {
   readonly authorize?: Authorize;
   readonly diagnostics?: DiagnosticsSink;
@@ -209,7 +209,7 @@ function buildBridgeServer(
       value: unknown,
       send: StreamSender,
     ): Promise<void> {
-      // 계약: 이 메서드는 reject하지 않는다(RD-029). 두 adapter
+      // 계약: 이 메서드는 reject하지 않는다. 두 adapter
       // (`electron-adapter.ts`, `testing/loopback-transport.ts`)가 반환된
       // promise를 `void`로 버리므로, reject하면 unhandled rejection이 된다.
       // 알려진 예외 경로는 모두 위에서 개별 처리되어 여기 도달하지 않는다 —

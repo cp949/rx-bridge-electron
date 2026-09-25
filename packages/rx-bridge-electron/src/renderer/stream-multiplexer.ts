@@ -245,7 +245,7 @@ export class StreamMultiplexer {
         }
         generation.handlers.next(value);
       }
-      // `next` 콜백 안에서 dispose됐으면 ack를 보내지 않는다(ADR 0006 RD-031 개정).
+      // `next` 콜백 안에서 dispose됐으면 ack를 보내지 않는다(ADR 0006 개정).
       // 로컬 마지막 구독자 해제 뒤의 ack는 받아들인 batch의 확인이라 보낸다.
       if (this.#lifetime.disposed) {
         return;

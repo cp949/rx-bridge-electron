@@ -52,7 +52,7 @@ async function setup(): Promise<{
   return { transport, api };
 }
 
-// RD-030: dispose() 도중 동기로 실행되는 사용자 코드가 재진입할 수 있는
+// dispose() 도중 동기로 실행되는 사용자 코드가 재진입할 수 있는
 // 지점 3개(rpc-settled·subscription-closed·complete) × 재진입 동작 3개
 // (subscribe·rpc·dispose) 매트릭스. ADR 0006 종료 계약("종료 뒤 호출은 항상
 // 동기 CANCELLED, 전송 없음")이 세 지점 전부에서 지켜지는지 고정한다.

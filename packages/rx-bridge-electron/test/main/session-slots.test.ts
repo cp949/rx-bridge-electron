@@ -1,8 +1,8 @@
 /**
- * 세션 slot 회계와 retire listener 연동(`SessionSlots`, RD-041)을
+ * 세션 slot 회계와 retire listener 연동(`SessionSlots`)을
  * `RpcRequests`·`Subscriptions`를 거치지 않고 직접 검증한다. 이 파일은
- * RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다 — `DeliveryWindow`
- * (RD-034)·`Upstreams`(RD-036)와 같은 근거로, `SessionSlots`도 session
+ * "구독 모듈은 직접 test하지 않는다" 원칙의 예외다 — `DeliveryWindow`·
+ * `Upstreams`와 같은 근거로, `SessionSlots`도 session
  * 자체를 인터페이스로만 다루는 순수 module이라 직접 검증한다.
  *
  * 세션은 실제 `DocumentSessions` + `FakeTarget`으로 만들고 detach로

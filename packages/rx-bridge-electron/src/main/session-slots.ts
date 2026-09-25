@@ -98,7 +98,7 @@ class LeaseImpl implements SlotLease {
 
 /**
  * 세션 소유 자원 1건(RPC 요청 1건, 구독 1건)의 slot 한도 판정·반납·전역
- * 집계와 retire listener 연동을 소유하는 module(RD-041). `RpcRequests`가
+ * 집계와 retire listener 연동을 소유하는 module. `RpcRequests`가
  * `maxConcurrentRpc`용, `Subscriptions`가 `maxSubscriptions`용으로 각자
  * 인스턴스 하나씩 생성자 안에서 만든다.
  *

@@ -28,7 +28,7 @@ const cache = new WeakMap<RemoteState<unknown>, RemoteStateStore<unknown>>();
  * - 같은 `state` 객체로 다시 부르면 같은 store(같은 `subscribe`·`getSnapshot`
  *   참조)를 돌려준다. `WeakMap` 캐시가 이를 보장한다. `state`가 사용자
  *   fake(내부 신호를 못 받는 `RemoteState` 구현)이면 이 합류 없이
- *   RD-043 그대로 이벤트 기반으로 동작한다.
+ *   이벤트 기반으로만 동작한다.
  */
 export function snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T> {
   const cached = cache.get(state as RemoteState<unknown>);

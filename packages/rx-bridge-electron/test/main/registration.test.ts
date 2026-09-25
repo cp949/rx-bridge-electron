@@ -7,10 +7,10 @@ import { broadcastEvent, currentValueSource } from "../../src/main/sources.js";
 import { FakeTarget, handshakeRequest, sender } from "./fake-ipc.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-// DELTA-07: 이 파일은 원래 descriptor 기반 registerImplementations/
+// 이 파일은 원래 descriptor 기반 registerImplementations/
 // normalizeImplementation("구현 배열을 계약과 대조" 모델) 자체의 런타임
-// 검증을 다뤘다(DELTA-09에서 descriptor API 자체가 제거됐다). 그 중 다음 두
-// 부류는 이번 DELTA에서 옮기지 않았다(각각 사유):
+// 검증을 다뤘다(descriptor API는 제거됐다). 그 중 다음 두 부류는 impl 기반
+// API로 옮기지 않았다(각각 사유):
 //
 // 1. "선언된 도메인 구현이 배열에 없음/중복/다른 모양으로 재선언" 계열 — 계약과
 //    구현을 분리해 배열로 등록하는 descriptor API 고유의 아키텍처에서만 의미가
@@ -19,7 +19,7 @@ import { testSubscriptionId } from "./subscription-ids.js";
 // 2. "raw 구현이 선언된 handler/source를 빠뜨렸다/모르는 걸 추가했다"(Missing/
 //    Undeclared RPC handler·State source·Event source) — impl 트리에는 별도
 //    "선언"이 없으므로 이 구분 자체가 없다. 같은 취지의 정적 검사는 이미
-//    `test/contract/bridge-types.test.ts`(DELTA-02)의 누락/초과 키 `@ts-expect-error`
+//    `test/contract/bridge-types.test.ts`의 누락/초과 키 `@ts-expect-error`
 //    케이스가 타입 단계에서 커버한다.
 //
 // "형태 오류"(RPC handler가 함수가 아님·State source에 현재값이 없음·Event

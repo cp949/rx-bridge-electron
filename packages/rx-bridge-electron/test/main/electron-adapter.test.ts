@@ -898,10 +898,10 @@ describe("StreamBridgeServer.handshake direct calls", () => {
 });
 
 /**
- * RD-014 연결 설정 축약(ADR 0013): `bindElectronBridge`의 `ipcMain`·`namespace`,
+ * 연결 설정 축약(ADR 0013): `bindElectronBridge`의 `ipcMain`·`namespace`,
  * `attach`의 `role`을 생략했을 때의 기본값과 미주입 오류 경로.
  */
-describe("bindElectronBridge argument defaults (RD-014)", () => {
+describe("bindElectronBridge argument defaults", () => {
   test("omitting namespace uses the shared default and channels are rx-bridge-electron:v1:default:*", () => {
     const ipcMain = new FakeIpcMain();
     const server = createBridgeServer(waitImpl);

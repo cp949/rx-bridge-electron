@@ -322,10 +322,10 @@ describe("renderer handshake and API proxy", () => {
 });
 
 /**
- * RD-014 연결 설정 축약(ADR 0013): `createRendererApi`의 `transport` 생략 시
+ * 연결 설정 축약(ADR 0013): `createRendererApi`의 `transport` 생략 시
  * `globalThis.rxBridge` 사용 경로와 그 부재 시 에러 경로.
  */
-describe("createRendererApi transport default (RD-014)", () => {
+describe("createRendererApi transport default", () => {
   afterEach(() => {
     delete (globalThis as { rxBridge?: unknown }).rxBridge;
   });

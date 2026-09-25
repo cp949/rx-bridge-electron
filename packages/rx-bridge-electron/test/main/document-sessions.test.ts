@@ -1,8 +1,8 @@
 /**
- * `DocumentSession`의 retire interface(`retireReason`·`onRetire`, RD-037)를
+ * `DocumentSession`의 retire interface(`retireReason`·`onRetire`, ADR 0023)를
  * `DocumentSessions`(attach·establish·detach·dispose·lifecycle)를 통해
- * 직접 검증한다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의
- * 예외다 — `DeliveryWindow`(RD-034)·`Upstreams`(RD-036)와 같은 근거로,
+ * 직접 검증한다. 이 파일은 "구독 모듈은 직접 test하지 않는다" 원칙의
+ * 예외다 — `DeliveryWindow`·`Upstreams`와 같은 근거로,
  * 세션도 session·authorize·창·진단·envelope을 모르는 순수 module이다.
  *
  * 구현 class(`SessionImpl`)는 export되지 않는다 — 아래 test는 항상

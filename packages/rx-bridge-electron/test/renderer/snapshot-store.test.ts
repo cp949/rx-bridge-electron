@@ -4,7 +4,7 @@
  * 종료(complete/error) 뒤 처리, 구독 해제, listener 공유 구독(종료 뒤 재개·
  * 알림 중 해제·중첩 구독), dispose된 API·사용자 fake 입력을 함께 다룬다.
  * 추가로 generation 교체(G1·G2·G3) 뒤 listener 알림과 합류 재진입(N1~N8,
- * RD-044), 종료 알림 안 동기 재구독 합류와 동기 transport 합류 누수(N9~N11)를
+ * ADR 0024), 종료 알림 안 동기 재구독 합류와 동기 transport 합류 누수(N9~N11)를
  * 다룬다.
  */
 import { BehaviorSubject, Observable, config, repeat } from "rxjs";

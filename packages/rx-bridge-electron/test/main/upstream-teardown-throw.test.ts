@@ -1,6 +1,6 @@
 /**
  * 사용자 source의 teardown이 throw할 때 Main 구독 정리가 격리되는지 확인한다
- * (ROADMAP RD-045). rxjs 7은 teardown throw를 `UnsubscriptionError`로 다시
+ * (ADR 0025). rxjs 7은 teardown throw를 `UnsubscriptionError`로 다시
  * 던진다. 세션 retire 연쇄(abort listener 안), 공유 upstream entry 정리,
  * `server.dispose()`, 전송 실패 뒤 close, 동기 방출 중 이미 닫힌 upstream에
  * teardown이 붙는 경로를 server seam에서 구독하며 검증한다. 각 경로는 예외를
