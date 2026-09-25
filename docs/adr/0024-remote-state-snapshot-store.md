@@ -60,4 +60,4 @@ ROADMAP "현재 범위 밖의 확장"은 "React 전용 패키지"를 제외한�
 
 ## 범위 밖
 
-Event·RPC 편의 기능, TanStack Query 연동 예제 문서화. 후속 이슈로 `.scratch/renderer-framework-integration/issues/`에 등록한다(TanStack은 demo 의존성에 넣지 않고 문서 예제로만 둔다).
+Event·RPC 편의 기능, TanStack Query 연동 예제 문서화. 후속 이슈로 등록한다(TanStack은 demo 의존성에 넣지 않고 문서 예제로만 둔다).

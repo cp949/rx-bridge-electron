@@ -2,8 +2,7 @@
 // 검증한다. descriptor 없이 impl 트리만으로 RPC·State·Event가 동작하는지,
 // impl 형태 오류·이름 규칙 위반이 생성 시점에 명확한 에러로 실패하는지,
 // `payloadLimits`·`resourceLimits`·event buffer 옵션이 impl 경로에도 그대로
-// 적용되는지를 다룬다. `.scratch/lightweight-contract/spec.md`의 확정 결정
-// 2(Main 구현)·4(event buffer)·5(errors) 참고.
+// 적용되는지를 다룬다(ADR 0012).
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test } from "vitest";
 

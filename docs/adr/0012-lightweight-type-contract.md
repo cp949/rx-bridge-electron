@@ -1,6 +1,6 @@
 # 계약은 TS 타입 하나로 두고, 스키마는 operation 단위 선택 map으로 둔다
 
-- 관련: RD-010~RD-013, 명세 `.scratch/lightweight-contract/spec.md`
+- 관련: RD-010~RD-013
 - 대체: [ADR 0004](0004-validated-bounded-payloads.md)의 `payloadLimits` 위치를 개정한다. [ADR 0008](0008-contract-registration-match.md)을 대체한다(런타임 재검증이 필요한 전제 — descriptor 기반 `DomainContract`·`DomainImplementation`·`implementDomain` — 자체가 사라진다).
 
 ## 문제

@@ -10,8 +10,6 @@
 - `Symbol.dispose in api`가 `false`다. `has` trap이 문자열 `dispose`만 확인했다. `using`은 `get`을 쓰므로 동작했지만 `in` 검사는 틀렸다.
 - `Object.getOwnPropertyDescriptor(api.domain.rpc, "op")`가 `value: undefined`인 descriptor를 돌려준다. descriptor trap이 `value`를 채우지 않았다.
 
-출처: `.scratch/renderer-proxy-frozen-tree`.
-
 ## 결정
 
 1. `createRendererApi()`는 `Object.create(null)` 노드를 manifest를 따라 재귀로 만들고 `Object.freeze`한 일반 객체 트리를 반환한다.

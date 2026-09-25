@@ -46,7 +46,7 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 
 ### 틀렸을 때의 대가
 
-가설이 실제로 깨지는 Electron 경로가 있다면(예: `did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스), `authorize`가 오래 걸리는 요청이 이미 retire된 옛 세션을 향해 `FORBIDDEN`이나 성공 응답을 잘못 돌려줄 수 있다. 이 가설을 직접 검증하는 자동 test는 없다. 단위 test의 `FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않아 frame 교체를 관측하지 못하고(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`), Electron acceptance(multi-window reload·창 닫기)는 retire 경로만 거치며 `authorize` 대기 중 navigation 시나리오를 갖지 않는다. 가설이 깨졌다는 의심이 들면 Electron acceptance에 navigation 중 `authorize`가 지연되는 시나리오를 추가해 재현을 시도한다. _(개정: [ADR 0019](0019-navigation-retire-on-commit.md) — RD-025가 이 문단이 예로 든 "`did-start-navigation` 없이 라우팅이 바뀌는 엣지 케이스"를 실제로 실행 실험(DELTA-02, Electron 44.4.5)으로 찾아냈다: 오류 페이지 commit(`ERR_CONNECTION_REFUSED`)이 `did-navigate` 없이 `did-fail-load`만 내며 `routingId`를 바꾼다. retire 신호를 `did-navigate` + `did-fail-load`(routingId 일치) 조합으로 바꿔 이 case를 포함하도록 고쳤다 — "틀렸을 때의 대가"가 우려한 시나리오가 실제로 존재했고, 대응은 이 ADR이 기록한다.)_
+가설이 실제로 깨지는 Electron 경로가 있다면(예: `did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스), `authorize`가 오래 걸리는 요청이 이미 retire된 옛 세션을 향해 `FORBIDDEN`이나 성공 응답을 잘못 돌려줄 수 있다. 이 가설을 직접 검증하는 자동 test는 없다. 단위 test의 `FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않아 frame 교체를 관측하지 못하고([ADR 0016](0016-sender-admission.md)), Electron acceptance(multi-window reload·창 닫기)는 retire 경로만 거치며 `authorize` 대기 중 navigation 시나리오를 갖지 않는다. 가설이 깨졌다는 의심이 들면 Electron acceptance에 navigation 중 `authorize`가 지연되는 시나리오를 추가해 재현을 시도한다. _(개정: [ADR 0019](0019-navigation-retire-on-commit.md) — RD-025가 이 문단이 예로 든 "`did-start-navigation` 없이 라우팅이 바뀌는 엣지 케이스"를 실제로 실행 실험(DELTA-02, Electron 44.4.5)으로 찾아냈다: 오류 페이지 commit(`ERR_CONNECTION_REFUSED`)이 `did-navigate` 없이 `did-fail-load`만 내며 `routingId`를 바꾼다. retire 신호를 `did-navigate` + `did-fail-load`(routingId 일치) 조합으로 바꿔 이 case를 포함하도록 고쳤다 — "틀렸을 때의 대가"가 우려한 시나리오가 실제로 존재했고, 대응은 이 ADR이 기록한다.)_
 
 _(개정: RD-049 — "`FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않는다"는 RD-018 이후 맞지 않다. `FakeTarget`(`test/main/fake-ipc.ts`)은 현재 main frame id를 들고 `frameId`까지 비교한다. 단위 test가 frame 교체 뒤 거부를 관측할 수 있다.)_
 
@@ -65,7 +65,7 @@ _(개정: RD-049 — "`FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하�
 ## 범위 밖
 
 - ROADMAP RD-016 후보 03(wire key 문법 — `startsWith("rpc:")`·`slice(4)`를 protocol 모듈로 옮기는 것. 이 ADR은 조회 위치만 `RpcRequests` 안으로 옮겼을 뿐 문법 자체는 손대지 않았다)과 후보 04(server version 분기 — 운영 경로 도달 불가, `recordAdapterRejection` Symbol, `FakeTarget` frameId).
-- deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 후속 이슈(`.scratch/rpc-deadline-cancel-diagnostic/issues/01-deadline-cancel-diagnostic.md`)에서 "먼저 확정된 원인 하나만 기록"으로 해결했다([ADR 0010](0010-operational-diagnostics.md) §8).
+- deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 후속 이슈에서 "먼저 확정된 원인 하나만 기록"으로 해결했다([ADR 0010](0010-operational-diagnostics.md) §8).
 - wire 형식·채널·handshake·공개 export 변경. `RpcRequests`는 `src/main/index.ts`의 공개 export가 아니다 — `Subscriptions`와 같은 내부 구현이다.
 
 ## 관련 ADR

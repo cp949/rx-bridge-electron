@@ -4,7 +4,7 @@
 
 ## 상황
 
-[ADR 0010](0010-operational-diagnostics.md)은 Main의 `DiagnosticsSink`만 다뤘고 Renderer 진단을 범위 밖(`.scratch/renderer-diagnostics`)으로 뒀다. Renderer(`src/renderer`)는 다음을 조용히 처리한다.
+[ADR 0010](0010-operational-diagnostics.md)은 Main의 `DiagnosticsSink`만 다뤘고 Renderer 진단을 범위 밖으로 뒀다. Renderer(`src/renderer`)는 다음을 조용히 처리한다.
 
 - RPC 확정 원인: 원격 응답(성공·에러), 로컬 deadline, `signal` abort, `dispose`, `timeoutMs` 검증 실패, transport 실패, 응답 파싱·요청 불일치. 호출자는 `RemoteError.code`만 본다 — 로컬 deadline(`DEADLINE_EXCEEDED`)과 signal abort·dispose(`CANCELLED`)는 code만으로 구분되지 않는 경우가 있다.
 - 스트림 메시지 폐기: parse 실패, `protocolVersion`·`clientId` 불일치, sequence 역행·중복 `subscribed`·`subscribed` 전 데이터.

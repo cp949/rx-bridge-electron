@@ -2,7 +2,11 @@
 
 ### Issue tracker
 
-이슈와 명세는 `.scratch/<feature-slug>/` 아래 로컬 마크다운으로 관리한다. See `docs/agents/issue-tracker.md`.
+이슈와 명세는 GitHub issue(`gh` CLI)로 관리한다. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+기본 다섯 역할 라벨(`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`)을 이름 그대로 쓴다. See `docs/agents/triage-labels.md`.
 
 ### Domain docs
 

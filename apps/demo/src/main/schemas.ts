@@ -1,5 +1,5 @@
 // 경량 계약(ADR 0012): 도메인 스키마는 Main에만 두고 Renderer 번들에는
-// 포함하지 않는다(`.scratch/lightweight-contract/spec.md` 확정 결정 3).
+// 포함하지 않는다.
 // `schemas`/`errors`는 각각 `satisfies SchemasFor<AppBridge>`/
 // `satisfies ErrorsFor<AppBridge>`로 선언해 경로 오타와 스키마 출력 타입
 // 불일치를 컴파일 에러로 잡는다(ADR 0012 "파일 분리" 패턴,

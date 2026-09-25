@@ -14,7 +14,7 @@
 
 adapter가 판정한 `frame-not-main`·`origin-not-allowed`를 같은 진단 sink에 보내려고 `src/main/diagnostics.ts`에 모듈 내부 Symbol `recordAdapterRejection`을 두고 `StreamBridgeServer`에 그 Symbol 키의 선택적 메서드를 붙이는 통로(ADR 0010 §14)가 생겼다. 판정을 server 하나로 모으면 adapter가 sink에 닿을 일 자체가 없어져 이 통로가 필요 없어진다.
 
-test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `webContentsId`·`isMainFrame`만 보고 frameId를 무시해, server seam test가 frame 교체 뒤 거부를 관측할 수 없었다(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`). 실제 adapter(`electron-adapter.ts`)는 `contents.mainFrame.routingId === sender.frameId`까지 비교한다.
+test 하니스의 `FakeTarget.isCurrentMainFrame`(`test/main/fake-ipc.ts`)이 `webContentsId`·`isMainFrame`만 보고 frameId를 무시해, server seam test가 frame 교체 뒤 거부를 관측할 수 없었다. 실제 adapter(`electron-adapter.ts`)는 `contents.mainFrame.routingId === sender.frameId`까지 비교한다.
 
 ## 결정 1: `DocumentSessions`의 private `#admit(sender)` 하나가 모든 채널의 sender admission을 판정한다
 

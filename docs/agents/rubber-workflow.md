@@ -221,7 +221,7 @@ checklist의 완료 조건을 전부 만족하면:
    이미 `yyyyMMdd-NN-<제목>` 형식이라 재명명하지 않는다). `_works/`가 통째로 gitignore
    대상이라 이 이동은 git에 기록되지 않는다.
 
-`ROADMAP.md`·ADR·`.scratch/`·소스 주석 같은 추적 파일에는 `_works/` 경로를 적지 않는다 — 다른
+`ROADMAP.md`·ADR·GitHub issue·소스 주석 같은 추적 대상에는 `_works/` 경로를 적지 않는다 — 다른
 환경에서는 그 경로가 없다. 출처는 RD 번호·커밋 해시·ADR 링크로 남긴다.
 
 ### 함정 → 장기 문서화
@@ -252,7 +252,7 @@ checklist의 완료 조건을 전부 만족하면:
 
 - 현재 ROADMAP.md 항목의 범위 안이면 그 항목의 하위 항목으로 `ROADMAP.md`에 삽입한다.
 - 범위 밖이거나 ROADMAP.md와 무관한 작업(브레인스토밍 시작 포함)이면
-  `.scratch/<feature-slug>/issues/`에 등록한다(`docs/agents/issue-tracker.md`).
+  GitHub issue로 등록한다(`docs/agents/issue-tracker.md`).
 - 등록 여부는 매번 판단한다 — 사소하면 버려도 된다.
 
 ## 금지

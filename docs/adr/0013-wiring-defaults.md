@@ -52,7 +52,7 @@
 
 - `createRendererApi`의 `{ globalName }` 옵션 객체 overload. transport 인자는 `BridgeTransport | undefined`만 받는다 — 다른 이름의 전역을 읽고 싶은 소비자는 transport를 직접 만들어 넘긴다.
 - hello-world 이외의 자동 `pagehide` dispose 등록. 이 문서는 자동 등록을 추가하는 게 아니라 hello-world에서 불필요한 수동 등록을 빼는 것이다.
-- Renderer Proxy를 동결 객체 트리로 교체하는 것(`.scratch/renderer-proxy-frozen-tree`).
+- Renderer Proxy를 동결 객체 트리로 교체하는 것([ADR 0021](0021-renderer-frozen-api-tree.md)).
 - 와이어 형식·채널 형식·handshake 프로토콜 변경.
 
 ## 적용 범위
