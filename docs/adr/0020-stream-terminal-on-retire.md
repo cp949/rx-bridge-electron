@@ -6,7 +6,7 @@
 
 세션이 retire되면 RPC는 이미 통지를 받는다 — 진행 중 RPC는 `CANCELLED "Request cancelled."`, retire 뒤 새 RPC는 `FORBIDDEN "Bridge sender is not authorized."`([ADR 0015](0015-rpc-request-lifecycle.md)). 그러나 stream(State/Event)은 세 경로 모두 조용히 멈췄다:
 
-- **활성 구독**: `session.signal` abort → `consumer.onSessionAbort` → `#close`. 전송 없음.
+- **활성 구독**: `session.signal` abort → `consumer.onSessionAbort` → `#close`. 전송 없음. _(개정: [ADR 0023](0023-session-retire-interface.md) — 구독 경로는 `session.signal`이 아니라 `onRetire`로 이 통지를 받는다. abort 메커니즘은 implementation으로 유지된다.)_
 - **`authorize` 대기 구독**: 대기 entry의 `onAbort`가 `controller.abort()`만 하고 끝난다. 기존 `#reject`는 `sessionSignal.aborted`면 아무것도 보내지 않는다 — retire 통지에 그대로 쓸 수 없다.
 
   _(개정: RD-032 — 시작 전 거부·admission 거부·대기 중 retire·활성 retire의 통지 판정이 `Subscriptions`의 원인 표 한 곳으로 합쳐졌다. `#reject`는 삭제됐다.)_
