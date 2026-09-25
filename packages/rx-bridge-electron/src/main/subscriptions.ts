@@ -378,13 +378,15 @@ export class Subscriptions {
    * 같은 순서). 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된
    * pending `onAbort`가 retire 통지와 lease 반환을 맡는다. `false`면 이미
    * 취소됐거나(unsubscribe·retire) 세션이 retire된 것이므로 `subscribe()`는
-   * 이어서 진행하지 않는다.(등록 시점에 이미 retire된 세션이면 `onRetire`의
+   * 이어서 진행하지 않는다. (등록 시점에 이미 retire된 세션이면 `onRetire`의
    * 즉시 호출이 그 자리에서 `entry.onAbort`를 대신 실행한다 — RD-037.)
    *
-   * lease 처리(K2): 승인(`ok`이고 verdict가 `allowed`)이면 `offRetire()`만
+   * lease 처리: 승인(`ok`이고 verdict가 `allowed`)이면 `offRetire()`만
    * 불러 slot을 유지한다 — `#start`가 같은 lease를 이어받아 곧바로
-   * `consumers.set`하므로 관측 가능한 slot 반환은 없다. 그 외(거부·취소·
-   * `ok`가 false)면 `release()`로 slot을 반환한다.
+   * `consumers.set`하므로 관측 가능한 slot 반환은 없다. 이 이음 구간에는
+   * 진단·`send`·`authorize`·source 호출을 넣지 않는다(외부 호출 지점마다
+   * slot 수 = pending + consumers). 그 외(거부·취소·`ok`가 false)면
+   * `release()`로 slot을 반환한다.
    */
   #finishPending(
     session: DocumentSession,
@@ -476,9 +478,10 @@ export class Subscriptions {
     });
     // 세션이 등록 이전에 이미 retire됐으면 `lease.onRetire`가 여기서
     // `consumer.onSessionAbort`를 즉시 동기 호출해 open 전 분기(`#close` +
-    // `#endUnstarted`)를 태운다. 진단 sink가 동기 unsubscribe로 창을 먼저
-    // 닫았으면 `#close`가 이미 `lease.release()`를 불렀으므로, 방금 등록한
-    // listener는 release된 lease에 대한 등록이라 L5에 따라 no-op이다 — 별도
+    // `#endUnstarted`)를 태운다. 진단 sink가 동기 unsubscribe·dispose로 창을
+    // 먼저 닫았으면 `#close`가 이미 `lease.release()`를 불렀으므로 등록은
+    // 남지 않는다 — 세션이 살아 있으면 no-op이고, 이미 retire됐으면 같은
+    // 즉시 호출로 open 전 CANCELLED를 통지한다(`SlotLease.onRetire`). 별도
     // 해제가 필요 없다.
     lease.onRetire(consumer.onSessionAbort);
     if (window.closed) return;

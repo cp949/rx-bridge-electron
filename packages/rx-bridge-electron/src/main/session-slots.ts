@@ -19,9 +19,10 @@ export interface SlotLease {
    * retire 통지를 등록한다. release된 lease면 등록은 남기지 않는다 —
    * 호출 시점에 세션이 이미 retire 상태면 listener를 동기 1회 호출하고,
    * 아직 살아 있으면 아무 일도 하지 않는다(no-op, 이후 그 세션이 retire돼도
-   * 호출되지 않는다). _(개정: DELTA-04 — 옛 `session.onRetire`는 "release"
-   * 개념이 없어 세션이 이미 retire됐으면 등록 즉시 항상 호출했다. release된
-   * lease를 완전히 무시하면 이 동작이 달라진다. 사용자 확인 2026-09-25.)_
+   * 호출되지 않는다). release 여부는 이후 retire를 구독할지만 정하고, 이미
+   * 일어난 retire의 즉시 통지는 `DocumentSession.onRetire`와 같다 —
+   * `Subscriptions.dispose()`가 등록 전 consumer를 먼저 닫아 lease를
+   * release해도 open 전 CANCELLED 통지가 나가야 한다.
    * release되지 않은 lease는: 이미 등록된 listener가 있으면 `Error`를
    * 던진다 — 등록은 한 번에 하나뿐이다(호출자는 `offRetire()`로 먼저
    * 해제한 뒤 다시 등록한다). 세션이 이미 retire됐으면 반환 전에 listener를
@@ -66,8 +67,8 @@ class LeaseImpl implements SlotLease {
   public onRetire(listener: () => void): void {
     if (this.#released) {
       // 등록 상태(#unregister)는 release() 뒤 항상 undefined다 — 여기서는
-      // 아무것도 등록하지 않는다. 세션이 이미 retire 상태면 옛
-      // `session.onRetire`와 같은 관측 결과를 위해 즉시 1회만 호출한다.
+      // 아무것도 등록하지 않는다. 세션이 이미 retire 상태면
+      // `session.onRetire`의 즉시 호출과 같게 1회만 호출한다.
       if (this.#session.retireReason !== undefined) listener();
       return;
     }

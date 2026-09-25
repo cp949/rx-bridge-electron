@@ -7,7 +7,7 @@
  *
  * 세션은 실제 `DocumentSessions` + `FakeTarget`으로 만들고 detach로
  * retire한다 — EventTarget 기반 예외 격리·등록 순서가 실제 `SessionImpl`과
- * 같아야 하기 때문이다(`session-slots.ts:L5` 이중 등록·즉시 호출 경로는
+ * 같아야 하기 때문이다(`SlotLease.onRetire`의 등록·즉시 호출 경로는
  * `DocumentSession.onRetire`의 실제 구현에 위임한다).
  */
 import { describe, expect, test, vi } from "vitest";
