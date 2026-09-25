@@ -286,7 +286,7 @@ const scopedDataEvent = scopedEvent(
 );
 ```
 
-`overflow`는 `"error"`(대기 값 전달 뒤 `STREAM_OVERFLOW`로 종료), `"drop-oldest"`, `"drop-newest"` 중 하나입니다. plain `Observable<T>`을 그대로 impl에 두면 buffer 옵션 없이 기본값을 씁니다.
+`overflow`는 `"error"`(대기 값 전달 뒤 `STREAM_OVERFLOW`로 종료), `"drop-oldest"`, `"drop-newest"` 중 하나입니다. plain `Observable<T>`을 그대로 impl에 두면 buffer 옵션 없이 기본값을 씁니다. buffer 옵션 객체나 source 반환 타입을 따로 선언할 때는 `/main`의 `EventSourceBuffer`·`OverflowPolicy`·`EventSource<T>`·`BroadcastEventSource<T>`·`ScopedEventSource<T>` 타입을 씁니다.
 
 잘못된 buffer(`capacity`, `overflow`)나 source 모양은 helper를 쓰지 않은 직접 작성 source를 포함해 `createBridgeServer` 호출 시 `TypeError`로 실패합니다.
 

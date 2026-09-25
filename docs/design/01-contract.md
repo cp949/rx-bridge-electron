@@ -59,7 +59,7 @@ type AppBridge = {
 
 ### 구현 측 타입
 
-`BridgeImpl<B>`가 참조하는 `BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 구성 타입은 `contract/impl-types.ts`가 소유한다. `src/contract/`는 패키지 내부 모듈 중 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다. eslint `@typescript-eslint/no-restricted-imports`가 강제한다.
+`BridgeImpl<B>`가 참조하는 `BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 구성 타입은 `contract/impl-types.ts`가 소유한다. `src/contract/`는 패키지 내부 모듈 중 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다. eslint `@typescript-eslint/no-restricted-imports`가 강제한다. 이 타입들은 `/main`에서 type export하고 `/contract`에서는 export하지 않는다. 앱은 buffer 옵션 객체나 source 반환 타입을 `BridgeImpl<B>` indexed access 없이 선언한다.
 
 `EventSource<T>`는 세 형태 중 하나다.
 

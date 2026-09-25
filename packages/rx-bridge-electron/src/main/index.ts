@@ -20,7 +20,14 @@ export { DEFAULT_PAYLOAD_LIMITS } from "./payload-limits.js";
 export { DEFAULT_RESOURCE_LIMITS } from "./resource-limits.js";
 export type { ResourceLimits } from "./resource-limits.js";
 export { broadcastEvent, currentValueSource, scopedEvent } from "./sources.js";
-export type { CurrentValueSource } from "./sources.js";
+export type {
+  BroadcastEventSource,
+  CurrentValueSource,
+  EventSource,
+  EventSourceBuffer,
+  OverflowPolicy,
+  ScopedEventSource,
+} from "./sources.js";
 export type {
   AttachedTarget,
   Authorize,

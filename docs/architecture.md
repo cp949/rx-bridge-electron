@@ -17,7 +17,7 @@
 | `@cp949/rx-bridge-electron/testing`  | test 전용     | `createLoopbackTransport` — in-process `BridgeTransport` 두 번째 adapter       |
 | `@cp949/rx-bridge-electron/protocol` | 모든 프로세스 | envelope·payload parse 함수, `PROTOCOL_VERSION`, wire 메시지 타입              |
 
-`src/contract/`는 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다(eslint `no-restricted-imports`가 강제한다). `BridgeImpl`이 참조하는 구현 측 타입(`BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 그 구성 타입)은 `contract/impl-types.ts`가 소유한다. `main`은 `BridgeContext`·`SenderIdentity`·`CurrentValueSource`를 re-export한다. `EventSource`와 그 구성 타입(`BroadcastEventSource`·`ScopedEventSource`·`EventSourceBuffer`·`OverflowPolicy`)은 어느 진입점에서도 공개 export하지 않는다.
+`src/contract/`는 `src/protocol/`에만 의존하고 `src/main/*`을 타입으로도 import하지 않는다(eslint `no-restricted-imports`가 강제한다). `BridgeImpl`이 참조하는 구현 측 타입(`BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 그 구성 타입)은 `contract/impl-types.ts`가 소유한다. `main`은 `BridgeContext`·`SenderIdentity`·`CurrentValueSource`·`EventSource`와 그 구성 타입(`BroadcastEventSource`·`ScopedEventSource`·`EventSourceBuffer`·`OverflowPolicy`)을 type re-export한다. `contract` 진입점은 이 타입들을 export하지 않는다.
 
 계약은 런타임 값이 아니라 순수 TS 타입 `B`다. handler, Electron 객체, 자격증명, Node API, 함수, Observable/Subject는 preload 경계를 건너지 않는다. Renderer에는 고정된 `BridgeTransport`만 노출하며 `ipcRenderer`, 임의 채널, raw Electron event를 공개하지 않는다.
 
