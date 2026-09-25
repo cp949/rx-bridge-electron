@@ -437,6 +437,61 @@ describe("renderer RemoteState", () => {
     next.unsubscribe();
   });
 
+  test("marks the snapshot stale with the last value after a remote error", async () => {
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const errors: unknown[] = [];
+    state.subscribe({ error: (error) => errors.push(error) });
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
+    transport.emitStream(
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "batch", sequence: 1, values: ["old"] }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, {
+        type: "error",
+        sequence: 2,
+        error: { code: "SOURCE_FAILED", message: "stream failed" },
+      }),
+    );
+
+    expect(errors).toHaveLength(1);
+    expect(state.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "old",
+    });
+  });
+
+  test("discards the stale value when a reconnecting generation closes before its first value", async () => {
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const first = state.subscribe();
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
+    transport.emitStream(
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "batch", sequence: 1, values: ["old"] }),
+    );
+    first.unsubscribe();
+    expect(state.snapshot).toEqual({
+      status: "stale",
+      active: false,
+      value: "old",
+    });
+
+    const next = state.subscribe();
+    expect(state.snapshot).toEqual({ status: "connecting", active: true });
+    next.unsubscribe();
+
+    expect(state.snapshot).toEqual({ status: "uninitialized", active: false });
+  });
+
   test("opens a fresh generation when a terminal callback subscribes again", async () => {
     const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
