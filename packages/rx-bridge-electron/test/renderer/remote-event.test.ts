@@ -1,11 +1,8 @@
 import { describe, expect, test } from "vitest";
 
 import { createRendererApi, RemoteError } from "../../src/renderer/index.js";
-import type {
-  RendererStreamCommand,
-  StreamMessage,
-} from "../../src/protocol/index.js";
-import { FakeTransport } from "./fake-transport.js";
+import type { StreamMessage } from "../../src/protocol/index.js";
+import { FakeTransport, streamMessage } from "./fake-transport.js";
 
 interface EventBridge {
   readonly hardware: {
@@ -15,66 +12,30 @@ interface EventBridge {
   };
 }
 
-type StreamMessageBody = StreamMessage extends infer Message
-  ? Message extends StreamMessage
-    ? Omit<Message, "protocolVersion" | "clientId" | "subscriptionId">
-    : never
-  : never;
-
-function eventTransport(): FakeTransport {
-  const transport = new FakeTransport();
-  transport.handshake = Promise.resolve({
-    protocolVersion: 1,
-    clientId: "client-1",
-    manifest: {
-      rpc: [],
-      state: [],
-      event: ["event:hardware/fault$"],
-    },
-  });
-  return transport;
-}
-
-function message(
-  subscriptionId: string,
-  value: StreamMessageBody,
-  clientId = "client-1",
-): StreamMessage {
-  return {
-    protocolVersion: 1,
-    clientId,
-    subscriptionId,
-    ...value,
-  } as StreamMessage;
-}
-
-function subscriptions(transport: FakeTransport) {
-  return transport.controls.filter(
-    (
-      command,
-    ): command is Extract<
-      RendererStreamCommand,
-      { readonly type: "subscribe" }
-    > => command.type === "subscribe",
-  );
-}
-
 describe("renderer remote Event", () => {
   test("shares a generation, gates values on subscribed, and never replays", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     const first = api.hardware.event.fault$.subscribe((value) =>
       firstValues.push(value),
     );
-    const id = subscriptions(transport)[0]!.subscriptionId;
+    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
 
     transport.emitStream(
-      message(id, { type: "batch", sequence: 1, values: ["too-early"] }),
+      streamMessage(id, {
+        type: "batch",
+        sequence: 1,
+        values: ["too-early"],
+      }),
     );
-    transport.emitStream(message(id, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      message(id, { type: "batch", sequence: 1, values: ["first"] }),
+      streamMessage(id, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(id, { type: "batch", sequence: 1, values: ["first"] }),
     );
     expect(firstValues).toEqual(["first"]);
 
@@ -82,10 +43,10 @@ describe("renderer remote Event", () => {
     const second = api.hardware.event.fault$.subscribe((value) =>
       secondValues.push(value),
     );
-    expect(subscriptions(transport)).toHaveLength(1);
+    expect(transport.subscribeCommands()).toHaveLength(1);
     expect(secondValues).toEqual([]);
     transport.emitStream(
-      message(id, { type: "batch", sequence: 2, values: ["second"] }),
+      streamMessage(id, { type: "batch", sequence: 2, values: ["second"] }),
     );
     expect(firstValues).toEqual(["first", "second"]);
     expect(secondValues).toEqual(["second"]);
@@ -102,7 +63,9 @@ describe("renderer remote Event", () => {
   });
 
   test("delivers a batch synchronously in order before ACK and ignores non-increasing sequences", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
@@ -113,16 +76,26 @@ describe("renderer remote Event", () => {
     const subscription = api.hardware.event.fault$.subscribe((value) =>
       timeline.push(value),
     );
-    const id = subscriptions(transport)[0]!.subscriptionId;
-    transport.emitStream(message(id, { type: "subscribed", sequence: 5 }));
+    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
     transport.emitStream(
-      message(id, { type: "batch", sequence: 6, values: ["a", "b"] }),
+      streamMessage(id, { type: "subscribed", sequence: 5 }),
     );
     transport.emitStream(
-      message(id, { type: "batch", sequence: 6, values: ["duplicate"] }),
+      streamMessage(id, { type: "batch", sequence: 6, values: ["a", "b"] }),
     );
     transport.emitStream(
-      message(id, { type: "batch", sequence: 4, values: ["decreasing"] }),
+      streamMessage(id, {
+        type: "batch",
+        sequence: 6,
+        values: ["duplicate"],
+      }),
+    );
+    transport.emitStream(
+      streamMessage(id, {
+        type: "batch",
+        sequence: 4,
+        values: ["decreasing"],
+      }),
     );
 
     expect(timeline).toEqual(["a", "b", "ack:6"]);
@@ -133,7 +106,9 @@ describe("renderer remote Event", () => {
   });
 
   test("acknowledges an accepted batch after a synchronous last-subscriber unsubscribe", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
@@ -148,18 +123,26 @@ describe("renderer remote Event", () => {
       timeline.push(value);
       subscription.unsubscribe();
     });
-    const id = subscriptions(transport)[0]!.subscriptionId;
-    transport.emitStream(message(id, { type: "subscribed", sequence: 0 }));
+    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    transport.emitStream(
+      streamMessage(id, { type: "subscribed", sequence: 0 }),
+    );
 
     transport.emitStream(
-      message(id, { type: "batch", sequence: 1, values: ["first", "second"] }),
+      streamMessage(id, {
+        type: "batch",
+        sequence: 1,
+        values: ["first", "second"],
+      }),
     );
 
     expect(timeline).toEqual(["first", "unsubscribe", "acknowledge"]);
   });
 
   test("closes only the current generation and discards wrong-session and closed-ID messages", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     let completed = 0;
@@ -169,18 +152,23 @@ describe("renderer remote Event", () => {
         completed += 1;
       },
     });
-    const firstId = subscriptions(transport)[0]!.subscriptionId;
-    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
+    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
     transport.emitStream(
-      message(
-        firstId,
-        { type: "batch", sequence: 1, values: ["wrong"] },
-        "old-client",
-      ),
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
-    transport.emitStream(message(firstId, { type: "complete", sequence: 2 }));
+    transport.emitStream({
+      protocolVersion: 1,
+      clientId: "old-client",
+      subscriptionId: firstId,
+      type: "batch",
+      sequence: 1,
+      values: ["wrong"],
+    } as StreamMessage);
     transport.emitStream(
-      message(firstId, { type: "batch", sequence: 3, values: ["late"] }),
+      streamMessage(firstId, { type: "complete", sequence: 2 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "batch", sequence: 3, values: ["late"] }),
     );
     expect(firstValues).toEqual([]);
     expect(completed).toBe(1);
@@ -189,13 +177,13 @@ describe("renderer remote Event", () => {
     api.hardware.event.fault$.subscribe({
       error: (error) => errors.push(error),
     });
-    const secondId = subscriptions(transport)[1]!.subscriptionId;
+    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
-      message(secondId, { type: "subscribed", sequence: 0 }),
+      streamMessage(secondId, { type: "subscribed", sequence: 0 }),
     );
     transport.emitStream(
-      message(secondId, {
+      streamMessage(secondId, {
         type: "error",
         sequence: 1,
         error: { code: "SOURCE_FAILED", message: "stream failed" },
@@ -210,7 +198,9 @@ describe("renderer remote Event", () => {
   });
 
   test("opens a fresh generation when an error callback subscribes again", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
@@ -219,33 +209,37 @@ describe("renderer remote Event", () => {
         api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
       },
     });
-    const firstId = subscriptions(transport)[0]!.subscriptionId;
-    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
+    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
     transport.emitStream(
-      message(firstId, {
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, {
         type: "error",
         sequence: 1,
         error: { code: "SOURCE_FAILED", message: "stream failed" },
       }),
     );
 
-    expect(subscriptions(transport)).toHaveLength(2);
-    const secondId = subscriptions(transport)[1]!.subscriptionId;
+    expect(transport.subscribeCommands()).toHaveLength(2);
+    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
-      message(firstId, { type: "batch", sequence: 2, values: ["late"] }),
+      streamMessage(firstId, { type: "batch", sequence: 2, values: ["late"] }),
     );
     transport.emitStream(
-      message(secondId, { type: "subscribed", sequence: 0 }),
+      streamMessage(secondId, { type: "subscribed", sequence: 0 }),
     );
     transport.emitStream(
-      message(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+      streamMessage(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
     );
     expect(nextValues).toEqual(["fresh"]);
   });
 
   test("opens a fresh generation when a complete callback subscribes again", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
@@ -254,37 +248,46 @@ describe("renderer remote Event", () => {
         api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
       },
     });
-    const firstId = subscriptions(transport)[0]!.subscriptionId;
-    transport.emitStream(message(firstId, { type: "subscribed", sequence: 0 }));
-    transport.emitStream(message(firstId, { type: "complete", sequence: 1 }));
+    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    transport.emitStream(
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "complete", sequence: 1 }),
+    );
 
-    expect(subscriptions(transport)).toHaveLength(2);
-    const secondId = subscriptions(transport)[1]!.subscriptionId;
+    expect(transport.subscribeCommands()).toHaveLength(2);
+    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
-      message(firstId, { type: "batch", sequence: 2, values: ["late"] }),
+      streamMessage(firstId, { type: "batch", sequence: 2, values: ["late"] }),
     );
     transport.emitStream(
-      message(secondId, { type: "subscribed", sequence: 0 }),
+      streamMessage(secondId, { type: "subscribed", sequence: 0 }),
     );
     transport.emitStream(
-      message(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+      streamMessage(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
     );
     expect(nextValues).toEqual(["fresh"]);
   });
 
   test("routes subscribed and a synchronous first batch through the pre-registered generation", async () => {
-    const transport = eventTransport();
+    const transport = new FakeTransport({
+      manifest: { event: ["event:hardware/fault$"] },
+    });
     const wireOrder: string[] = [];
     transport.controlHook = (command) => {
       if (command.type === "subscribe") {
         wireOrder.push("subscribe");
         transport.emitStream(
-          message(command.subscriptionId, { type: "subscribed", sequence: 0 }),
+          streamMessage(command.subscriptionId, {
+            type: "subscribed",
+            sequence: 0,
+          }),
         );
         wireOrder.push("subscribed");
         transport.emitStream(
-          message(command.subscriptionId, {
+          streamMessage(command.subscriptionId, {
             type: "batch",
             sequence: 1,
             values: ["synchronous"],
