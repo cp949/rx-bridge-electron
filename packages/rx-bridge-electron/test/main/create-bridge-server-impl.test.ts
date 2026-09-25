@@ -427,6 +427,52 @@ describe("createBridgeServer(impl, options): schemas/errors 옵션 배선", () =
     ).toThrow(/has no matching implementation/);
   });
 
+  // 타입을 우회한 schemas/errors 서브트리의 형태 오류. 노드 → category →
+  // rpc leaf 순으로 경로마다 다른 메시지가 난다.
+  test.each([
+    [
+      "schemas 도메인 노드가 객체가 아니면",
+      { schemas: { device: 42 } },
+      "Schema entry must be an object.",
+    ],
+    [
+      "errors 도메인 노드가 객체가 아니면",
+      { errors: { device: 42 } },
+      "Errors entry must be an object.",
+    ],
+    [
+      "schemas category가 객체가 아니면",
+      { schemas: { device: { rpc: 42 } } },
+      "Schema entries for 'rpc:device' must be an object.",
+    ],
+    [
+      "errors category가 객체가 아니면",
+      { errors: { device: { rpc: 42 } } },
+      "Errors entries for 'rpc:device' must be an object.",
+    ],
+    [
+      "rpc schema leaf가 객체가 아니면",
+      { schemas: { device: { rpc: { send: 42 } } } },
+      "Schema entry for 'rpc:device/send' must be an object.",
+    ],
+    [
+      "rpc errors leaf가 배열이 아니면",
+      { errors: { device: { rpc: { send: "DEVICE_TIMEOUT" } } } },
+      "Declared errors for 'rpc:device/send' must be an array of error codes.",
+    ],
+  ] as const)("%s 실패한다", (_name, options, message) => {
+    const { impl } = buildImpl();
+    const create = () =>
+      createBridgeServer(
+        impl,
+        options as unknown as Parameters<
+          typeof createBridgeServer<AppBridge>
+        >[1],
+      );
+    expect(create).toThrow(TypeError);
+    expect(create).toThrow(message);
+  });
+
   test("options.schemas를 지정하면 실제 입력 검증에 쓰인다", async () => {
     const { impl } = buildImpl();
     const server = createBridgeServer(impl, {
