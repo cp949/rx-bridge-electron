@@ -7,47 +7,17 @@ import {
   currentValueSource,
   scopedEvent,
 } from "../../src/main/sources.js";
-import type {
-  StreamMessage,
-  WireStreamCommand,
-} from "../../src/protocol/index.js";
+import type { StreamMessage } from "../../src/protocol/index.js";
 import { parseBridgeValue } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
+import {
+  rendererDocument,
+  type TestSubscription,
+} from "./renderer-document.js";
 import { testSubscriptionId } from "./subscription-ids.js";
 
-function command(
-  type: "subscribe",
-  subscriptionId: string,
-  clientId?: string,
-  key?: string,
-): Extract<WireStreamCommand, { type: "subscribe" }>;
-function command(
-  type: "unsubscribe",
-  subscriptionId: string,
-  clientId?: string,
-  key?: string,
-): Extract<WireStreamCommand, { type: "unsubscribe" }>;
-function command(
-  type: "subscribe" | "unsubscribe",
-  subscriptionId: string,
-  clientId = "client-1",
-  key = "state:hardware/current$",
-): WireStreamCommand {
-  return type === "subscribe"
-    ? { protocolVersion: 1, clientId, type, subscriptionId, key }
-    : { protocolVersion: 1, clientId, type, subscriptionId };
-}
-const ack = (
-  subscriptionId: string,
-  sequence: number,
-  clientId = "client-1",
-) => ({
-  protocolVersion: 1 as const,
-  clientId,
-  type: "acknowledge" as const,
-  subscriptionId,
-  sequence,
-});
+const STATE = "state:hardware/current$";
+const EVENT = "event:hardware/change$";
 
 function harness(
   options: {
@@ -76,9 +46,7 @@ function harness(
   );
   server.attach(new FakeTarget(1));
   server.attach(new FakeTarget(2));
-  const messages: StreamMessage[] = [];
-  const send = (message: StreamMessage) => messages.push(message);
-  return { server, source, events, diagnostics, messages, send };
+  return { server, source, events, diagnostics };
 }
 
 describe("Main stream sources and sharing", () => {
@@ -101,42 +69,18 @@ describe("Main stream sources and sharing", () => {
     });
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
+    const record = {
+      onFrame: (message: StreamMessage) => {
+        messages.push(message);
+      },
     };
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const doc = rendererDocument(server);
+    const first = await doc.subscribe(EVENT, record);
+    await doc.subscribe(EVENT, record);
     expect(subscriptions).toBe(2);
     expect(live).toBe(1);
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(3),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    await first.ack(1);
+    await doc.subscribe(EVENT, record);
     expect(subscriptions).toBe(2);
     expect(live).toBe(1);
     expect(
@@ -157,48 +101,24 @@ describe("Main stream sources and sharing", () => {
     });
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
-    const first: StreamMessage[] = [];
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => first.push(message),
-    );
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command("subscribe", testSubscriptionId(2), "client-2"),
-      (message) => second.push(message),
-    );
-    expect(first.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
-    expect(second.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
-    expect(first[1]).toMatchObject({ values: [7] });
-    expect(second[1]).toMatchObject({ values: [7] });
+    const doc = rendererDocument(server);
+    const other = rendererDocument(server, {
+      webContentsId: 2,
+      clientId: "client-2",
+    });
+    const first = await doc.subscribe(STATE);
+    const second = await other.subscribe(STATE);
+    expect(first.types()).toEqual(["subscribed", "batch"]);
+    expect(second.types()).toEqual(["subscribed", "batch"]);
+    expect(first.frames[1]).toMatchObject({ values: [7] });
+    expect(second.frames[1]).toMatchObject({ values: [7] });
     expect(subscribe).toHaveBeenCalledTimes(1);
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      () => {},
-    );
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command("unsubscribe", testSubscriptionId(2), "client-2"),
-      () => {},
-    );
+    await first.unsubscribe();
+    await second.unsubscribe();
     expect(source.observed).toBe(false);
     source.next(9);
-    const later: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(3)),
-      (message) => later.push(message),
-    );
-    expect(later[1]).toMatchObject({ values: [9] });
+    const later = await doc.subscribe(STATE);
+    expect(later.frames[1]).toMatchObject({ values: [9] });
     expect(subscribe).toHaveBeenCalledTimes(2);
   });
 
@@ -215,27 +135,11 @@ describe("Main stream sources and sharing", () => {
       },
     });
     server.attach(new FakeTarget(1, "dashboard"));
-    await server.controlStream(
-      sender({ origin: "https://evil.example" }),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      () => {},
-    );
+    await rendererDocument(server, {
+      origin: "https://evil.example",
+    }).subscribe(EVENT);
     expect(contexts).toHaveLength(0);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      () => {},
-    );
+    await rendererDocument(server).subscribe(EVENT);
     expect(contexts).toEqual([
       expect.objectContaining({
         windowRole: "dashboard",
@@ -262,29 +166,16 @@ describe("Main stream sources and sharing", () => {
     });
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
-    const first: StreamMessage[] = [];
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => first.push(message),
-    );
+    const first = await rendererDocument(server).subscribe(STATE);
     throwing = true;
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command("subscribe", testSubscriptionId(2), "client-2"),
-      (message) => second.push(message),
-    );
-    expect(first.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
-    expect(first[1]).toMatchObject({ values: [1] });
-    expect(second.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(second.at(-1)).toMatchObject({
+    const second = await rendererDocument(server, {
+      webContentsId: 2,
+      clientId: "client-2",
+    }).subscribe(STATE);
+    expect(first.types()).toEqual(["subscribed", "batch"]);
+    expect(first.frames[1]).toMatchObject({ values: [1] });
+    expect(second.types()).toEqual(["subscribed", "error"]);
+    expect(second.frames.at(-1)).toMatchObject({
       error: { code: "INTERNAL", message: "Internal bridge error." },
     });
     expect(raw.observed).toBe(true);
@@ -306,22 +197,9 @@ describe("Main stream sources and sharing", () => {
         hardware: { event: { change$: scopedEvent(factory) } },
       });
       server.attach(new FakeTarget());
-      const messages: StreamMessage[] = [];
-      await server.controlStream(
-        sender(),
-        command(
-          "subscribe",
-          testSubscriptionId(1),
-          "client-1",
-          "event:hardware/change$",
-        ),
-        (message) => messages.push(message),
-      );
-      expect(messages.map((message) => message.type)).toEqual([
-        "subscribed",
-        "error",
-      ]);
-      expect(messages.at(-1)).toMatchObject({
+      const sub = await rendererDocument(server).subscribe(EVENT);
+      expect(sub.types()).toEqual(["subscribed", "error"]);
+      expect(sub.frames.at(-1)).toMatchObject({
         error: { code: "INTERNAL", message: "Internal bridge error." },
       });
       expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
@@ -334,19 +212,12 @@ describe("Main stream sources and sharing", () => {
       hardware: { state: { current$: currentValueSource(source) } },
     });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => {
-        messages.push(message);
+    const sub = await rendererDocument(server).subscribe(STATE, {
+      onFrame: (message) => {
         if (message.type === "batch") throw new Error("closed frame");
       },
-    );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    });
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
     expect(source.observed).toBe(false);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
@@ -358,30 +229,13 @@ describe("Main stream sources and sharing", () => {
     });
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
-    const first: StreamMessage[] = [];
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => first.push(message),
-    );
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-2",
-        "event:hardware/change$",
-      ),
-      (message) => second.push(message),
-    );
+    const first = await rendererDocument(server).subscribe(EVENT);
+    const second = await rendererDocument(server, {
+      webContentsId: 2,
+      clientId: "client-2",
+    }).subscribe(EVENT);
     source.error(new Error("secret"));
-    for (const messages of [first, second]) {
+    for (const messages of [first.frames, second.frames]) {
       expect(messages.map((message) => message.type)).toEqual([
         "subscribed",
         "error",
@@ -390,7 +244,9 @@ describe("Main stream sources and sharing", () => {
         error: { code: "INTERNAL", message: "Internal bridge error." },
       });
     }
-    expect(JSON.stringify([...first, ...second])).not.toContain("secret");
+    expect(JSON.stringify([...first.frames, ...second.frames])).not.toContain(
+      "secret",
+    );
     expect(source.observed).toBe(false);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
@@ -403,32 +259,14 @@ describe("Main stream scoped Event delivery", () => {
       hardware: { event: { change$: scopedEvent(() => upstream) } },
     });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => messages.push(message);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     upstream.next(1);
     upstream.next(2);
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
-    expect(messages.at(-1)).toMatchObject({ values: [1] });
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-      "batch",
-    ]);
-    expect(messages.at(-1)).toMatchObject({ values: [2] });
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
+    expect(sub.frames.at(-1)).toMatchObject({ values: [1] });
+    await sub.ack(1);
+    expect(sub.types()).toEqual(["subscribed", "batch", "batch"]);
+    expect(sub.frames.at(-1)).toMatchObject({ values: [2] });
   });
 
   test("scoped Event error terminates with a masked INTERNAL error and returns the slot", async () => {
@@ -439,24 +277,10 @@ describe("Main stream scoped Event delivery", () => {
       { diagnostics },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => messages.push(message);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     upstream.error(new Error("boom"));
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "INTERNAL", message: "Internal bridge error." },
     });
     expect(diagnostics.record.mock.calls.map(([event]) => event.type)).toEqual(
@@ -472,23 +296,9 @@ describe("Main stream scoped Event delivery", () => {
       { diagnostics },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => messages.push(message);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     upstream.complete();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "complete",
-    ]);
+    expect(sub.types()).toEqual(["subscribed", "complete"]);
     expect(diagnostics.record.mock.calls.map(([event]) => event.type)).toEqual(
       expect.arrayContaining(["subscription-opened", "subscription-closed"]),
     );
@@ -510,33 +320,16 @@ describe("Main stream scoped Event delivery", () => {
     });
     server.attach(new FakeTarget(1));
     server.attach(new FakeTarget(2));
-    const first: StreamMessage[] = [];
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => first.push(message),
-    );
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-2",
-        "event:hardware/change$",
-      ),
-      (message) => second.push(message),
-    );
+    const first = await rendererDocument(server).subscribe(EVENT);
+    const second = await rendererDocument(server, {
+      webContentsId: 2,
+      clientId: "client-2",
+    }).subscribe(EVENT);
     expect(factoryCalls).toBe(2);
     firstSubject.next(1);
     secondSubject.next(2);
-    expect(first.at(-1)).toMatchObject({ values: [1] });
-    expect(second.at(-1)).toMatchObject({ values: [2] });
+    expect(first.frames.at(-1)).toMatchObject({ values: [1] });
+    expect(second.frames.at(-1)).toMatchObject({ values: [2] });
   });
 });
 
@@ -547,20 +340,12 @@ describe("Main stream flow control", () => {
       hardware: { state: { current$: currentValueSource(source) } },
     });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-    };
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(STATE);
     const pending: { nested: { count: number } } = { nested: { count: 2 } };
     source.next(pending);
     Object.assign(pending.nested, { count: "invalid" });
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    expect(messages.at(-1)).toMatchObject({
+    await sub.ack(1);
+    expect(sub.frames.at(-1)).toMatchObject({
       type: "batch",
       values: [{ nested: { count: 2 } }],
     });
@@ -572,26 +357,13 @@ describe("Main stream flow control", () => {
       hardware: { event: { change$: broadcastEvent(source) } },
     });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-    };
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     source.next({ nested: { count: 1 } });
     const pending: { nested: { count: number } } = { nested: { count: 2 } };
     source.next(pending);
     Object.assign(pending.nested, { raw: new Uint8Array([3]) });
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    const latest = messages.at(-1);
+    await sub.ack(1);
+    const latest = sub.frames.at(-1);
     expect(latest).toMatchObject({
       type: "batch",
       values: [{ nested: { count: 2 } }],
@@ -606,19 +378,15 @@ describe("Main stream flow control", () => {
     ).toEqual({ nested: { count: 2 } });
   });
   test("holds one State batch and replaces pending State with latest value until ACK", async () => {
-    const { server, source, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
+    const { server, source } = harness();
+    const sub = await rendererDocument(server).subscribe(STATE);
     source.next(2);
     source.next(3);
-    expect(messages.filter((message) => message.type === "batch")).toHaveLength(
-      1,
-    );
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    expect(messages.at(-1)).toMatchObject({
+    expect(
+      sub.frames.filter((message) => message.type === "batch"),
+    ).toHaveLength(1);
+    await sub.ack(1);
+    expect(sub.frames.at(-1)).toMatchObject({
       type: "batch",
       sequence: 2,
       values: [3],
@@ -632,43 +400,34 @@ describe("Main stream flow control", () => {
   ] as const)(
     "Event %s keeps accepted values and counts drops",
     async (overflow, expected, ends) => {
-      const { server, events, messages, send, diagnostics } = harness({
+      const { server, events, diagnostics } = harness({
         capacity: 2,
         overflow,
       });
-      await server.controlStream(
-        sender(),
-        command(
-          "subscribe",
-          testSubscriptionId(1),
-          "client-1",
-          "event:hardware/change$",
-        ),
-        send,
-      );
+      const sub = await rendererDocument(server).subscribe(EVENT);
       events.next(1);
       events.next(2);
       events.next(3);
       events.next(4);
       expect(
-        messages.filter((message) => message.type === "batch"),
+        sub.frames.filter((message) => message.type === "batch"),
       ).toHaveLength(1);
-      expect(messages[1]).toMatchObject({ values: [1] });
+      expect(sub.frames[1]).toMatchObject({ values: [1] });
       expect(diagnostics.record).toHaveBeenCalledWith(
         expect.objectContaining({ type: "stream-dropped", count: 1 }),
       );
-      await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-      await server.controlStream(sender(), ack(testSubscriptionId(1), 2), send);
+      await sub.ack(1);
+      await sub.ack(2);
       expect(
-        messages
+        sub.frames
           .filter((message) => message.type === "batch")
           .slice(1)
           .map((message) =>
             message.type === "batch" ? message.values[0] : undefined,
           ),
       ).toEqual(expected);
-      await server.controlStream(sender(), ack(testSubscriptionId(1), 3), send);
-      expect(messages.some((message) => message.type === "error")).toBe(ends);
+      await sub.ack(3);
+      expect(sub.frames.some((message) => message.type === "error")).toBe(ends);
       expect(
         diagnostics.record.mock.calls
           .filter(([entry]) => entry.type === "stream-queue")
@@ -695,18 +454,8 @@ describe("Main stream lifecycle and ordering", () => {
       },
     });
     server.attach(target);
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    const sub = await rendererDocument(server).subscribe(EVENT);
+    expect(sub.types()).toEqual(["subscribed"]);
     expect(starts).toBe(0);
   });
   test("navigation inside subscribed delivery prevents a late error or upstream subscription", async () => {
@@ -717,67 +466,39 @@ describe("Main stream lifecycle and ordering", () => {
     );
     const target = new FakeTarget();
     server.attach(target);
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => {
-        messages.push(message);
+    const sub = await rendererDocument(server).subscribe(EVENT, {
+      onFrame: () => {
         target.endDocument();
       },
-    );
-    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    });
+    expect(sub.types()).toEqual(["subscribed"]);
     expect(source.observed).toBe(false);
   });
 
   test("retired client IDs cannot replay after detach and a new client may reuse its stream ID", async () => {
     const { server, source } = harness();
-    const first: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => first.push(message),
-    );
+    const doc = rendererDocument(server);
+    await doc.subscribe(STATE);
     server.attach(new FakeTarget());
-    const replay: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => replay.push(message),
-    );
-    expect(replay.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(replay.at(-1)).toMatchObject({
+    const replay = await doc.subscribe(STATE, { id: 1 });
+    expect(replay.types()).toEqual(["subscribed", "error"]);
+    expect(replay.frames.at(-1)).toMatchObject({
       type: "error",
       error: {
         code: "FORBIDDEN",
         message: "Bridge sender is not authorized.",
       },
     });
-    const replacement: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "client-2"),
-      (message) => replacement.push(message),
-    );
-    expect(replacement.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    const replacement = await rendererDocument(server, {
+      clientId: "client-2",
+    }).subscribe(STATE, { id: 1 });
+    expect(replacement.types()).toEqual(["subscribed", "batch"]);
     source.next(2);
-    await server.controlStream(
-      sender(),
-      ack(testSubscriptionId(1), 1, "client-2"),
-      () => {},
-    );
-    expect(replacement.at(-1)).toMatchObject({ type: "batch", values: [2] });
+    await replacement.ack(1);
+    expect(replacement.frames.at(-1)).toMatchObject({
+      type: "batch",
+      values: [2],
+    });
   });
   test("unsubscribe during pending authorization prevents a late source subscription", async () => {
     let allow!: (value: boolean) => void;
@@ -791,38 +512,19 @@ describe("Main stream lifecycle and ordering", () => {
     );
     server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
+    const record = {
+      onFrame: (message: StreamMessage) => {
+        messages.push(message);
+      },
     };
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      send,
-    );
+    const doc = rendererDocument(server);
+    const sub = doc.begin(EVENT, record);
+    await sub.unsubscribe();
     allow(true);
-    await pending;
+    await sub.ready;
     expect(source.observed).toBe(false);
     expect(messages).toEqual([]);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    await doc.subscribe(EVENT, { id: 1, ...record });
     expect(source.observed).toBe(false);
     expect(messages).toEqual([]);
   });
@@ -833,22 +535,9 @@ describe("Main stream lifecycle and ordering", () => {
       { authorize: () => false },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({ error: { code: "FORBIDDEN" } });
+    const sub = await rendererDocument(server).subscribe(EVENT);
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({ error: { code: "FORBIDDEN" } });
     expect(source.observed).toBe(false);
   });
 
@@ -858,35 +547,28 @@ describe("Main stream lifecycle and ordering", () => {
       hardware: { event: { change$: broadcastEvent(source) } },
     });
     server.attach(new FakeTarget());
-    await expect(
-      server.controlStream(
-        sender(),
-        command(
-          "subscribe",
-          testSubscriptionId(1),
-          "client-1",
-          "event:hardware/change$",
-        ),
-        () => {
-          throw new Error("closed frame");
-        },
-      ),
-    ).resolves.toBeUndefined();
+    const sub = rendererDocument(server).begin(EVENT, {
+      onFrame: () => {
+        throw new Error("closed frame");
+      },
+    });
+    await expect(sub.ready).resolves.toBeUndefined();
     expect(source.observed).toBe(false);
   });
 
   test("delimiter-laden clientIds cannot collide across sessions", async () => {
-    const { server, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "a"),
-      send,
-    );
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "a:b:c"),
-      send,
-    );
+    const { server } = harness();
+    const messages: StreamMessage[] = [];
+    const record = {
+      onFrame: (message: StreamMessage) => {
+        messages.push(message);
+      },
+    };
+    await rendererDocument(server, { clientId: "a" }).subscribe(STATE, record);
+    await rendererDocument(server, { clientId: "a:b:c" }).subscribe(STATE, {
+      id: 1,
+      ...record,
+    });
     expect(
       messages
         .filter((message) => message.type === "subscribed")
@@ -912,16 +594,7 @@ describe("Main stream lifecycle and ordering", () => {
       },
     });
     server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      () => {},
-    );
+    await rendererDocument(server).subscribe(EVENT);
     expect(produced).toBe(3);
   });
 
@@ -934,100 +607,45 @@ describe("Main stream lifecycle and ordering", () => {
       hardware: { event: { change$: broadcastEvent(source) } },
     });
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => messages.push(message);
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    expect(messages.at(-1)).toMatchObject({ type: "complete" });
+    const sub = await rendererDocument(server).subscribe(EVENT);
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
+    await sub.ack(1);
+    expect(sub.frames.at(-1)).toMatchObject({ type: "complete" });
   });
 
   test("terminal error drains accepted values and a later subscription starts fresh", async () => {
-    const { server, events, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const { server, events } = harness();
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe(EVENT);
     events.next(1);
     events.next(2);
     events.error(new Error("private secret"));
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 2), send);
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-      "batch",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    await sub.ack(1);
+    await sub.ack(2);
+    expect(sub.types()).toEqual(["subscribed", "batch", "batch", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "INTERNAL", message: "Internal bridge error." },
     });
-    const fresh: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => fresh.push(message),
-    );
-    expect(fresh.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    const fresh = await doc.subscribe(STATE);
+    expect(fresh.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("old-session ACK and unsubscribe cannot affect replacement", async () => {
-    const { server, source, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
-    const replacement: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "client-2"),
-      (message) => replacement.push(message),
-    );
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      send,
-    );
-    await server.controlStream(sender(), ack(testSubscriptionId(1), 1), send);
+    const { server, source } = harness();
+    const sub = await rendererDocument(server).subscribe(STATE);
+    const replacement = await rendererDocument(server, {
+      clientId: "client-2",
+    }).subscribe(STATE, { id: 1 });
+    await sub.unsubscribe();
+    await sub.ack(1);
     source.next(10);
-    await server.controlStream(
-      sender(),
-      ack(testSubscriptionId(1), 1, "client-2"),
-      send,
-    );
-    expect(replacement.at(-1)).toMatchObject({
+    await replacement.ack(1);
+    expect(replacement.frames.at(-1)).toMatchObject({
       clientId: "client-2",
       type: "batch",
       values: [10],
     });
-    expect(messages).toHaveLength(2);
+    expect(sub.frames).toHaveLength(2);
   });
 
   test("a State value exceeding maxTotalBytes fails validation instead of being sent", async () => {
@@ -1046,22 +664,9 @@ describe("Main stream lifecycle and ordering", () => {
       },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    const sub = await rendererDocument(server).subscribe(STATE);
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: { code: "INTERNAL", message: "Internal bridge error." },
     });
     expect(diagnostics.record).toHaveBeenCalledWith(
@@ -1081,28 +686,11 @@ describe("Main stream lifecycle and ordering", () => {
       { authorize: () => authorization, diagnostics },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-    };
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      send,
-    );
+    const sub = rendererDocument(server).begin(EVENT);
+    await sub.unsubscribe();
     allow(false);
-    await pending;
-    expect(messages).toEqual([]);
+    await sub.ready;
+    expect(sub.frames).toEqual([]);
     const rejections = diagnostics.record.mock.calls
       .map(([event]) => event as { type: string })
       .filter((event) => event.type === "rejected");
@@ -1123,25 +711,12 @@ describe("Main stream lifecycle and ordering", () => {
       { authorize: () => authorization, diagnostics },
     );
     const detach = server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const sub = rendererDocument(server).begin(EVENT);
     detach();
     fail(new Error("authorize boom"));
-    await pending;
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    await sub.ready;
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     const rejections = diagnostics.record.mock.calls
@@ -1153,37 +728,20 @@ describe("Main stream lifecycle and ordering", () => {
 
   test("subscribing without an authorize option delivers subscribed synchronously", async () => {
     const { server } = harness();
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-    };
-    const pending = server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
-    expect(messages[0]).toMatchObject({ type: "subscribed", sequence: 0 });
-    await pending;
+    const sub = rendererDocument(server).begin(STATE);
+    expect(sub.frames[0]).toMatchObject({ type: "subscribed", sequence: 0 });
+    await sub.ready;
   });
 
   test.each(["drop-oldest", "drop-newest", "error"] as const)(
     "detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED and records no stream-queue after subscription-closed (%s)",
     async (policy) => {
-      const { server, events, diagnostics, messages, send } = harness({
+      const { server, events, diagnostics } = harness({
         capacity: 2,
         overflow: policy,
       });
       const detach = server.attach(new FakeTarget());
-      await server.controlStream(
-        sender(),
-        command(
-          "subscribe",
-          testSubscriptionId(1),
-          "client-1",
-          "event:hardware/change$",
-        ),
-        send,
-      );
+      const sub = await rendererDocument(server).subscribe(EVENT);
       diagnostics.record.mockImplementation((event: { type: string }) => {
         if (event.type === "stream-dropped") detach();
       });
@@ -1193,7 +751,7 @@ describe("Main stream lifecycle and ordering", () => {
       events.next(4);
       events.next(5);
       expect(
-        messages.map((message) => ({
+        sub.frames.map((message) => ({
           type: message.type,
           sequence: message.sequence,
         })),
@@ -1202,8 +760,8 @@ describe("Main stream lifecycle and ordering", () => {
         { type: "batch", sequence: 1 },
         { type: "error", sequence: 2 },
       ]);
-      expect(messages[1]).toMatchObject({ values: [1] });
-      expect(messages.at(-1)).toMatchObject({
+      expect(sub.frames[1]).toMatchObject({ values: [1] });
+      expect(sub.frames.at(-1)).toMatchObject({
         error: { code: "CANCELLED", message: "Bridge session ended." },
       });
       expect(
@@ -1226,27 +784,14 @@ describe("Main stream lifecycle and ordering", () => {
   );
 
   test("unsubscribe from the diagnostics sink during stream-dropped records no stream-queue after subscription-closed", async () => {
-    const { server, events, diagnostics, messages, send } = harness({
+    const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
     });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     diagnostics.record.mockImplementation((event: { type: string }) => {
       if (event.type === "stream-dropped") {
-        void server.controlStream(
-          sender(),
-          command("unsubscribe", testSubscriptionId(1)),
-          send,
-        );
+        void sub.unsubscribe();
       }
     });
     events.next(1);
@@ -1255,7 +800,7 @@ describe("Main stream lifecycle and ordering", () => {
     events.next(4);
     events.next(5);
     expect(
-      messages.map((message) => ({
+      sub.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1263,7 +808,7 @@ describe("Main stream lifecycle and ordering", () => {
       { type: "subscribed", sequence: 0 },
       { type: "batch", sequence: 1 },
     ]);
-    expect(messages[1]).toMatchObject({ values: [1] });
+    expect(sub.frames[1]).toMatchObject({ values: [1] });
     expect(
       diagnostics.record.mock.calls
         .slice(-2)
@@ -1279,21 +824,12 @@ describe("Main stream lifecycle and ordering", () => {
   });
 
   test("detach from the diagnostics sink during a post-push stream-queue diagnostic drops the pending batch", async () => {
-    const { server, events, diagnostics, messages, send } = harness({
+    const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
     });
     const detach = server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     diagnostics.record.mockImplementation(
       (event: { type: string; depth?: number }) => {
         if (event.type === "stream-queue" && event.depth === 1) detach();
@@ -1302,7 +838,7 @@ describe("Main stream lifecycle and ordering", () => {
     events.next(1);
     events.next(2);
     expect(
-      messages.map((message) => ({
+      sub.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1310,7 +846,7 @@ describe("Main stream lifecycle and ordering", () => {
       { type: "subscribed", sequence: 0 },
       { type: "error", sequence: 1 },
     ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(
@@ -1329,28 +865,22 @@ describe("Main stream lifecycle and ordering", () => {
       capacity: 2,
       overflow: "drop-oldest",
     });
-    const id = testSubscriptionId(1);
-    const messages: StreamMessage[] = [];
     let gate = false;
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-      if (gate && message.type === "batch") {
-        void server.controlStream(sender(), ack(id, message.sequence), send);
-      }
-    };
-    await server.controlStream(
-      sender(),
-      command("subscribe", id, "client-1", "event:hardware/change$"),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT, {
+      onFrame: (message, subscription) => {
+        if (gate && message.type === "batch") {
+          void subscription.ack(message.sequence);
+        }
+      },
+    });
     events.next(1);
     events.next(2);
     events.next(3);
     events.complete();
     gate = true;
-    await server.controlStream(sender(), ack(id, 1), send);
+    await sub.ack(1);
     expect(
-      messages.map((message) => ({
+      sub.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1361,9 +891,9 @@ describe("Main stream lifecycle and ordering", () => {
       { type: "batch", sequence: 3 },
       { type: "complete", sequence: 4 },
     ]);
-    expect(messages[1]).toMatchObject({ values: [1] });
-    expect(messages[2]).toMatchObject({ values: [2] });
-    expect(messages[3]).toMatchObject({ values: [3] });
+    expect(sub.frames[1]).toMatchObject({ values: [1] });
+    expect(sub.frames[2]).toMatchObject({ values: [2] });
+    expect(sub.frames[3]).toMatchObject({ values: [3] });
     expect(
       diagnostics.record.mock.calls
         .slice(-3)
@@ -1381,23 +911,17 @@ describe("Main stream lifecycle and ordering", () => {
       capacity: 2,
       overflow: "drop-oldest",
     });
-    const id = testSubscriptionId(1);
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-      if (message.type === "batch") {
-        void server.controlStream(sender(), command("unsubscribe", id), send);
-      }
-    };
-    await server.controlStream(
-      sender(),
-      command("subscribe", id, "client-1", "event:hardware/change$"),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT, {
+      onFrame: (message, subscription) => {
+        if (message.type === "batch") {
+          void subscription.unsubscribe();
+        }
+      },
+    });
     events.next(1);
     events.next(2);
     expect(
-      messages.map((message) => ({
+      sub.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1405,7 +929,7 @@ describe("Main stream lifecycle and ordering", () => {
       { type: "subscribed", sequence: 0 },
       { type: "batch", sequence: 1 },
     ]);
-    expect(messages[1]).toMatchObject({ values: [1] });
+    expect(sub.frames[1]).toMatchObject({ values: [1] });
     expect(
       diagnostics.record.mock.calls
         .slice(-3)
@@ -1420,25 +944,16 @@ describe("Main stream lifecycle and ordering", () => {
       queuedEvents: 0,
     });
     events.next(3);
-    expect(messages).toHaveLength(2);
+    expect(sub.frames).toHaveLength(2);
   });
 
   test("detach from the diagnostics sink during a post-shift stream-queue diagnostic discards the flushed value", async () => {
-    const { server, events, diagnostics, messages, send } = harness({
+    const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
     });
     const detach = server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     diagnostics.record.mockImplementation(
       (event: { type: string; depth?: number }) => {
         if (event.type === "stream-queue" && event.depth === 0) detach();
@@ -1447,7 +962,7 @@ describe("Main stream lifecycle and ordering", () => {
     events.next(1);
     events.next(2);
     expect(
-      messages.map((message) => ({
+      sub.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1455,7 +970,7 @@ describe("Main stream lifecycle and ordering", () => {
       { type: "subscribed", sequence: 0 },
       { type: "error", sequence: 1 },
     ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(
@@ -1478,30 +993,21 @@ describe("Main stream lifecycle and ordering", () => {
       capacity: 2,
       overflow: "drop-oldest",
     });
-    const first = testSubscriptionId(1);
-    const second = testSubscriptionId(2);
-    const sendFirst = (message: StreamMessage) => {
-      if (message.type === "batch" && message.sequence === 2) events.complete();
-    };
-    const messages: StreamMessage[] = [];
-    const sendSecond = (message: StreamMessage) => messages.push(message);
-    await server.controlStream(
-      sender(),
-      command("subscribe", first, "client-1", "event:hardware/change$"),
-      sendFirst,
-    );
-    await server.controlStream(
-      sender(),
-      command("subscribe", second, "client-1", "event:hardware/change$"),
-      sendSecond,
-    );
+    const doc = rendererDocument(server);
+    const first = await doc.subscribe(EVENT, {
+      onFrame: (message) => {
+        if (message.type === "batch" && message.sequence === 2)
+          events.complete();
+      },
+    });
+    const second = await doc.subscribe(EVENT);
     events.next(1);
-    await server.controlStream(sender(), ack(first, 1), sendFirst);
+    await first.ack(1);
     events.next(2);
     expect(server.getDiagnosticsSnapshot().queuedEvents).toBe(0);
-    await server.controlStream(sender(), ack(second, 1), sendSecond);
+    await second.ack(1);
     expect(
-      messages.map((message) => ({
+      second.frames.map((message) => ({
         type: message.type,
         sequence: message.sequence,
       })),
@@ -1514,27 +1020,14 @@ describe("Main stream lifecycle and ordering", () => {
 
   test("a shared value reaching a consumer closed earlier in the same fan-out records no validation-failed", async () => {
     const { server, events, diagnostics } = harness();
-    const first = testSubscriptionId(1);
-    const second = testSubscriptionId(2);
-    const sendSecond = () => {};
-    const sendFirst = (message: StreamMessage) => {
-      if (message.type === "error")
-        void server.controlStream(
-          sender(),
-          command("unsubscribe", second),
-          sendSecond,
-        );
-    };
-    await server.controlStream(
-      sender(),
-      command("subscribe", first, "client-1", "event:hardware/change$"),
-      sendFirst,
-    );
-    await server.controlStream(
-      sender(),
-      command("subscribe", second, "client-1", "event:hardware/change$"),
-      sendSecond,
-    );
+    const doc = rendererDocument(server);
+    let second: TestSubscription | undefined;
+    await doc.subscribe(EVENT, {
+      onFrame: (message) => {
+        if (message.type === "error") void second?.unsubscribe();
+      },
+    });
+    second = await doc.subscribe(EVENT);
     diagnostics.record.mockClear();
     events.next((() => 1) as unknown as number);
     expect(
@@ -1551,76 +1044,42 @@ describe("Main stream lifecycle and ordering", () => {
 
 describe("Main stream terminal notify on retire", () => {
   test("detach retires an active State subscriber with CANCELLED, discarding an unacked pending value", async () => {
-    const { server, source, messages, send } = harness();
+    const { server, source } = harness();
     const detach = server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(STATE);
     source.next(2);
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
     detach();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "batch", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
     source.next(3);
-    expect(messages).toHaveLength(3);
+    expect(sub.frames).toHaveLength(3);
   });
 
   test("detach replaces a recorded terminal still waiting for ACK with CANCELLED", async () => {
-    const { server, source, messages, send } = harness();
+    const { server, source } = harness();
     const detach = server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(STATE);
     source.complete();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
     detach();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "batch", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       sequence: 2,
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
   });
 
   test("server.dispose() retires an active broadcast Event subscriber with CANCELLED", async () => {
-    const { server, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    const { server } = harness();
+    const sub = await rendererDocument(server).subscribe(EVENT);
+    expect(sub.types()).toEqual(["subscribed"]);
     server.dispose();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
   });
@@ -1633,23 +1092,10 @@ describe("Main stream terminal notify on retire", () => {
       },
     });
     const detach = server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const sub = await rendererDocument(server).subscribe(EVENT);
     detach();
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames.at(-1)).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     expect(upstream.observed).toBe(false);
@@ -1663,43 +1109,28 @@ describe("Main stream terminal notify on retire", () => {
     "%s retires an active subscriber without a stream termination",
     async (reason) => {
       const target = new FakeTarget();
-      const { server, messages, send } = harness();
+      const { server } = harness();
       server.attach(target);
-      await server.controlStream(
-        sender(),
-        command("subscribe", testSubscriptionId(1)),
-        send,
-      );
-      const before = messages.length;
+      const sub = await rendererDocument(server).subscribe(STATE);
+      const before = sub.frames.length;
       target.fireLifecycle(reason);
-      expect(messages.slice(before)).toEqual([]);
-      expect(messages.slice(0, before).map((message) => message.type)).toEqual([
-        "subscribed",
-        "batch",
-      ]);
+      expect(sub.frames.slice(before)).toEqual([]);
+      expect(
+        sub.frames.slice(0, before).map((message) => message.type),
+      ).toEqual(["subscribed", "batch"]);
       expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
     },
   );
 
   test("a replacing clientId retires the previous active subscriber without a stream termination", async () => {
-    const { server, messages, send } = harness();
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "client-1"),
-      send,
-    );
-    const before = messages.length;
-    const replacement: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1), "client-2"),
-      (message) => replacement.push(message),
-    );
-    expect(messages.slice(before)).toEqual([]);
-    expect(replacement.map((message) => message.type)).toEqual([
-      "subscribed",
-      "batch",
-    ]);
+    const { server } = harness();
+    const sub = await rendererDocument(server).subscribe(STATE);
+    const before = sub.frames.length;
+    const replacement = await rendererDocument(server, {
+      clientId: "client-2",
+    }).subscribe(STATE, { id: 1 });
+    expect(sub.frames.slice(before)).toEqual([]);
+    expect(replacement.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("a send failure while notifying an active subscriber still closes it", async () => {
@@ -1710,15 +1141,13 @@ describe("Main stream terminal notify on retire", () => {
     const detach = server.attach(new FakeTarget());
     const messages: StreamMessage[] = [];
     let calls = 0;
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      (message) => {
+    await rendererDocument(server).subscribe(STATE, {
+      onFrame: (message) => {
         calls += 1;
         if (calls === 3) throw new Error("closed frame");
         messages.push(message);
       },
-    );
+    });
     expect(messages.map((message) => message.type)).toEqual([
       "subscribed",
       "batch",
@@ -1739,25 +1168,12 @@ describe("Main stream terminal notify on retire", () => {
       { authorize: () => authorization },
     );
     const detach = server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const sub = rendererDocument(server).begin(EVENT);
     detach();
     allow(true);
-    await pending;
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    await sub.ready;
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
   });
@@ -1774,25 +1190,12 @@ describe("Main stream terminal notify on retire", () => {
       { authorize: () => authorization },
     );
     server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const sub = rendererDocument(server).begin(EVENT);
     server.dispose();
     allow(true);
-    await pending;
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    await sub.ready;
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
   });
@@ -1809,22 +1212,15 @@ describe("Main stream terminal notify on retire", () => {
       { authorize: () => authorization },
     );
     const detach = server.attach(new FakeTarget());
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      () => {
+    const sub = rendererDocument(server).begin(EVENT, {
+      onFrame: () => {
         throw new Error("closed frame");
       },
-    );
+    });
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
     expect(() => detach()).not.toThrow();
     allow(true);
-    await pending;
+    await sub.ready;
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
@@ -1841,48 +1237,28 @@ describe("Main stream terminal notify on retire", () => {
       { authorize: () => authorization },
     );
     server.attach(target);
-    const messages: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const sub = rendererDocument(server).begin(EVENT);
     target.endDocument();
     allow(true);
-    await pending;
-    expect(messages).toEqual([]);
+    await sub.ready;
+    expect(sub.frames).toEqual([]);
   });
 
   test("detach while sending a rejection's subscribed replaces the rejection with CANCELLED", async () => {
     const { server } = harness();
     const target = new FakeTarget();
     const detach = server.attach(target);
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-      if (message.type === "subscribed") detach();
-    };
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/missing$",
-      ),
-      send,
+    const sub = await rendererDocument(server).subscribe(
+      "state:hardware/missing$",
+      {
+        onFrame: (message) => {
+          if (message.type === "subscribed") detach();
+        },
+      },
     );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[0]).toMatchObject({ sequence: 0 });
-    expect(messages[1]).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[0]).toMatchObject({ sequence: 0 });
+    expect(sub.frames[1]).toMatchObject({
       sequence: 1,
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
@@ -1893,46 +1269,29 @@ describe("Main stream terminal notify on retire", () => {
     const { server } = harness();
     const target = new FakeTarget();
     server.attach(target);
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-      if (message.type === "subscribed") target.fireLifecycle("destroyed");
-    };
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/missing$",
-      ),
-      send,
+    const sub = await rendererDocument(server).subscribe(
+      "state:hardware/missing$",
+      {
+        onFrame: (message) => {
+          if (message.type === "subscribed") target.fireLifecycle("destroyed");
+        },
+      },
     );
-    expect(messages.map((message) => message.type)).toEqual(["subscribed"]);
+    expect(sub.types()).toEqual(["subscribed"]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("detach from the diagnostics sink before a rejection is sent answers with CANCELLED", async () => {
-    const { server, diagnostics, messages, send } = harness();
+    const { server, diagnostics } = harness();
     const detach = server.attach(new FakeTarget());
     diagnostics.record.mockImplementation((event: { type: string }) => {
       if (event.type === "rejected") detach();
     });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/missing$",
-      ),
-      send,
+    const sub = await rendererDocument(server).subscribe(
+      "state:hardware/missing$",
     );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       sequence: 1,
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
@@ -1953,20 +1312,9 @@ describe("Main stream terminal notify on retire", () => {
           detach();
       },
     );
-    const messages: StreamMessage[] = [];
-    const send = (message: StreamMessage) => {
-      messages.push(message);
-    };
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
-    expect(messages.map((message) => message.type)).toEqual([
-      "subscribed",
-      "error",
-    ]);
-    expect(messages[1]).toMatchObject({
+    const sub = await rendererDocument(server).subscribe(STATE);
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       sequence: 1,
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
@@ -2001,11 +1349,7 @@ describe("Main stream terminal notify on retire", () => {
           inSink.push(server.getDiagnosticsSnapshot().subscriptions);
       },
     );
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      () => {},
-    );
+    await rendererDocument(server).subscribe(STATE);
     expect(inSink).toEqual([1]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
@@ -2013,7 +1357,7 @@ describe("Main stream terminal notify on retire", () => {
   test.each(["detach", "server.dispose()"] as const)(
     "%s inside the session-opened diagnostic notifies a pending subscription to an existing key with CANCELLED",
     async (mode) => {
-      const { server, source, diagnostics, messages, send } = harness();
+      const { server, source, diagnostics } = harness();
       const detach = server.attach(new FakeTarget());
       diagnostics.record.mockImplementation((event: { type: string }) => {
         if (event.type === "session-opened") {
@@ -2021,17 +1365,10 @@ describe("Main stream terminal notify on retire", () => {
           else server.dispose();
         }
       });
-      await server.controlStream(
-        sender(),
-        command("subscribe", testSubscriptionId(1)),
-        send,
-      );
-      expect(messages.map((message) => message.type)).toEqual([
-        "subscribed",
-        "error",
-      ]);
-      expect(messages[0]).toMatchObject({ sequence: 0 });
-      expect(messages[1]).toMatchObject({
+      const sub = await rendererDocument(server).subscribe(STATE);
+      expect(sub.types()).toEqual(["subscribed", "error"]);
+      expect(sub.frames[0]).toMatchObject({ sequence: 0 });
+      expect(sub.frames[1]).toMatchObject({
         sequence: 1,
         error: { code: "CANCELLED", message: "Bridge session ended." },
       });
@@ -2048,7 +1385,7 @@ describe("Main stream terminal notify on retire", () => {
   test.each(["detach", "server.dispose()"] as const)(
     "%s inside the subscription-opened diagnostic notifies a not-yet-open consumer with CANCELLED",
     async (mode) => {
-      const { server, source, diagnostics, messages, send } = harness();
+      const { server, source, diagnostics } = harness();
       const detach = server.attach(new FakeTarget());
       diagnostics.record.mockImplementation((event: { type: string }) => {
         if (event.type === "subscription-opened") {
@@ -2056,17 +1393,10 @@ describe("Main stream terminal notify on retire", () => {
           else server.dispose();
         }
       });
-      await server.controlStream(
-        sender(),
-        command("subscribe", testSubscriptionId(1)),
-        send,
-      );
-      expect(messages.map((message) => message.type)).toEqual([
-        "subscribed",
-        "error",
-      ]);
-      expect(messages[0]).toMatchObject({ sequence: 0 });
-      expect(messages[1]).toMatchObject({
+      const sub = await rendererDocument(server).subscribe(STATE);
+      expect(sub.types()).toEqual(["subscribed", "error"]);
+      expect(sub.frames[0]).toMatchObject({ sequence: 0 });
+      expect(sub.frames[1]).toMatchObject({
         sequence: 1,
         error: { code: "CANCELLED", message: "Bridge session ended." },
       });
@@ -2087,56 +1417,50 @@ describe("Main stream terminal notify on retire", () => {
 
   test("main-frame-navigation inside the session-opened diagnostic sends nothing for a pending subscription to an existing key", async () => {
     const target = new FakeTarget();
-    const { server, diagnostics, messages, send } = harness();
+    const { server, diagnostics } = harness();
     server.attach(target);
     diagnostics.record.mockImplementation((event: { type: string }) => {
       if (event.type === "session-opened")
         target.fireLifecycle("main-frame-navigation");
     });
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
-    expect(messages).toEqual([]);
+    const sub = await rendererDocument(server).subscribe(STATE);
+    expect(sub.frames).toEqual([]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("main-frame-navigation inside the subscription-opened diagnostic sends nothing for a not-yet-open consumer", async () => {
     const target = new FakeTarget();
-    const { server, diagnostics, messages, send } = harness();
+    const { server, diagnostics } = harness();
     server.attach(target);
     diagnostics.record.mockImplementation((event: { type: string }) => {
       if (event.type === "subscription-opened")
         target.fireLifecycle("main-frame-navigation");
     });
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
-    expect(messages).toEqual([]);
+    const sub = await rendererDocument(server).subscribe(STATE);
+    expect(sub.frames).toEqual([]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
   test("unsubscribe inside the subscription-opened diagnostic leaves no retire listener that notifies on a later detach", async () => {
-    const { server, diagnostics, messages, send } = harness();
+    const { server, diagnostics } = harness();
     const detach = server.attach(new FakeTarget());
+    // subscribe 호출 도중이라 handle이 아직 없다 — unsubscribe를 raw로 보낸다.
     diagnostics.record.mockImplementation((event: { type: string }) => {
       if (event.type === "subscription-opened")
         void server.controlStream(
           sender(),
-          command("unsubscribe", testSubscriptionId(1)),
-          send,
+          {
+            protocolVersion: 1,
+            clientId: "client-1",
+            type: "unsubscribe",
+            subscriptionId: testSubscriptionId(1),
+          },
+          () => {},
         );
     });
-    await server.controlStream(
-      sender(),
-      command("subscribe", testSubscriptionId(1)),
-      send,
-    );
+    const sub = await rendererDocument(server).subscribe(STATE);
     detach();
-    expect(messages).toEqual([]);
+    expect(sub.frames).toEqual([]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 });
