@@ -8,7 +8,11 @@ import {
   type WireStreamCommand,
 } from "../protocol/index.js";
 import type { LibraryErrorPayload } from "../protocol/messages.js";
-import { authorizeOperation, bridgeContext } from "./authorization.js";
+import {
+  authorizeOperation,
+  bridgeContext,
+  type AuthorizeVerdict,
+} from "./authorization.js";
 import {
   createEventDeliveryWindow,
   createRejectionDeliveryWindow,
@@ -31,6 +35,7 @@ import type {
   StateRegistrationEntry,
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
+import { SessionSlots, type SlotLease } from "./session-slots.js";
 import type { Authorize, DiagnosticsSink, SenderIdentity } from "./types.js";
 import { Upstreams } from "./upstreams.js";
 
@@ -44,8 +49,8 @@ type ControlCommand = Exclude<WireStreamCommand, { type: "subscribe" }>;
 interface PendingEntry {
   readonly controller: AbortController;
   readonly onAbort: () => void;
-  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
-  releaseRetire: () => void;
+  /** slot lease(RD-041). 승인되면 `#start`의 `Consumer`가 이어받는다. */
+  readonly lease: SlotLease;
 }
 
 interface Consumer {
@@ -58,8 +63,8 @@ interface Consumer {
   readonly registration: Registration;
   readonly controller: AbortController;
   readonly onSessionAbort: () => void;
-  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
-  releaseRetire: () => void;
+  /** slot lease(RD-041). pending entry에서 이어받는다. */
+  readonly lease: SlotLease;
   /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
   readonly window: DeliveryWindow;
   /**
@@ -70,7 +75,7 @@ interface Consumer {
   opened: boolean;
 }
 
-/** 세션 1개가 소유한 구독 상태. `pending`+`consumers` 합이 slot 점유 수다. */
+/** 세션 1개가 소유한 구독 상태. slot 점유 수·회수는 `SessionSlots`(RD-041)가 lease로 셈한다 — `pending`·`consumers`는 id → entry map일 뿐이다. */
 interface SessionState {
   watermark: number;
   readonly pending: Map<string, PendingEntry>;
@@ -144,15 +149,16 @@ export class Subscriptions {
   readonly #upstreams = new Upstreams();
   readonly #sessions = new WeakMap<DocumentSession, SessionState>();
   /**
-   * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) — 진단
-   * 집계(`subscriptionCount`·`queuedEventsCount`)에 필요한 순회 수단이다. 세션별
-   * 상태 자체는 `#sessions`(WeakMap)가 세션 수명에 맞춰 소유한다.
+   * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) —
+   * `queuedEventsCount`·`dispose` 순회에만 쓰인다(RD-041: slot 집계는
+   * `SessionSlots`가 맡는다). 세션별 상태 자체는 `#sessions`(WeakMap)가 세션
+   * 수명에 맞춰 소유한다.
    */
   readonly #liveStates = new Set<SessionState>();
   readonly #limits: PayloadLimits;
-  readonly #resourceLimits: ResourceLimits;
   readonly #diagnostics: DiagnosticsSink | undefined;
   readonly #authorize: Authorize | undefined;
+  readonly #slots: SessionSlots;
 
   public constructor(
     table: RegistrationTable,
@@ -163,16 +169,13 @@ export class Subscriptions {
   ) {
     this.#table = table;
     this.#limits = limits;
-    this.#resourceLimits = resourceLimits;
     this.#diagnostics = diagnostics;
     this.#authorize = authorize;
+    this.#slots = new SessionSlots(resourceLimits.maxSubscriptions);
   }
 
   public subscriptionCount(): number {
-    let count = 0;
-    for (const state of this.#liveStates)
-      count += state.pending.size + state.consumers.size;
-    return count;
+    return this.#slots.count();
   }
 
   public queuedEventsCount(): number {
@@ -240,10 +243,8 @@ export class Subscriptions {
       return;
     }
 
-    if (
-      state.pending.size + state.consumers.size >=
-      this.#resourceLimits.maxSubscriptions
-    ) {
+    const lease = this.#slots.acquire(session);
+    if (lease === undefined) {
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",
         reason: "subscription-limit",
@@ -267,23 +268,24 @@ export class Subscriptions {
     const controller = new AbortController();
     const entry: PendingEntry = {
       controller,
+      lease,
       onAbort: () => {
         state.pending.delete(command.subscriptionId);
+        lease.release();
         this.#pruneIfEmpty(state);
         controller.abort();
         this.#endUnstarted(command, send, { kind: "retired" }, session);
       },
-      releaseRetire: () => {},
     };
     state.pending.set(command.subscriptionId, entry);
     this.#liveStates.add(state);
-    // 세션이 등록 이전에 이미 retire됐으면 `onRetire`가 여기서 `entry.onAbort`를
-    // 즉시 동기 호출한다(같은 처리: 삭제·prune·controller.abort()·통지, ADR
-    // 0020) — 이 경우 entry는 이미 map에서 빠져 있으므로 handle을 저장하지
-    // 않고 그대로 return한다(authorize로 진행하지 않는다).
-    const release = session.onRetire(entry.onAbort);
-    if (state.pending.get(command.subscriptionId) !== entry) return;
-    entry.releaseRetire = release;
+    // 세션이 등록 이전에 이미 retire됐으면 `lease.onRetire`가 여기서
+    // `entry.onAbort`를 즉시 동기 호출한다(같은 처리: 삭제·release·prune·
+    // controller.abort()·통지, ADR 0020) — 이 경우 entry는 이미 map에서
+    // 빠지고 lease도 release됐으므로 아래 `lease.released`로 감지해 그대로
+    // return한다(authorize로 진행하지 않는다).
+    lease.onRetire(entry.onAbort);
+    if (lease.released) return;
 
     const context = bridgeContext(
       session,
@@ -298,7 +300,15 @@ export class Subscriptions {
       registration.bridgeOperation,
     );
     const verdict = pending instanceof Promise ? await pending : pending;
-    if (!this.#finishPending(session, state, command.subscriptionId, entry))
+    if (
+      !this.#finishPending(
+        session,
+        state,
+        command.subscriptionId,
+        entry,
+        verdict,
+      )
+    )
       return;
     if (verdict.type === "rejected") {
       this.#endUnstarted(
@@ -310,7 +320,7 @@ export class Subscriptions {
       return;
     }
     if (verdict.type === "cancelled") return;
-    this.#start(session, state, sender, command, send, registration);
+    this.#start(session, state, sender, command, send, registration, lease);
   }
 
   public control(session: DocumentSession, command: ControlCommand): void {
@@ -321,7 +331,7 @@ export class Subscriptions {
       if (pending !== undefined) {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
-        pending.releaseRetire();
+        pending.lease.release();
         pending.controller.abort();
         return;
       }
@@ -337,8 +347,10 @@ export class Subscriptions {
 
   public dispose(): void {
     for (const state of [...this.#liveStates]) {
-      for (const pending of [...state.pending.values()])
+      for (const pending of [...state.pending.values()]) {
+        pending.lease.release();
         pending.controller.abort();
+      }
       state.pending.clear();
       for (const consumer of [...state.consumers.values()])
         this.#close(consumer);
@@ -360,20 +372,26 @@ export class Subscriptions {
   }
 
   /**
-   * `authorize` 대기가 여전히 유효한지 확인하고 slot을 반환한다. authorize
-   * 판정 뒤, 번역 전에 호출된다 — `authorize-denied` 진단은 이 호출보다
-   * 먼저(공유 단계 안에서) 기록되므로 slot 반환보다 앞선다(RPC와 같은 순서).
-   * 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된 pending
-   * `onAbort`가 retire 통지를 맡는다. `false`면 이미 취소됐거나(unsubscribe·
-   * retire) 세션이 retire된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
-   * (등록 시점에 이미 retire된 세션이면 `onRetire`의 즉시 호출이 그 자리에서
-   * `entry.onAbort`를 대신 실행한다 — RD-037.)
+   * `authorize` 대기가 여전히 유효한지 확인하고 pending 등록을 정리한다.
+   * authorize 판정 뒤, 번역 전에 호출된다 — `authorize-denied` 진단은 이
+   * 호출보다 먼저(공유 단계 안에서) 기록되므로 slot 정리보다 앞선다(RPC와
+   * 같은 순서). 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된
+   * pending `onAbort`가 retire 통지와 lease 반환을 맡는다. `false`면 이미
+   * 취소됐거나(unsubscribe·retire) 세션이 retire된 것이므로 `subscribe()`는
+   * 이어서 진행하지 않는다.(등록 시점에 이미 retire된 세션이면 `onRetire`의
+   * 즉시 호출이 그 자리에서 `entry.onAbort`를 대신 실행한다 — RD-037.)
+   *
+   * lease 처리(K2): 승인(`ok`이고 verdict가 `allowed`)이면 `offRetire()`만
+   * 불러 slot을 유지한다 — `#start`가 같은 lease를 이어받아 곧바로
+   * `consumers.set`하므로 관측 가능한 slot 반환은 없다. 그 외(거부·취소·
+   * `ok`가 false)면 `release()`로 slot을 반환한다.
    */
   #finishPending(
     session: DocumentSession,
     state: SessionState,
     id: string,
     entry: PendingEntry,
+    verdict: AuthorizeVerdict,
   ): boolean {
     const current = state.pending.get(id);
     if (current !== entry) return false;
@@ -381,7 +399,8 @@ export class Subscriptions {
       !entry.controller.signal.aborted && session.retireReason === undefined;
     state.pending.delete(id);
     this.#pruneIfEmpty(state);
-    entry.releaseRetire();
+    if (ok && verdict.type === "allowed") entry.lease.offRetire();
+    else entry.lease.release();
     return ok;
   }
 
@@ -392,6 +411,7 @@ export class Subscriptions {
     command: SubscribeCommand,
     send: StreamSender,
     registration: Registration,
+    lease: SlotLease,
   ): void {
     const controller = new AbortController();
     // registration이 이미 capacity·overflow를 검증하고 동결 복사본을
@@ -431,7 +451,7 @@ export class Subscriptions {
       controller,
       window,
       opened: false,
-      releaseRetire: () => {},
+      lease,
       onSessionAbort: () => {
         if (!consumer.opened) {
           // `subscribed` 송신 전 retire(시작 전 거부와 같은 창) — 활성 구독의
@@ -454,17 +474,14 @@ export class Subscriptions {
       type: "subscription-opened",
       key: consumer.key,
     });
-    // 세션이 등록 이전에 이미 retire됐으면 `onRetire`가 여기서
+    // 세션이 등록 이전에 이미 retire됐으면 `lease.onRetire`가 여기서
     // `consumer.onSessionAbort`를 즉시 동기 호출해 open 전 분기(`#close` +
-    // `#endUnstarted`)를 태운다 — 이 경우 handle은 no-op이다. 진단 sink가
-    // 동기 unsubscribe로 창을 먼저 닫았으면 `#close`가 부른 `releaseRetire`는
-    // 아직 초기값이었으므로, 방금 등록한 listener를 여기서 해제한다.
-    const release = session.onRetire(consumer.onSessionAbort);
-    if (window.closed) {
-      release();
-      return;
-    }
-    consumer.releaseRetire = release;
+    // `#endUnstarted`)를 태운다. 진단 sink가 동기 unsubscribe로 창을 먼저
+    // 닫았으면 `#close`가 이미 `lease.release()`를 불렀으므로, 방금 등록한
+    // listener는 release된 lease에 대한 등록이라 L5에 따라 no-op이다 — 별도
+    // 해제가 필요 없다.
+    lease.onRetire(consumer.onSessionAbort);
+    if (window.closed) return;
     consumer.opened = true;
     this.#send(consumer, window.open());
     if (window.closed) return;
@@ -565,7 +582,7 @@ export class Subscriptions {
       type: "subscription-closed",
       key: consumer.key,
     });
-    consumer.releaseRetire();
+    consumer.lease.release();
     const state = this.#sessions.get(consumer.session);
     if (state !== undefined) {
       state.consumers.delete(consumer.subscriptionId);
