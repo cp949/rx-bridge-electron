@@ -20,6 +20,7 @@ import type {
   RpcRegistrationEntry,
 } from "./registration.js";
 import type { ResourceLimits } from "./resource-limits.js";
+import { SessionSlots, type SlotLease } from "./session-slots.js";
 import type {
   Authorize,
   BridgeContext,
@@ -70,14 +71,7 @@ function cancelledIfAborted(
 interface ActiveRequest {
   readonly key: string;
   readonly controller: AbortController;
-  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
-  releaseRetire: () => void;
-}
-
-/** 세션 1개가 소유한 RPC 상태. `running`은 slot(동시 개수) 점유, `active`는 취소 대상 조회용. */
-interface SessionState {
-  running: number;
-  readonly active: Map<string, ActiveRequest>;
+  readonly lease: SlotLease;
 }
 
 /**
@@ -87,7 +81,10 @@ interface SessionState {
  * 그 판정을 응답으로 번역만 한다. `create-bridge-server.ts`는 세션 해석만
  * 맡긴다 — 이 클래스는 `DocumentSessions`를 모른다(`DocumentSession` 타입만
  * 참조). "세션이 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부
- * `session.onRetire`로 통지하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
+ * `SessionSlots` lease의 retire listener로 통지하므로(ADR 0015) 요청 signal
+ * 판정 하나로 충분하다. slot 한도 판정·반납·전역 집계는 `SessionSlots`(RD-041)
+ * 소유다 — retire된 세션이라도 handler가 아직 끝나지 않았다면 lease가
+ * release되기 전까지 계속 센다(ADR 0010 §10).
  */
 export class RpcRequests {
   readonly #table: RegistrationTable;
@@ -95,13 +92,8 @@ export class RpcRequests {
   readonly #resourceLimits: ResourceLimits;
   readonly #diagnostics: DiagnosticsSink | undefined;
   readonly #authorize: Authorize | undefined;
-  readonly #sessions = new WeakMap<DocumentSession, SessionState>();
-  /**
-   * retire된 세션이라도 handler가 아직 끝나지 않았다면 계속 센다(ADR 0010
-   * §10) — 세션 상태 순회로 계산하지 않고 slot 획득·반환 시점에 직접
-   * 증감한다.
-   */
-  #inFlight = 0;
+  readonly #active = new WeakMap<DocumentSession, Map<string, ActiveRequest>>();
+  readonly #slots: SessionSlots;
 
   public constructor(
     table: RegistrationTable,
@@ -115,10 +107,11 @@ export class RpcRequests {
     this.#resourceLimits = resourceLimits;
     this.#diagnostics = diagnostics;
     this.#authorize = authorize;
+    this.#slots = new SessionSlots(resourceLimits.maxConcurrentRpc);
   }
 
   public inFlightCount(): number {
-    return this.#inFlight;
+    return this.#slots.count();
   }
 
   /** RPC 요청 1건을 처리한다. `session`은 이미 해석된 현재 세션이다. */
@@ -138,7 +131,8 @@ export class RpcRequests {
       });
       return error("NOT_FOUND", "Unknown bridge operation.");
     }
-    if (!this.#tryAcquire(session)) {
+    const lease = this.#slots.acquire(session);
+    if (lease === undefined) {
       recordDiagnostic(this.#diagnostics, {
         type: "rejected",
         reason: "rpc-limit",
@@ -149,7 +143,12 @@ export class RpcRequests {
         "Too many concurrent bridge requests.",
       );
     }
-    const controller = this.#begin(session, envelope.requestId, envelope.key);
+    const controller = this.#begin(
+      session,
+      envelope.requestId,
+      envelope.key,
+      lease,
+    );
     const context = bridgeContext(session, sender, envelope, controller.signal);
     const started = performance.now();
     const work = (async (): Promise<RpcResponse> => {
@@ -177,7 +176,7 @@ export class RpcRequests {
         return response;
       } finally {
         this.#finish(session, envelope.requestId, controller);
-        this.#release(session);
+        lease.release();
         recordDiagnostic(this.#diagnostics, {
           type: "rpc-finished",
           key: envelope.key,
@@ -223,44 +222,34 @@ export class RpcRequests {
     return this.#table.rpc.get(key);
   }
 
-  #stateFor(session: DocumentSession): SessionState {
-    let state = this.#sessions.get(session);
-    if (state === undefined) {
-      state = { running: 0, active: new Map() };
-      this.#sessions.set(session, state);
+  #activeFor(session: DocumentSession): Map<string, ActiveRequest> {
+    let active = this.#active.get(session);
+    if (active === undefined) {
+      active = new Map();
+      this.#active.set(session, active);
     }
-    return state;
-  }
-
-  #tryAcquire(session: DocumentSession): boolean {
-    const state = this.#stateFor(session);
-    if (state.running >= this.#resourceLimits.maxConcurrentRpc) return false;
-    state.running += 1;
-    this.#inFlight += 1;
-    return true;
-  }
-
-  #release(session: DocumentSession): void {
-    const state = this.#sessions.get(session);
-    if (state !== undefined) state.running = Math.max(0, state.running - 1);
-    this.#inFlight = Math.max(0, this.#inFlight - 1);
+    return active;
   }
 
   /**
    * 같은 `requestId`의 기존 요청을 취소하고 새 controller를 등록한다.
-   * `session.onRetire`로 retire 통지를 구독해 이 요청을 스스로 취소하게
+   * lease의 `onRetire`로 retire 통지를 구독해 이 요청을 스스로 취소하게
    * 한다 — 이미 retire된 세션이면 `onRetire`가 등록 즉시 동기 호출하므로
    * (그 안에서 entry가 map에서 먼저 빠진다) 재검사 없이 즉시 취소한 것과
    * 같은 결과를 낸다.
    */
-  #begin(session: DocumentSession, id: string, key: string): AbortController {
+  #begin(
+    session: DocumentSession,
+    id: string,
+    key: string,
+    lease: SlotLease,
+  ): AbortController {
     this.#cancelActive(session, id);
-    const state = this.#stateFor(session);
+    const active = this.#activeFor(session);
     const controller = new AbortController();
-    const entry: ActiveRequest = { key, controller, releaseRetire: () => {} };
-    state.active.set(id, entry);
-    const release = session.onRetire(() => this.#cancelActive(session, id));
-    if (state.active.get(id) === entry) entry.releaseRetire = release;
+    const entry: ActiveRequest = { key, controller, lease };
+    active.set(id, entry);
+    lease.onRetire(() => this.#cancelActive(session, id));
     return controller;
   }
 
@@ -269,21 +258,20 @@ export class RpcRequests {
     id: string,
     controller: AbortController,
   ): void {
-    const state = this.#sessions.get(session);
-    if (state === undefined) return;
-    const entry = state.active.get(id);
+    const active = this.#active.get(session);
+    if (active === undefined) return;
+    const entry = active.get(id);
     if (entry === undefined || entry.controller !== controller) return;
-    state.active.delete(id);
-    entry.releaseRetire();
+    active.delete(id);
   }
 
   #cancelActive(session: DocumentSession, id: string): void {
-    const state = this.#sessions.get(session);
-    if (state === undefined) return;
-    const entry = state.active.get(id);
+    const active = this.#active.get(session);
+    if (active === undefined) return;
+    const entry = active.get(id);
     if (entry === undefined) return;
-    state.active.delete(id);
-    entry.releaseRetire();
+    active.delete(id);
+    entry.lease.offRetire();
     // active에 남은 채 이미 aborted면 deadline이 먼저 확정해 rpc-timed-out을 남긴 요청이다.
     if (entry.controller.signal.aborted) return;
     entry.controller.abort();
