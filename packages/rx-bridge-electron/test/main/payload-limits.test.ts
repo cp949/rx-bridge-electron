@@ -1,6 +1,6 @@
 // payload-limits.ts의 기본값·부분 병합·검증·동결을 다룬다.
 // `createBridgeServer`를 거치는 배선 검증은 create-bridge-server-impl.test.ts에
-// 있다(DELTA-01에서 추가한 명시적 undefined 거부 test 포함). 이 파일은
+// 있다(RD-038의 명시적 undefined 거부 test 포함). 이 파일은
 // `resolvePayloadLimits`/`DEFAULT_PAYLOAD_LIMITS`를 직접 test한다.
 import { describe, expect, test } from "vitest";
 
@@ -69,11 +69,9 @@ describe("resolvePayloadLimits", () => {
     ["maxTotalBytes", "8"],
     ["maxTotalBytes", Infinity],
   ])("%s = %p는 TypeError로 거부한다", (key, value) => {
-    const options =
-      value === undefined
-        ? ({ [key]: undefined } as never)
-        : ({ [key]: value } as never);
-    expect(() => resolvePayloadLimits(options)).toThrow(
+    const resolve = () => resolvePayloadLimits({ [key]: value } as never);
+    expect(resolve).toThrow(TypeError);
+    expect(resolve).toThrow(
       new RegExp(
         `^Payload limit '${key}' must be a non-negative safe integer\\.$`,
       ),
@@ -81,9 +79,9 @@ describe("resolvePayloadLimits", () => {
   });
 
   test("알 수 없는 키는 TypeError로 거부한다", () => {
-    expect(() => resolvePayloadLimits({ maxWidgets: 1 } as never)).toThrow(
-      /^Unknown payload limit 'maxWidgets'\.$/,
-    );
+    const resolve = () => resolvePayloadLimits({ maxWidgets: 1 } as never);
+    expect(resolve).toThrow(TypeError);
+    expect(resolve).toThrow(/^Unknown payload limit 'maxWidgets'\.$/);
   });
 
   test("여러 필드가 잘못됐으면 정의 순서상 먼저인 필드 문구로 던진다", () => {
