@@ -1,6 +1,9 @@
 import {
   config,
+  defer,
   Observable,
+  ReplaySubject,
+  share,
   Subject,
   type Subscriber,
   type TeardownLogic,
@@ -8,7 +11,7 @@ import {
 
 import type { RemoteState, RemoteStateSnapshot } from "../contract/index.js";
 import type { ApiLifetime } from "./api-lifetime.js";
-import { createDisposedError, type RemoteError } from "./remote-error.js";
+import { createDisposedError } from "./remote-error.js";
 import type { StreamMultiplexer } from "./stream-multiplexer.js";
 
 /**
@@ -26,15 +29,6 @@ function reportUnhandledError(error: unknown): void {
   }
 }
 
-interface Generation<T> {
-  readonly subject: Subject<T>;
-  subscriptionId?: string;
-  subscribers: number;
-  closed: boolean;
-  hasValue: boolean;
-  latest: T | undefined;
-}
-
 type LocalGenerationKind = "state" | "event";
 
 /**
@@ -42,13 +36,22 @@ type LocalGenerationKind = "state" | "event";
  * `kind`가 `"state"`일 때만 snapshot을 유지·전이하고 늦은 구독자에게 현재값을
  * replay한다. `"event"`는 generation 수명 관리만 공유하고 snapshot을 읽지
  * 않는다.
+ *
+ * 로컬 구독자 공유·마지막 해제 시 연결 해제·늦은 합류 재생·종료 뒤 새 연결은
+ * `share`가 한다(ADR 0027). connector는 State면 `ReplaySubject(1)`, Event면
+ * `Subject`이고 reset 3종은 기본값(`true`)이다. 원격 구독 하나(= generation
+ * 하나)는 `#connect`가 만드는 연결 하나다. 재진입 순서는 rxjs 7 `share`의
+ * 구현 순서에 기댄다 — 구독자를 connector에 먼저 붙인 뒤 source를 연결하고,
+ * complete·error 때 reset을 구독자 통지보다 먼저 하며, `Subject.next`는 순회
+ * 전에 구독자 목록을 복사한다. `local-generation-reentrancy.test.ts`가 이
+ * 순서를 고정한다.
  */
 class LocalGeneration<T> {
   readonly #multiplexer: StreamMultiplexer;
   readonly #lifetime: ApiLifetime;
   readonly #key: string;
   readonly #kind: LocalGenerationKind;
-  #generation: Generation<T> | undefined;
+  readonly #shared: Observable<T>;
   #snapshot: RemoteStateSnapshot<T> = {
     status: "uninitialized",
     active: false,
@@ -69,6 +72,14 @@ class LocalGeneration<T> {
     this.#lifetime = lifetime;
     this.#key = key;
     this.#kind = kind;
+    this.#shared = defer(
+      () => new Observable<T>((subscriber) => this.#connect(subscriber)),
+    ).pipe(
+      share<T>({
+        connector: () =>
+          kind === "state" ? new ReplaySubject<T>(1) : new Subject<T>(),
+      }),
+    );
   }
 
   /** state 전용 값이다. event에서는 읽지 않는다. */
@@ -119,124 +130,81 @@ class LocalGeneration<T> {
       subscriber.error(createDisposedError());
       return;
     }
+    return this.#shared.subscribe(subscriber);
+  }
 
-    let generation = this.#generation;
-    const opensGeneration = generation === undefined;
-    if (generation === undefined) {
-      generation = {
-        subject: new Subject<T>(),
-        subscribers: 0,
-        closed: false,
-        hasValue: false,
-        latest: undefined,
-      };
-      this.#generation = generation;
+  /**
+   * generation 하나를 연다. `share`가 활성 연결이 없을 때만 부르고, 첫 로컬
+   * 구독자는 이미 connector에 붙어 있다. snapshot은 구독자 통지보다 먼저
+   * 반영한다. 반환한 teardown은 마지막 로컬 구독자가 해제될 때 `share`가
+   * 부른다 — 원격 terminal로 이미 끝난 뒤에는 아무것도 하지 않는다.
+   */
+  #connect(subscriber: Subscriber<T>): TeardownLogic {
+    let subscriptionId: string | undefined;
+    let ended = false;
+    const end = (): void => {
+      ended = true;
       if (this.#kind === "state") {
-        this.#snapshot = { status: "connecting", active: true };
-      }
-    }
-
-    generation.subscribers += 1;
-    const innerSubscription = generation.subject.subscribe(subscriber);
-
-    if (
-      !opensGeneration &&
-      this.#kind === "state" &&
-      generation.hasValue &&
-      this.#generation === generation &&
-      !generation.closed
-    ) {
-      // 새 구독자에게만 현재값을 동기로 재생한다. subject.next로 재생하면
-      // 기존 구독자가 값을 중복 수신하므로 subscriber에 직접 전달한다. 값의
-      // 수명은 generation의 수명과 같다 — generation이 폐기되면(마지막 구독
-      // 해제, error, complete) 값도 함께 버려지고 다음 generation에는
-      // 재생되지 않는다.
-      subscriber.next(generation.latest as T);
-    }
-
-    let removed = false;
-    const removeLocalSubscriber = (): void => {
-      if (removed) {
-        return;
-      }
-      removed = true;
-      innerSubscription.unsubscribe();
-      generation.subscribers -= 1;
-      if (
-        generation.subscribers === 0 &&
-        !generation.closed &&
-        this.#generation === generation
-      ) {
-        generation.closed = true;
-        this.#generation = undefined;
-        if (this.#kind === "state") {
-          this.#markInactive();
-        }
-        if (generation.subscriptionId !== undefined) {
-          this.#multiplexer.close(generation.subscriptionId);
-        }
+        this.#markInactive();
       }
     };
-
-    if (opensGeneration) {
-      this.#multiplexer.open(
-        this.#key,
-        {
-          next: (value) => {
-            if (this.#generation !== generation || generation.closed) {
-              return;
-            }
-            const typedValue = value as T;
-            generation.hasValue = true;
-            generation.latest = typedValue;
-            if (this.#kind === "state") {
-              this.#snapshot = {
-                status: "current",
-                active: true,
-                value: typedValue,
-              };
-            }
-            generation.subject.next(typedValue);
-          },
-          error: (error) => this.#finish(generation, error),
-          complete: () => this.#finish(generation),
-        },
-        (subscriptionId) => {
-          generation.subscriptionId = subscriptionId;
-        },
-      );
+    if (this.#kind === "state") {
+      this.#snapshot = { status: "connecting", active: true };
     }
+    this.#multiplexer.open(
+      this.#key,
+      {
+        next: (value) => {
+          if (ended) {
+            return;
+          }
+          const typedValue = value as T;
+          if (this.#kind === "state") {
+            this.#snapshot = {
+              status: "current",
+              active: true,
+              value: typedValue,
+            };
+          }
+          subscriber.next(typedValue);
+        },
+        error: (error) => {
+          if (ended) {
+            return;
+          }
+          end();
+          subscriber.error(error);
+        },
+        complete: () => {
+          if (ended) {
+            return;
+          }
+          end();
+          subscriber.complete();
+        },
+      },
+      (id) => {
+        subscriptionId = id;
+      },
+    );
 
     // 활성 generation일 때만 쏜다. `multiplexer.open`이 동기로 실패하면
     // generation이 이미 끝나 있을 수 있다 — 그 상태에서 신호를 쏘면
     // `snapshotStore`가 `open === false`로 보고 합류를 시도해 다시 실패하는
     // 재구독 루프가 된다(N8).
-    if (
-      opensGeneration &&
-      this.#kind === "state" &&
-      this.#generation === generation &&
-      !generation.closed
-    ) {
+    if (this.#kind === "state" && !ended) {
       this.#notifyOpened();
     }
 
-    return removeLocalSubscriber;
-  }
-
-  #finish(generation: Generation<T>, error?: RemoteError): void {
-    if (generation.closed || this.#generation !== generation) {
-      return;
-    }
-    generation.closed = true;
-    this.#generation = undefined;
-    if (this.#kind === "state") {
-      this.#markInactive();
-    }
-    if (error === undefined) {
-      generation.subject.complete();
-    } else {
-      generation.subject.error(error);
-    }
+    return () => {
+      if (ended) {
+        return;
+      }
+      end();
+      if (subscriptionId !== undefined) {
+        this.#multiplexer.close(subscriptionId);
+      }
+    };
   }
 
   #markInactive(): void {
