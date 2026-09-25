@@ -38,9 +38,6 @@ export function snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T> {
     getSnapshot: () => state.snapshot,
   });
 
-  cache.set(
-    state as RemoteState<unknown>,
-    store as RemoteStateStore<unknown>,
-  );
+  cache.set(state as RemoteState<unknown>, store as RemoteStateStore<unknown>);
   return store;
 }
