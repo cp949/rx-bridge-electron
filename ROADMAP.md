@@ -487,7 +487,7 @@
 
 ### 기능별 설계 문서 (출처: 사용자 요청 2026-09-26, [.scratch/readme-restructure/issues/01-readme-user-guide-restructure.md](.scratch/readme-restructure/issues/01-readme-user-guide-restructure.md) 검토 질문 1·2)
 
-- [ ] **RD-046 — `docs/design/`에 기능별 설계 문서를 작성하고 패키지 README를 한글 단일로 바꾼다.** ADR은 결정 단위·시간순이라 대체·개정 note가 쌓였고, architecture.md는 개요와 세부가 한 문단에 섞였다. 주제별로 현재 모델·불변식·흐름·설계 이유·기각한 대안·한계를 한 곳에 모은다. 소스 라인번호와 작업 이력(RD·DELTA·커밋)을 쓰지 않는다. 코드 변경은 없다.
+- [x] **RD-046 — `docs/design/`에 기능별 설계 문서를 작성하고 패키지 README를 한글 단일로 바꾼다.** ADR은 결정 단위·시간순이라 대체·개정 note가 쌓였고, architecture.md는 개요와 세부가 한 문단에 섞였다. 주제별로 현재 모델·불변식·흐름·설계 이유·기각한 대안·한계를 한 곳에 모은다. 소스 라인번호와 작업 이력(RD·DELTA·커밋)을 쓰지 않는다. 코드 변경은 없다.
   - `docs/design/README.md`(문서 역할·주제 색인·작성 규칙)와 주제 문서 11개: 계약과 등록, Renderer API, Transport와 배선, 문서 세션, RPC, Main 스트림 전달, Renderer 스트림과 State, Payload와 오류 모델, 세션 자원 한도, 종료, 진단.
   - 패키지 README의 영어 문장을 없앤다(설치 절 병기, 절 이름 `Hello world`·`Testing`).
   - `docs/README.md`·`docs/agents/domain.md`에서 설계 문서를 찾게 한다.
@@ -495,6 +495,8 @@
   **범위 밖:** README 재구성(이슈 `readme-restructure/01`, 이번 결정으로 세부 이관처가 `docs/design/`으로 정해진다), architecture.md 축약.
 
   **완료 기준:** 주제 문서 11개와 색인이 있다. 라인번호·작업 이력 grep 0건. 각 문서의 규칙을 코드·test와 대조한 검토 결과가 있고 발견을 반영했다. 문서 간 같은 규칙의 서술이 일치한다. 패키지 README 코드 블록 밖 영어 문장 0건. 루트 `pnpm format:check` 통과.
+
+  계획: `_works/20260926-03-design-docs/`. **결과:** 완료 조건 충족, 편차 없음. 주제 문서 11개를 주제별 작성 에이전트 6개가 소스·test와 대조해 작성했고(문서당 규칙 25~60건 확인), 별도 교차 검토에서 모순 5건(06 capacity 한 칸 차이, 06 bind `dispose()` retire 사유, stream `authorize` 거부 중 sink 재진입 retire가 `CANCELLED`인 규칙 누락, 같은 문서 두 transport `replaced` 무통지 한계 누락, 11 RPC 진단 순서의 취소 위치)과 소유 중복 4건을 코드 기준으로 고쳤다. 라인번호·작업 이력 grep 0건, `pnpm format:check` 통과. 작성 중 발견한 architecture.md 불일치(`EventSource` re-export 서술, `./protocol` 진입점 누락, bind `dispose()` retire 행, RPC slot 반환 서술, 구독 판정 순서의 "RPC와 같은 순서", RD 표기)와 README 사실 오류 3건(adapter envelope 검사, stream의 `CANCELLED` 우선, `signal`을 무시하는 handler의 slot 점유)을 바로잡았다. 후속 이슈: [ADR·코드 주석 불일치](.scratch/adr-code-drift/issues/01-adr-and-comment-drift.md), [`BridgeOperation.domain` 미분해](.scratch/namespace-key-slash-domain/issues/01-bridge-operation-domain-split.md), [`EventSource` 타입 미공개](.scratch/event-source-type-export/issues/01-event-source-types-not-exported.md). README 재구성 이슈에 검토 질문 결정을 기록했다.
 
 ## 현재 범위 밖의 확장
 
