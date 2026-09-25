@@ -306,6 +306,26 @@ const scopedDataEvent = scopedEvent(
 
 같은 generation이 활성인 동안 늦게 합류한 로컬 구독자는 `subscribe()` 호출 안에서 현재값을 동기로 1회 받습니다. `undefined`도 유효한 현재값으로 전달됩니다. 아직 값을 받지 못한 `connecting` 상태(첫 로컬 구독자가 원격 구독을 열었지만 첫 값이 도착하기 전)에서 늦게 구독하면 즉시 아무 값도 받지 않고 첫 값을 기다립니다.
 
+### Main State source 평탄화
+
+Main State source의 `complete`/`error`는 Renderer의 현재 generation을 끝냅니다 — 구독자는 `stale`(또는 `uninitialized`)에서 멈추고, store는 스스로 재구독하지 않습니다. source를 교체해야 하면(장치 재연결 등) source 자체를 바꾸지 말고, 오래 사는 `BehaviorSubject`에 `switchMap`으로 평탄화해 `next`만 전달하세요. 안쪽 error는 `catchError`로 값으로 바꿉니다. 이 `BehaviorSubject`는 complete하지 않습니다.
+
+```ts
+import { BehaviorSubject, catchError, of, switchMap } from "rxjs";
+import { currentValueSource } from "@cp949/rx-bridge-electron/main";
+
+const connection = new BehaviorSubject({ connected: false });
+devices$
+  .pipe(
+    switchMap((device) =>
+      device.connection$.pipe(catchError(() => of({ connected: false }))),
+    ),
+  )
+  .subscribe((value) => connection.next(value));
+
+const source = currentValueSource(connection);
+```
+
 하나의 Renderer 문서 안에서는 여러 State/Event 구독자가 로컬 source를 공유합니다. Main의 소유 범위는 연결된 `webContents`와 문서 세션입니다. reload, 탐색, 완료, 오류, 마지막 구독 해제, 문서 파괴 시 관련 자원을 정리합니다. State는 현재값을 우선 전달합니다. Event는 재생하지 않으며 `subscribed` 확인 이후 순서를 보장하고 최대 한 번 전달합니다. Event buffer는 용량과 overflow 정책(`error`, `drop-oldest`, `drop-newest`)을 명시해야 합니다(위 "Event buffer 옵션" 참고, 생략 시 기본값).
 
 문서가 살아있는 채로 Main 쪽 세션이 끝나면(detach 또는 `server.dispose()`/bind `dispose()`), 활성 State/Event 구독과 `authorize` 대기 중이던 구독은 `RemoteError("CANCELLED", "Bridge session ended.")`를 받습니다 — `RemoteState`는 값이 있었으면 `stale`, 없었으면 `uninitialized`로 전이하고, 쌓여 있던 값은 전달하지 않습니다. 세션이 끝난 뒤의 새 구독은 `subscribed` 확인 직후 같은 `RemoteError("FORBIDDEN", "Bridge sender is not authorized.")`로 끝납니다(RPC 거부와 같은 코드·문구). navigation(문서 commit 시점, [ADR 0019](../../docs/adr/0019-navigation-retire-on-commit.md))·renderer process 종료·문서 파괴·같은 문서의 새 클라이언트 등록으로 인한 retire는 통지하지 않습니다 — 옛 문서 자신이 이미 없거나 재연결 흐름의 일부이기 때문입니다. 전송 실패는 삼킵니다(best-effort). 근거는 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
@@ -336,7 +356,7 @@ export function useRemoteState<T>(
 
 `useSyncExternalStore`의 세 번째 인자(`getServerSnapshot`)는 생략합니다 — Electron renderer에는 SSR이 없습니다.
 
-store의 listener들은 `state` 구독 하나를 공유합니다. 마지막 listener가 나가면 구독을 해제합니다. 원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 스스로 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하세요 — 새 listener가 `state`를 다시 구독하고, 남아 있던 listener도 그 변경을 받습니다. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요. 이렇게 직접 구독해 새 generation을 열면, 구독이 이미 끝난 store listener는 그 변경 알림을 받지 않습니다.
+store의 listener들은 `state` 구독 하나를 공유합니다. 마지막 listener가 나가면 구독을 해제합니다. listener가 있는 동안에는 다른 구독이 연 generation에도 합류해 변경을 알리고, listener가 모두 나갈 때까지 그 구독을 유지합니다. `getSnapshot()`이 바뀌면 반드시 알림을 받습니다(여분 알림은 허용). 원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 스스로 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하세요 — 새 listener가 `state`를 다시 구독하고, 남아 있던 listener도 그 변경을 받습니다. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요. Main 쪽에서 source를 통째로 교체해야 한다면 store 재구독 대신 위 "Main State source 평탄화" 참고.
 
 다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다.
 
