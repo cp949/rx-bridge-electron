@@ -229,6 +229,33 @@
 
   계획: `_works/20260925-10-authorize-step/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(characterization test 7건 추가 — 수정 전 코드에서 36 files/653→660 tests GREEN 확인) → DELTA-02(`error-serializer.ts`의 `internalError`를 동결 상수로 export, `subscriptions.ts`·`rpc-requests.ts` 리터럴 통합) → DELTA-03(`authorization.ts` 도입, RPC 경로가 `authorizeOperation`의 판정을 응답으로 번역만 하도록 전환) → DELTA-04(stream 경로 전환, authorize 거부 진단을 slot 반환 전으로 옮겨 RPC와 순서를 맞춤) → DELTA-05(문서 반영·전체 검증) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 36 files/660 tests 통과(기준 653+7), 루트 `pnpm lint`·`pnpm format:check` 통과, demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: `"Internal bridge error."` 1건(`error-serializer.ts`), `"Bridge operation is forbidden."` 1건(`authorization.ts`), `reason: "authorize-denied"` 1건(`authorization.ts`), `windowRole:` 1건(`authorization.ts`), `#authorize(` 0건(`rpc-requests.ts`·`subscriptions.ts`). `git diff dev -- create-bridge-server.ts` 빈 출력, 생성자 시그니처 불변. `git diff dev -- test` 실제 삭제 줄은 `diagnostics-rejections.test.ts`의 `setup()` 반환값에 `detach` 필드를 더한 2줄뿐(단언 불변), 나머지는 추가. ADR 0011 개정 note·`docs/architecture.md`(:112·:114 부근)에 반영. 리뷰 `02.html` 카드 05 완료 표시. **발견:** DELTA-01 ②(RPC sink 재진입) test의 진단 순서는 계획 시점 추정과 달랐다 — `detach()`가 session을 abort시켜 `#begin`의 `onSessionAbort` 리스너가 동기로 `#cancelActive`를 불러 `rpc-cancelled`가 끼어든다(실측: `session-opened`→`rejected(authorize-denied)`→`session-closed`→`rpc-cancelled`→`rpc-finished`). 실측값으로 test를 고정했다(DELTA-01 "## 결과"). **리뷰:** `authorize`가 있으면 판정이 microtask 한 단계 늦게 도착한다(macrotask 경계와의 순서는 같다) — ADR 0011 note에 추가. sink 안 snapshot `subscriptions` +1 주장을 test로 고정(RD-033 이전 코드 RED `[0]`, 이후 GREEN `[1]`).
 
+- [ ] **RD-034 — consumer 1건의 전달 창을 `Subscriptions` 안 내부 module `DeliveryWindow`로 분리한다.** 지금 `subscriptions.ts`(680줄)의 `Consumer`는 19필드이고, 그중 창 상태 6개(`pendingState`·`hasPendingState`·`pendingEvents`·`inFlight`·`terminal`·`sequence`)가 admission·fan-out·수명 필드와 섞여 있다. 창 불변식("ack 전 추가 전송 없음")의 예외인 선점 종료(ADR 0020 결정 3)가 창 밖 `onSessionAbort`의 `++consumer.sequence`에 있다. State/Event 정책 차이는 값이 들어올 때마다 kind 분기(`#start` queue 생성·`#next`·`#flush` 2곳)로 다시 판별된다. 출처: 아키텍처 리뷰 `_works/arch-review/02.html` 카드 06, 2026-09-25 그릴링. **구조:**
+  - 신규 `src/main/delivery-window.ts`의 `DeliveryWindow`는 rxjs·session에 의존하지 않는다. 입력은 `open()`·`accept(value)`·`ack(sequence)`·`end(terminal)`·`preempt(error)`·`close()`이고, 출력은 envelope 없는 보낼 메시지(반환값)다.
+  - 창이 sequence(`subscribed` 0 포함)·`inFlight`·기록된 terminal·닫힘 플래그를 단독 소유한다. `Consumer.closed`는 삭제하고 `Subscriptions`는 창 판정을 읽는다.
+  - State/Event 차이는 생성 시 주입하는 buffer 정책 하나로 표현한다. State는 최신값 1칸 덮어쓰기, Event는 `BoundedQueue`이고 `error` 정책 overflow는 `STREAM_OVERFLOW` terminal이다. 창 안 kind 분기는 0곳이다.
+  - `stream-dropped`·`stream-queue` 진단은 창 생성 시 주입한 callback(`onDropped`·`onQueueDepth`)을 발생 지점에서 동기 호출한다. 창은 callback 뒤마다 자기 상태를 다시 확인한다. 효과 목록 반환형은 sink 재진입 시 선점 `error` sequence를 바꾸므로 쓰지 않는다.
+  - 선점 종료는 `preempt(error)`다. 쌓인 값·기록된 terminal을 버리고 다음 sequence로 `error`를 반환한다. `onSessionAbort`는 반환 메시지를 보내고 `#close`만 한다.
+  - `Subscriptions`에 남는 것: admission·`authorize` 대기, fan-out(kind 분기 `#start` 시작 경로 선택·늦게 합류한 State의 `getValue()` 2곳 유지), `parseOutput`·`validation-failed`, envelope 조립·`send`·send 예외 시 close, 수명 정리(listener 해제·slot·`subscription-closed`·controller·source 분리). `#endUnstarted`의 `subscribed`(0)+`error`(1)는 창 생성 전 경로라 그대로 둔다.
+  - 동작 변경 없음: wire 메시지 순서, sequence 번호, 진단 종류·순서, `getDiagnosticsSnapshot()` 값을 보존한다. 생성자 시그니처·`create-bridge-server.ts` 배선을 바꾸지 않는다. 새 ADR·ADR 개정 note는 만들지 않는다.
+  - test 표면: RD-015 그릴링 결정 5("구독 모듈 직접 test 없음")의 예외로, `BoundedQueue`와 같은 등급의 순수 module인 `DeliveryWindow`만 `test/main/delivery-window.test.ts`에서 직접 test한다. `Subscriptions`는 계속 `createBridgeServer` seam으로만 test한다.
+
+  **범위 밖(보류):** 리뷰 02 카드 07·08. fan-out 쪽 kind 분기 2곳. 동작 변경이 필요한 결함이 나오면 이 RD에 섞지 않고 별도 RD로 등록한다.
+
+  **완료 기준:**
+  - refactor 전에 `createBridgeServer` seam characterization test 4건을 추가하고 GREEN을 확인한다. 대상:
+    - 진단 sink가 `stream-dropped`를 받는 중 동기 detach
+    - 진단 sink가 `stream-queue`를 받는 중 동기 detach
+    - 동기 `send` 안 `acknowledge` 재진입
+    - 동기 `send` 안 `unsubscribe` 재진입
+
+    이 test들은 refactor 뒤에도 GREEN이다.
+
+  - `delivery-window.test.ts`가 창 불변식을 표 형식으로 고정한다: ack 게이트, State 최신값 교체, Event overflow 3정책, 대기 값 drain 뒤 terminal, `preempt`의 대기 값·기록된 terminal 폐기, `close` 뒤 무출력, 진단 callback 안 `preempt`·`close` 재진입.
+  - 기존 test 단언 변경 0건이다.
+  - `src/main/subscriptions.ts`의 `consumer.sequence`·`inFlight`·`pendingState`·`hasPendingState`·`pendingEvents`·`closed: ` 0건. `src/main/delivery-window.ts`의 `rxjs`·`./subscriptions`·`./document-sessions` import 0건, `kind ===` 0건.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - `docs/architecture.md` 구독 서술 1문장, `CONTEXT.md` "구독" 항목 1문장(전달 창은 `DeliveryWindow`가 소유), 리뷰 02.html 카드 06 완료 표시를 반영한다.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
