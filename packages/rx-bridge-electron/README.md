@@ -336,7 +336,7 @@ export function useRemoteState<T>(
 
 `useSyncExternalStore`의 세 번째 인자(`getServerSnapshot`)는 생략합니다 — Electron renderer에는 SSR이 없습니다.
 
-원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하거나 새 `state`를 넘기세요. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요.
+store의 listener들은 `state` 구독 하나를 공유합니다. 마지막 listener가 나가면 구독을 해제합니다. 원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 스스로 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하세요 — 새 listener가 `state`를 다시 구독하고, 남아 있던 listener도 그 변경을 받습니다. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요. 이렇게 직접 구독해 새 generation을 열면, 구독이 이미 끝난 store listener는 그 변경 알림을 받지 않습니다.
 
 다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다.
 

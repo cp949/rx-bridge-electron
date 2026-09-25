@@ -25,11 +25,12 @@ export interface RemoteStateStore<T> {
 }
 ```
 
-- `subscribe`는 `state`를 구독해 `next`·`error`·`complete`마다 `onChange()`를 인자 없이 호출한다. `error`는 알림으로만 쓰고 삼킨다 — 다시 던지지 않는다. 반환 함수는 그 구독을 해제한다.
+- store는 listener 집합과 `state` 구독 하나를 가진다. `subscribe(onChange)`는 listener를 추가하고, `state` 구독이 없거나 원격 종료로 끝났으면 새로 구독한다. `next`·`error`·`complete`마다 모든 listener의 `onChange()`를 인자 없이 호출한다. `error`는 알림으로만 쓰고 삼킨다 — 다시 던지지 않는다. 반환 함수는 그 listener만 제거하고, 마지막 listener가 나가면 `state` 구독을 해제한다.
+- listener마다 `state`를 따로 구독하지 않는 이유: 원격 종료 뒤 한 listener(예: 새로 mount된 컴포넌트)가 새 generation을 열면 `getSnapshot`은 새 generation 값을 돌려주는데, 이미 종료된 구독을 가진 기존 listener는 알림을 받지 못한다. React에서는 같은 state를 읽는 컴포넌트끼리 다른 값을 렌더한다(tearing). 공유 구독이면 새 generation의 변경이 기존 listener에게도 전달된다.
 - `getSnapshot`은 캐시하지 않는다. 호출 시점의 `state.snapshot`을 그대로 돌려준다.
 - `WeakMap` 캐시로 같은 `state` 객체에는 같은 store(같은 `subscribe`·`getSnapshot` 함수 참조)를 돌려준다. React는 `useCallback` 없이 `useSyncExternalStore(store.subscribe, store.getSnapshot)`로 쓴다.
 - store 함수는 `this`를 쓰지 않는 closure로 만들고, store 객체는 `Object.freeze`한다(ADR 0021의 API 트리 동결과 같은 취지 — React가 `subscribe`·`getSnapshot`을 분리해서 호출한다).
-- 원격 complete/error 뒤에는 재구독하지 않는다. snapshot은 `stale`(또는 `uninitialized`)에서 멈춘다.
+- 원격 complete/error 뒤에는 스스로 재구독하지 않는다. 새 listener가 들어올 때까지 snapshot은 `stale`(또는 `uninitialized`)에서 멈춘다.
 - 입력은 공개 인터페이스 `RemoteState<T>`다. `RemoteState`·`RemoteStateSnapshot` 타입은 바뀌지 않는다.
 
 ### 범위 해석
@@ -42,13 +43,14 @@ ROADMAP "현재 범위 밖의 확장"은 "React 전용 패키지"를 제외한�
 - **별도 패키지(`@cp949/rx-bridge-electron-react`).** 발행·버전 동기화 비용이 생긴다. adapter 자체가 프레임워크 중립이라 분리할 이유가 없다.
 - **`RemoteState`에 메서드 추가(`state.toStore()` 등).** `RemoteState`는 공개 인터페이스이므로 사용자가 만드는 fake·mock도 새 메서드를 구현해야 한다. 독립 함수로 두면 `RemoteState<T>` 모양만 만족하면 된다.
 - **캐시 없는 함수(매 호출 새 store 생성).** React에서 안정된 참조를 얻으려면 호출부가 `useMemo`/`useCallback`을 직접 써야 해 hook 작성 부담이 그대로 남는다. `WeakMap` 캐시가 이 부담을 adapter 쪽으로 옮긴다.
-- **자동 재구독.** 결정 2("종료 후")를 반복 위반한다. 원격 종료는 ADR 0020이 정한 최종 상태이고, 자동 재구독은 그 계약과 충돌한다.
+- **자동 재구독.** 원격 종료는 ADR 0020이 정한 최종 상태이고, 자동 재구독은 그 계약과 충돌한다. 원격이 계속 종료하면 재구독이 반복된다.
 - **snapshot에 error 추가.** `RemoteStateSnapshot`은 공개 계약이다. error를 실으려면 모든 소비자가 새 판별 분기를 갖게 되고, ROADMAP 결정("종료 원인은 노출하지 않는다")과도 어긋난다. 원인이 필요하면 `state`를 직접 구독한다.
 
 ## 한계
 
 - 종료 원인을 store로 알 수 없다. `RemoteError`가 필요하면 `state.subscribe({ error })`로 직접 구독한다.
-- 종료 뒤 자동 복구가 없다. 다시 구독하려면 컴포넌트를 remount하거나 새 `state`를 넘긴다.
+- 종료 뒤 자동 복구가 없다. 다시 구독하려면 컴포넌트를 remount한다 — 새 listener가 `state`를 다시 구독하고, 남아 있던 listener도 그 변경을 받는다.
+- store 밖에서 `state`를 직접 구독해 새 generation이 열리면, store 구독이 이미 끝난 상태의 listener는 그 변경 알림을 받지 않는다(`getSnapshot`은 새 값을 돌려준다). 같은 state를 store와 직접 구독에 섞어 쓸 때 해당한다.
 
 ## 범위 밖
 

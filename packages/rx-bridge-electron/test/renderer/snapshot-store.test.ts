@@ -1,10 +1,10 @@
 /**
  * `snapshotStore`가 `RemoteState`를 외부 store 계약(`subscribe`/`getSnapshot`)으로
  * 옮기는 것을 검증하는 테스트. 캐시 동일성, snapshot 참조 안정성, 알림 타이밍,
- * 종료(complete/error) 뒤 처리, 구독 해제, dispose된 API·사용자 fake 입력을
- * 함께 다룬다.
+ * 종료(complete/error) 뒤 처리, 구독 해제, listener 공유 구독(종료 뒤 재개·
+ * 알림 중 해제·중첩 구독), dispose된 API·사용자 fake 입력을 함께 다룬다.
  */
-import { BehaviorSubject, config } from "rxjs";
+import { BehaviorSubject, Observable, config } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
 import {
@@ -238,6 +238,115 @@ describe("snapshotStore", () => {
     expect(secondOnChange).not.toHaveBeenCalled();
   });
 
+  test("원격 종료 뒤 새 listener가 generation을 다시 열면 기존 listener도 새 generation의 변경 알림을 받는다", async () => {
+    const transport = new FakeTransport({ manifest: STATE_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const store = snapshotStore(state);
+    const earlyOnChange = vi.fn();
+    store.subscribe(earlyOnChange);
+
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
+    transport.emitStream(
+      streamMessage(firstId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "batch", sequence: 1, values: ["a"] }),
+    );
+    transport.emitStream(
+      streamMessage(firstId, { type: "complete", sequence: 2 }),
+    );
+    expect(earlyOnChange).toHaveBeenCalledTimes(2);
+
+    const lateOnChange = vi.fn();
+    const unsubscribeLate = store.subscribe(lateOnChange);
+    expect(transport.subscribeCommands()).toHaveLength(2);
+    expect(earlyOnChange).toHaveBeenCalledTimes(2);
+
+    const secondId = transport.subscriptionIdFor(CONNECTION_KEY, 1);
+    transport.emitStream(
+      streamMessage(secondId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(secondId, { type: "batch", sequence: 1, values: ["b"] }),
+    );
+
+    expect(store.getSnapshot()).toEqual({
+      status: "current",
+      active: true,
+      value: "b",
+    });
+    expect(earlyOnChange).toHaveBeenCalledTimes(3);
+    expect(lateOnChange).toHaveBeenCalledTimes(1);
+
+    // 늦은 listener가 나가도 기존 listener가 남아 있으므로 generation을 유지한다.
+    unsubscribeLate();
+    expect(
+      transport.controls.filter((command) => command.type === "unsubscribe"),
+    ).toHaveLength(0);
+    expect(store.getSnapshot().status).toBe("current");
+  });
+
+  test("알림 중 앞선 listener가 뒤 listener를 해제하면 해제된 listener는 불리지 않는다", async () => {
+    const transport = new FakeTransport({ manifest: STATE_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const store = snapshotStore(state);
+    let unsubscribeSecond: (() => void) | undefined;
+    const firstOnChange = vi.fn(() => unsubscribeSecond?.());
+    const secondOnChange = vi.fn();
+
+    store.subscribe(firstOnChange);
+    unsubscribeSecond = store.subscribe(secondOnChange);
+
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
+    transport.emitStream(
+      streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(subscriptionId, {
+        type: "batch",
+        sequence: 1,
+        values: ["a"],
+      }),
+    );
+
+    expect(firstOnChange).toHaveBeenCalledTimes(1);
+    expect(secondOnChange).not.toHaveBeenCalled();
+  });
+
+  test("같은 onChange를 두 번 구독해도 해제 함수는 각자 한 구독만 해제한다", async () => {
+    const transport = new FakeTransport({ manifest: STATE_MANIFEST });
+    const api = await createRendererApi<StateBridge>({ transport });
+    const state = api.hardware.state.connection$;
+    const store = snapshotStore(state);
+    const onChange = vi.fn();
+
+    const unsubscribeFirst = store.subscribe(onChange);
+    const unsubscribeSecond = store.subscribe(onChange);
+    unsubscribeFirst();
+    unsubscribeFirst();
+
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
+    transport.emitStream(
+      streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(subscriptionId, {
+        type: "batch",
+        sequence: 1,
+        values: ["a"],
+      }),
+    );
+    expect(onChange).toHaveBeenCalledTimes(1);
+
+    unsubscribeSecond();
+    expect(transport.controls.at(-1)).toEqual({
+      type: "unsubscribe",
+      subscriptionId,
+    });
+  });
+
   test("dispose된 API의 state를 구독하면 onChange가 동기로 1회 불리고 미처리 오류로 보고되지 않는다", async () => {
     const originalOnUnhandledError = config.onUnhandledError;
     const unhandledSpy = vi.fn();
@@ -276,5 +385,41 @@ describe("snapshotStore", () => {
     store.subscribe(onChange);
 
     expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  test("동기 첫 알림 안에서 같은 store를 다시 구독해도 state는 한 번만 구독하고 전부 해제하면 남기지 않는다", () => {
+    const snapshot: RemoteStateSnapshot<number> = {
+      status: "current",
+      active: true,
+      value: 1,
+    };
+    const subject = new BehaviorSubject(1);
+    const upstreamSubscribe = vi.fn();
+    const state: RemoteState<number> = Object.assign(
+      new Observable<number>((subscriber) => {
+        upstreamSubscribe();
+        return subject.subscribe(subscriber);
+      }),
+      { snapshot },
+    );
+    const store = snapshotStore(state);
+
+    // 중첩 구독이 state를 다시 구독하면 동기 알림이 재귀한다. 회귀 시 test가
+    // 멈추지 않고 실패하도록 깊이를 제한한다.
+    let depth = 0;
+    let nestedUnsubscribe: (() => void) | undefined;
+    const outerUnsubscribe = store.subscribe(() => {
+      depth += 1;
+      if (depth > 3) {
+        return;
+      }
+      nestedUnsubscribe ??= store.subscribe(() => {});
+    });
+    expect(nestedUnsubscribe).toBeDefined();
+    expect(upstreamSubscribe).toHaveBeenCalledTimes(1);
+
+    outerUnsubscribe();
+    nestedUnsubscribe?.();
+    expect(subject.observed).toBe(false);
   });
 });
