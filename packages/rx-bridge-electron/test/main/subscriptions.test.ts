@@ -244,6 +244,156 @@ describe("Main stream sources and sharing", () => {
       }),
     ]);
   });
+
+  test("a late-joining State consumer whose getValue() throws is masked without disturbing the shared upstream", async () => {
+    const raw = new BehaviorSubject(1);
+    let throwing = false;
+    const flagged = Object.assign(
+      new Observable<number>((subscriber) => raw.subscribe(subscriber)),
+      {
+        getValue: () => {
+          if (throwing) throw new Error("boom");
+          return raw.getValue();
+        },
+      },
+    );
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(flagged) } },
+    });
+    server.attach(new FakeTarget(1));
+    server.attach(new FakeTarget(2));
+    const first: StreamMessage[] = [];
+    const second: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      (message) => first.push(message),
+    );
+    throwing = true;
+    await server.controlStream(
+      sender({ webContentsId: 2 }),
+      command("subscribe", testSubscriptionId(2), "client-2"),
+      (message) => second.push(message),
+    );
+    expect(first.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    expect(first[1]).toMatchObject({ values: [1] });
+    expect(second.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
+    expect(second.at(-1)).toMatchObject({
+      error: { code: "INTERNAL", message: "Internal bridge error." },
+    });
+    expect(raw.observed).toBe(true);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(1);
+  });
+
+  test.each([
+    [
+      "throws",
+      (): never => {
+        throw new Error("boom");
+      },
+    ],
+    ["returns a non-Observable", () => 42 as unknown as Observable<number>],
+  ] as const)(
+    "scoped Event terminates with a masked INTERNAL error and returns the slot when the factory %s",
+    async (_label, factory) => {
+      const server = createBridgeServer({
+        hardware: { event: { change$: scopedEvent(factory) } },
+      });
+      server.attach(new FakeTarget());
+      const messages: StreamMessage[] = [];
+      await server.controlStream(
+        sender(),
+        command(
+          "subscribe",
+          testSubscriptionId(1),
+          "client-1",
+          "event:hardware/change$",
+        ),
+        (message) => messages.push(message),
+      );
+      expect(messages.map((message) => message.type)).toEqual([
+        "subscribed",
+        "error",
+      ]);
+      expect(messages.at(-1)).toMatchObject({
+        error: { code: "INTERNAL", message: "Internal bridge error." },
+      });
+      expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+    },
+  );
+
+  test("a first State batch send failure during the shared subscribe closes the consumer without ever observing upstream", async () => {
+    const source = new BehaviorSubject(1);
+    const server = createBridgeServer({
+      hardware: { state: { current$: currentValueSource(source) } },
+    });
+    server.attach(new FakeTarget());
+    const messages: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      (message) => {
+        messages.push(message);
+        if (message.type === "batch") throw new Error("closed frame");
+      },
+    );
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "batch",
+    ]);
+    expect(source.observed).toBe(false);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("a broadcast upstream error masks the original message for every fanned-out consumer", async () => {
+    const source = new Subject<number>();
+    const server = createBridgeServer({
+      hardware: { event: { change$: broadcastEvent(source) } },
+    });
+    server.attach(new FakeTarget(1));
+    server.attach(new FakeTarget(2));
+    const first: StreamMessage[] = [];
+    const second: StreamMessage[] = [];
+    await server.controlStream(
+      sender(),
+      command(
+        "subscribe",
+        testSubscriptionId(1),
+        "client-1",
+        "event:hardware/change$",
+      ),
+      (message) => first.push(message),
+    );
+    await server.controlStream(
+      sender({ webContentsId: 2 }),
+      command(
+        "subscribe",
+        testSubscriptionId(2),
+        "client-2",
+        "event:hardware/change$",
+      ),
+      (message) => second.push(message),
+    );
+    source.error(new Error("secret"));
+    for (const messages of [first, second]) {
+      expect(messages.map((message) => message.type)).toEqual([
+        "subscribed",
+        "error",
+      ]);
+      expect(messages.at(-1)).toMatchObject({
+        error: { code: "INTERNAL", message: "Internal bridge error." },
+      });
+    }
+    expect(JSON.stringify([...first, ...second])).not.toContain("secret");
+    expect(source.observed).toBe(false);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });
 
 describe("Main stream scoped Event delivery", () => {
