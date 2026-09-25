@@ -262,10 +262,10 @@
 
 - [ ] **RD-035 — Renderer test의 wire 조립·구독 ID 조회 helper를 `FakeTransport` 한 파일로 모은다.** 지금 `test/renderer/` test 6개 파일에 같은 helper가 약 15벌 복제돼 있다: stream 메시지 조립(`message`/`streamMessage`, `StreamMessageBody` 타입) ×4, manifest만 다른 handshake factory(`eventTransport`·`stateTransport`·`streamTransport`·`bridgeTransport`) ×4, 글자까지 같은 RPC `success` ×3, 구독 ID 추출 3방식(`subscriptions(transport)[n]`·`firstSubscriptionId`·`subscriptionIdFor(transport, key)`) ×4. 출처: 아키텍처 리뷰 `_works/arch-review/02.html` 카드 07, 2026-09-25 그릴링. 카드 원안(key 단위로 sequence·id를 자동 추적하는 "가짜 Main")은 기각했다 — remote-event test가 검증하는 sequence 규칙(중복·감소·`subscribed` 전 batch)을 test 본문에서 감추고, 이상 상황용 raw 우회로가 필요해 wire 지식이 두 곳에 남는다. 카드 근거("ADR 0017은 wire 변경이 test를 한꺼번에 깨뜨린 이력을 기록한다")도 사실과 다르다: 그 이력은 demo test 대상이고 loopback으로 해결됐으며, RD-017·019가 `test/renderer/`를 바꾼 커밋은 3건, 각 1파일이다. **구조:**
   - `FakeTransport`는 shallow 호출 기록기로 유지한다(ADR 0017 결정 불변). sequence·subscriptionId는 계속 test가 인자로 쓴다.
-  - `test/renderer/fake-transport.ts`에 모은다. wire 조립은 자유 함수 export(`streamMessage(subscriptionId, body)`, `rpcSuccess(requestId, result?)`, `rpcError(requestId, error)`, `StreamMessageBody` 타입), 기록 조회는 `FakeTransport` method(`subscribeCommands()`, `subscriptionIdFor(key, nth = 0)`, 조회 실패 시 throw)다.
-  - handshake factory 4벌은 생성자 옵션 `new FakeTransport({ manifest })`로 바꾼다. manifest는 기본값과 병합하지 않고 통째로 교체하며, 지정하지 않은 종류는 `[]`다. 옵션이 없으면 지금 기본 handshake를 유지한다. `create-renderer-api.test.ts`의 인라인 handshake는 그대로 둔다.
+  - `test/renderer/fake-transport.ts`에 모은다. wire 조립은 자유 함수 export(`streamMessage(subscriptionId, body)`, `rpcSuccess(requestId, result?)`, `rpcError(requestId, error)`, `StreamMessageBody` 타입. `rpcError`는 정상 RPC error 응답 2곳을 raw literal에서 빼기 위해 둔다), 기록 조회는 `FakeTransport` method(`subscribeCommands()`, `subscriptionIdFor(key, nth = 0)`, 조회 실패 시 throw)다.
+  - handshake factory 4벌은 생성자 옵션 `new FakeTransport({ manifest })`로 바꾼다. manifest는 기본값과 병합하지 않고 통째로 교체하며, 지정하지 않은 종류는 `[]`다. 옵션이 없으면 지금 기본 handshake를 유지한다. `create-renderer-api.test.ts`에서 정상 manifest를 넣고 API tree 모양을 보는 인라인 handshake 4곳도 이 옵션으로 옮긴다. handshake 자체를 검증하는 인라인(deferred·잘못된 값·reject)은 그대로 둔다.
   - 구독 ID 조회는 key 기준 `subscriptionIdFor(key, nth)` 하나로 통일한다. 같은 key 재구독은 `nth = 1`이다.
-  - builder는 `protocolVersion: 1`·`clientId: "client-1"`을 고정하고 envelope override 인자를 두지 않는다. envelope 이상(`protocolVersion: 2`, 다른 `clientId`)과 handshake 검증 입력은 raw literal로 남긴다. sequence·subscriptionId·requestId 이상은 builder 인자로 표현한다.
+  - builder는 `protocolVersion: 1`·`clientId: "client-1"`을 고정하고 envelope override 인자를 두지 않는다. envelope 이상(`protocolVersion: 2`, 다른 `clientId`)과 handshake 검증 입력은 raw literal로 남긴다. sequence·subscriptionId·requestId 이상은 builder 인자로 표현한다. 로컬 `message(..., clientId)` 셋째 인자로 쓰던 `remote-event.test.ts`의 `"old-client"` 지점은 raw literal로 바꾼다.
 
   **범위 밖(보류):** key 단위 가짜 Main. `src/` 변경. `test/renderer/` 밖 test. ADR 0017·`docs/architecture.md`·`CONTEXT.md` 변경. 리뷰 02 카드 08.
 
@@ -273,7 +273,7 @@
   - test 제목·단언(matcher·기대값) 변경 0건이다. 관측 대상 식이 로컬 helper에서 `FakeTransport` method로 바뀌는 것만 허용한다(`remote-event.test.ts`의 `expect(subscriptions(transport))` 3곳).
   - test 수가 기준(RD-034 뒤 37 files/686 tests, renderer 6 files/136 tests)과 같다. `vitest list test/renderer` 출력이 `dev`와 같다.
   - `test/renderer/*.test.ts`에서 로컬 helper 정의(`message`·`streamMessage`·`success`·`subscriptions`·`firstSubscriptionId`·`subscriptionIdFor`·`subscribeCommands`·`eventTransport`·`stateTransport`·`streamTransport`·`bridgeTransport`, `StreamMessageBody` 타입) 0건이다.
-  - `test/renderer/*.test.ts`의 `protocolVersion: 1` 잔존분이 handshake 검증 입력과 envelope 이상 test뿐이다(계획 시점 예상 14건).
+  - `test/renderer/*.test.ts`의 `protocolVersion: 1` 잔존분이 handshake 검증 입력과 envelope 이상 test뿐이다(계획 시점 예상 10건).
   - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`가 통과한다.
   - 리뷰 `02.html` 카드 07의 근거를 교정하고, 완료(범위 B)와 기각한 원안 1줄을 표시한다.
 
