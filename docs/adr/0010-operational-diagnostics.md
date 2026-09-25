@@ -79,6 +79,9 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 11. **sink 예외 격리**: 7개 기존 호출 지점과 모든 새 호출 지점을 공통 함수 `recordDiagnostic(sink, event)` 하나로 모은다. sink가 없으면 no-op이고, `record`가 동기로 throw해도 삼켜서 dispatch·stream 경로로 전파되지 않는다. `record`가 Promise를 반환해도 await하지 않는다(계약상 반환 타입이 `void`라 기대하지 않는다).
 12. **기본 무출력**: 어떤 진단 경로도 `console.*`이나 `process.stdout/stderr`를 쓰지 않는다. sink를 지정하지 않으면 완전히 조용하다.
 13. **`stream-queue` 빈도**: 기존 빈도(push·shift마다 기록)를 유지한다. 고빈도 관측이 필요하면 소비자가 sink 안에서 직접 샘플링(예: N번째 이벤트만 반영)한다 — 라이브러리가 빈도를 낮추지 않는다.
+
+    _(개정: RD-040 — 진단 sink가 `stream-dropped`를 받는 중 동기로 구독을 닫으면(detach·retire·unsubscribe) 그 push의 `stream-queue`는 기록하지 않는다. 한 구독의 진단은 `subscription-closed` 뒤에 나오지 않는다. 정상 경로의 push·shift마다 기록하는 빈도는 그대로다.)_
+
 14. **adapter → sink 경로**: `electron-adapter.ts`는 `DiagnosticsSink`에 직접 접근하지 않는다(`bindElectronBridge`는 `StreamBridgeServer`만 받는다). `src/main/diagnostics.ts`에 모듈 내부 Symbol `recordAdapterRejection`을 두고 `StreamBridgeServer`에 그 Symbol 키의 선택(`?`) 메서드를 붙인다. Symbol은 런타임 import가 없는 `diagnostics.ts`에 둔다 — preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들하므로, adapter가 `create-bridge-server.ts`를 값으로 import하면 preload 번들에 server와 `rxjs`가 끌려와 sandbox preload가 로드되지 않는다. `src/main/index.ts`는 이 Symbol을 export하지 않는다 — 라이브러리 사용자·테스트 fake가 작성하는 `StreamBridgeServer` 구현은 이 메서드가 없어도 `bindElectronBridge`와 계속 호환된다(메서드가 없으면 adapter는 기록을 건너뛴다). sink 설정 지점은 여전히 `createBridgeServer` 하나뿐이다.
 
     _(개정: [ADR 0016](0016-sender-admission.md) §14 — 이 Symbol 통로 자체가 삭제됐다, RD-018. 개정: RD-019 — 이 문단이 근거로 든 "preload가 `ELECTRON_BRIDGE_CHANNELS` 때문에 `electron-adapter.ts`를 번들한다"는 전제도 사라졌다. 채널 상수 정의가 `src/protocol/electron-channels.ts`로 옮겨졌고 preload는 이제 그 모듈에서 직접 import한다 — `electron-adapter.ts`를 번들할 이유가 없다. 두 개정은 서로 다른 변화다: RD-018은 Symbol을, RD-019는 이 문단의 인과관계 서술을 갱신한다.)_
