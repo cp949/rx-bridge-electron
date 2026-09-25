@@ -1,6 +1,6 @@
 # ADR 본문·코드 주석의 현재 코드 불일치
 
-- Status: 승격 (ROADMAP.md#RD-049)
+- Status: closed — RD-049 완료(ROADMAP.md#RD-049)
 - 출처: 2026-09-26 `docs/design/` 작성 중 코드 대조(`dev` @ `f261fce` 기준).
 
 설계 문서 작성 중 코드 대조로 확인. 설계 문서는 코드 기준으로 썼다. ADR은 기록이므로 본문을 고치지 않고 개정 note를 붙일지 판단한다.

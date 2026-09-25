@@ -12,6 +12,8 @@
 
 _(개정: ADR 0021 — Renderer API는 Proxy가 아니라 manifest로 만든 동결 객체 트리다. manifest에 있는 경로만 노출하는 규칙은 같다.)_
 
+_(개정: RD-049 — `InferBridge`는 [ADR 0012](0012-lightweight-type-contract.md) 이후 `BridgeApi<B>`다. "타입에도 키가 없다"는 계약 타입 노드에 카테고리 키 자체가 없을 때만 맞다. 빈 레코드(`{ a: { rpc: Record<string, never> } }`)로 선언하면 `BridgeApi<B>`에는 `rpc` 키가 생긴다(`src/contract/bridge-types.ts`의 `BridgeApiNode`). 런타임은 manifest에 entry가 없어 그 카테고리가 없다 — 도메인 전체가 비었으면 `api.a`부터 `undefined`다. 런타임 노출 규칙은 그대로다.)_
+
 ADR 0005의 나머지 결정은 유효하다: 루트 `api.dispose()`와 `api[Symbol.dispose]`는 같은 함수이고 첫 segment가 `dispose`인 도메인 이름은 예약한다. 스트림 이름에 `$` 접미사를 자동으로 붙이지 않는다 — 계층의 `state`·`event`가 종류를 드러내므로 접미사가 할 일도 없다. 호환 별칭은 두지 않는다. npm 배포 이력이 없고 저장소 내부 소비자(`apps/demo`, Electron fixture, README)는 이 결정과 함께 옮겼다. 외부 소비자는 `api.<domain>.<op>`를 op의 종류에 따라 `api.<domain>.rpc.<op>`, `.state.<op>`, `.event.<op>`로 바꾸고, operation 이름에 `/`를 썼다면 그 앞부분을 도메인 경로로 옮긴다.
 
 ## 개정: wire key 문법의 단일 소유 (RD-017)

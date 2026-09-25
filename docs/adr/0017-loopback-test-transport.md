@@ -49,6 +49,8 @@ export function createLoopbackTransport(
 
 `connect`·`invoke`의 요청·응답, `control`이 전달하는 stream 메시지 모두 `structuredClone`을 거친다 — 실제 IPC 경계처럼 참조를 공유하지 않는다. envelope 조립은 `withEnvelope`, 검사는 `parseRendererRpcRequest`·`parseRendererStreamCommand`(요청, 호출 시점에 동기), `parseHandshakeResponse`·`parseRpcResponse`·`parseStreamMessage`(응답·stream, clone 뒤)를 쓴다(모두 `../protocol/index.js`에서 값으로 import) — preload adapter(`src/preload/expose-bridge.ts`)가 쓰는 것과 같은 protocol 함수를 같은 위치에 둔다. 그래서 server가 handshake를 거부하면(`RpcResponse` 반환) `connect()`는 preload처럼 `parseHandshakeResponse`에서 reject되고, 거부 응답을 `HandshakeResponse`로 넘기지 않는다(RD-020 리뷰에서 교정 — 최초 구현은 거부 응답을 그대로 resolve했다). 참조를 그대로 넘기는 안(clone 생략)은 채택하지 않았다 — clone-불가능한 값(함수, class 인스턴스)이 실제로는 도달하지 못한다는 사실 자체가 이 adapter가 검증해야 할 대상이기 때문이다.
 
+_(개정: RD-049 — "양방향" clone은 범위가 좁다. `structuredClone`을 거치는 것은 `invoke` 요청, 모든 응답(handshake·RPC), stream 메시지다. handshake·cancel·control 요청은 `withEnvelope`로 새로 조립한 원시 필드 객체라 clone하지 않는다(`src/testing/loopback-transport.ts`). 어느 방향도 참조를 공유하지 않는다는 결과는 같다.)_
+
 ### 비동기 순서: `cancel`·`control`은 microtask로 미룬다
 
 `cancel(requestId)`와 `control(command)` 모두 `queueMicrotask`로 server 호출을 미룬다. `control()`이 반환되기 전에 `onStreamMessage` listener가 호출되지 않는다 — server가 만든 stream 메시지 전달 자체도 별도 `queueMicrotask`를 한 번 더 거친다(listener 호출을 `control()` 호출 스택과 분리). preload가 실제 IPC 왕복으로 갖는 비동기성의 최소 형태를 유지하기 위해서다. 동기 호출(server 메서드를 즉시 호출하고 즉시 listener를 부르는 안)은 채택하지 않았다 — 동기라면 `control()` 반환 직후 listener가 이미 불렸다고 가정하는 소비자 코드의 타이밍 버그를 test가 잡지 못한다.
@@ -60,6 +62,8 @@ export function createLoopbackTransport(
 ### `dispose()`: detach와 listener 해제만, server는 건드리지 않는다
 
 `dispose()`는 `server.attach`가 반환한 detach 함수를 호출하고 stream listener를 모두 지운다. 이후 `connect`·`invoke`는 reject, `cancel`·`control`은 조용히 무시한다(반복 호출 안전). `server` 자체는 dispose하지 않는다 — 한 `server`에 여러 loopback transport를 붙일 수 있으므로, transport 하나의 dispose가 다른 transport나 server 자체에 영향을 주면 안 된다. lifecycle 재현 API(`simulate(reason)`처럼 navigation·destroy 등 개별 수명 사건을 흉내 내는 기능)는 1차 범위에서 제외했다 — `dispose()`가 사실상 `destroyed`에 해당하는 것으로 충분하다고 봤다.
+
+_(개정: RD-049 — "`dispose()`가 사실상 `destroyed`에 해당"은 맞지 않다. `dispose()`는 detach다(retire 사유 `detach`). detach는 [ADR 0020](0020-stream-terminal-on-retire.md)대로 활성·`authorize` 대기 구독에 `error CANCELLED`를 보내고(loopback은 listener를 먼저 지워 전달되지 않는다), retired clientId 기록을 남긴다. `destroyed`는 기록을 지운다. 그래서 같은 `webContentsId`·`clientId`로 다시 붙으면 거부된다([TRP-006](../traps/TRP-006-loopback-retired-clientid-reconnect.md)).)_
 
 ### 의존 경계: `./testing`은 main을 타입으로만 참조한다
 

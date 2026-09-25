@@ -22,6 +22,8 @@
 
 `StreamHub`를 `Subscriptions`로 바꿔 subscriptionId 파싱·watermark·등록 조회·slot·`authorize` 대기와 호출·reject·consumer·교차 세션 fan-out·terminal·slot 반환을 모두 소유하게 한다. 세션별 상태는 모듈 안 `WeakMap<DocumentSession, …>`에 두고, retire는 `session.signal` abort 이벤트 하나로 받는다 — `DocumentSessions`가 대기·활성 목록을 따로 순회해 취소하지 않는다. `DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`)만 남는다. `create-bridge-server.ts`의 `controlStream`은 protocolVersion 검사·세션 해석(`establish`/`current`)·`sender-unauthorized` 판정·위임만 한다. _(개정: [ADR 0015](0015-rpc-request-lifecycle.md) — 이 RPC 수명주기 메서드들도 이후 `RpcRequests` 모듈로 옮겨져 `DocumentSessions`에서 전부 제거됐다. "만 남는다"는 이 결정 시점(RD-015)의 서술이다.)_
 
+_(개정: RD-049 — "retire는 `session.signal` abort 이벤트 하나로 받는다"와 아래 "수용한 동작 변화"의 `session.signal` abort listener 서술은 [ADR 0023](0023-session-retire-interface.md) 이후 맞지 않다. `DocumentSession`은 `signal`을 노출하지 않고 `retireReason`·`onRetire(listener)`를 노출한다. `Subscriptions`는 slot lease의 `onRetire`(`src/main/session-slots.ts`의 `SlotLease`)로 retire를 받는다. `DocumentSessions`가 목록을 순회해 취소하지 않는다는 결정은 그대로다.)_
+
 ## 결정: 세션 안에서는 `subscriptionId`만으로 구독을 식별한다
 
 이전에는 `JSON.stringify([webContentsId, frameId, clientId, subscriptionId])` 합성 키로 전역 Map을 썼다. 모든 stream 요청은 이미 `DocumentSessions.establish`/`current`가 `isCurrentMainFrame`(`routingId === frameId`)·origin·clientId를 확인해야 세션을 얻고, main frame 재탐색(`did-start-navigation`)은 그 세션을 retire한다. 따라서 같은 세션 안에서는 `subscriptionId`만 유일하면 충분하다 — 다른 세션(재사용된 clientId, 새 문서 등)은 애초에 다른 `DocumentSession` 객체라 별도 상태를 갖는다. 세션별 watermark가 같은 세션 안 재사용(늦은 도착·재전송)을 막는다.

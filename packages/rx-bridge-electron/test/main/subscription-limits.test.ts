@@ -237,7 +237,7 @@ describe("세션별 구독 한도", () => {
     expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
-  test("알 수 없는 key는 NOT_FOUND 뒤 슬롯이 반환된다", async () => {
+  test("알 수 없는 key는 NOT_FOUND로 끝나고 슬롯을 쓰지 않는다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
     const doc = rendererDocument(server);
     const sub = await doc.subscribe("state:hardware/missing$");

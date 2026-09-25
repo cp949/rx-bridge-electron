@@ -532,7 +532,7 @@
 
 ### ADR·코드 주석 불일치 정리 (출처: [.scratch/adr-code-drift/issues/01-adr-and-comment-drift.md](.scratch/adr-code-drift/issues/01-adr-and-comment-drift.md))
 
-- [ ] **RD-049 — ADR 본문·코드 주석·test 제목의 현재 코드 불일치를 개정 note와 주석 수정으로 해소한다.** 문서·주석만 바꾸며 동작 변경은 없다. 2026-09-26 `docs/design/` 작성 중 코드 대조로 발견하고 재확인했다(`dev` @ `3ae65aa`, 12개 항목 모두 유효). ADR은 기록이므로 본문을 고치지 않고 `_(개정: RD-049 — ...)_` note를 붙인다.
+- [x] **RD-049 — ADR 본문·코드 주석·test 제목의 현재 코드 불일치를 개정 note와 주석 수정으로 해소한다.** 문서·주석만 바꾸며 동작 변경은 없다. 2026-09-26 `docs/design/` 작성 중 코드 대조로 발견하고 재확인했다(`dev` @ `3ae65aa`, 12개 항목 모두 유효). ADR은 기록이므로 본문을 고치지 않고 `_(개정: RD-049 — ...)_` note를 붙인다.
   - ADR 0003(event buffer 위치), 0004(adapter parse), 0006(Admission 반환, dispose 뒤 handshake 응답 주체, RPC 종료 순서의 `rpc-settled`), 0007(빈 카테고리 레코드의 타입 키), 0009(결정 2·10·11·12, 신뢰 경계 서술), 0012(excess property check 범위), 0014(`onRetire`), 0015(`FakeTarget` frameId), 0017(loopback `dispose()`·clone 범위), 0024(snapshot 객체 생성 시점).
   - `docs/architecture.md`의 loopback "양방향 `structuredClone`" 서술을 clone 범위에 맞춘다.
   - `src/main/protocol-error.ts` 머리 주석의 낡은 전제(preload 번들, 타입 전용 import)를 지운다.
@@ -548,7 +548,7 @@
   - `src/` 변경은 주석뿐, `test/` 변경은 제목 1건.
   - 패키지 `pnpm check-types`·`pnpm test`, 루트 `pnpm lint`·`pnpm format:check` 통과.
 
-  계획: `_works/20260926-06-adr-code-drift/`.
+  계획: `_works/20260926-06-adr-code-drift/`. **결과:** 완료 조건 충족, 편차 없음. DELTA-01(RD-036 결과 문단의 잘린 꼬리 복원 — f29a75c의 용어 변경이 이미 적용돼 원문 전체가 아니라 꼬리만 되돌렸다. 가짜 제목 삭제, RD-047·RD-048 절을 RD-046 뒤로 이동(두 블록 본문은 `dev`와 동일), RD-036·RD-045 결과 문단의 제목 인용에서 `## ` 접두어 제거) → DELTA-02(ADR 0003·0004·0006(2곳)·0007·0009(2곳) note) → DELTA-03(ADR 0012(2곳)·0014·0015·0017(2곳)·0024 note, `docs/architecture.md` loopback clone 범위) → DELTA-04(`protocol-error.ts` 주석 3줄 삭제, test 제목 1건) → DELTA-05(패키지 `pnpm check-types`, `pnpm test` 46 files/881 tests, 루트 `pnpm lint`·`pnpm format:check` 통과. `git diff dev -- docs/adr` 삭제 줄 0건. `src/`·`test/` 변경 2파일, 주석·제목뿐). **발견:** 이슈 목록 밖 불일치 1건 — ADR 0012 event buffer 절의 `eventSource(data$, { buffer })`는 존재하지 않는 이름이다(실제 `broadcastEvent`·`scopedEvent`). 같은 RD-049 note로 처리했다.
 
 ## 현재 범위 밖의 확장
 

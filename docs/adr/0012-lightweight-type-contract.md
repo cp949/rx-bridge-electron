@@ -34,6 +34,8 @@ RPC 인자는 0개 또는 1개다(와이어가 항상 단일 `input`을 실어 �
 
 `impl: BridgeImpl<B>`은 계약이 선언한 모든 도메인·모든 operation에 대응하는 handler/source를 가진 일반 객체다. 계약과 구현이 어긋나면(누락, 초과, handler·source 형태 오류) 컴파일 타임에 실패한다 — 이것이 [ADR 0008](0008-contract-registration-match.md)이 생성 시점 런타임 재검증으로 잡던 문제(도메인·operation 누락/초과, handler·source 형태 오류)의 자리를 대신한다. `B`와 `impl`은 같은 타입 `B`에서 파생하므로, "같은 이름이지만 다른 정의의 도메인" 같은 참조 불일치 문제 자체가 성립하지 않는다(참조할 별도 `DomainContract` 객체가 없다).
 
+_(개정: RD-049 — "초과" operation의 컴파일 실패는 TypeScript excess property check라 `createBridgeServer`에 직접 넘긴 객체 리터럴에만 적용된다. 다른 변수를 거쳐 넘긴 객체의 초과 operation은 타입 검사를 통과한다. 그런 operation은 등록되어 Renderer에 노출되지만 계약 타입 `B`에 없어 `BridgeApi<B>` 타입에는 없다. 누락과 handler·source 형태 오류는 그대로 컴파일 실패다.)_
+
 타입을 우회해서(예: `as any`) 만든 impl에 operation이 빠져 있어도 manifest는 impl 키에서 생성하므로 그 operation은 애초에 manifest에 없다 — Renderer에 노출되지 않는다. 이는 "빠진 구현을 던져서 잡는다"가 아니라 "빠진 구현은 노출될 방법이 없다"는 다른 보장이다. impl 런타임 형태 검사(handler가 함수인지, state가 `getValue`를 갖는지 등)는 타입을 우회한 값을 상대로 한 방어선으로 유지한다 — 정상적으로 타입 검사를 통과시켜 만든 impl에서는 발동하지 않는다.
 
 ## 결정: `schemas`·`errors`는 계약과 같은 모양의 선택적 중첩 map이다
@@ -66,6 +68,8 @@ createBridgeServer<AppBridge>(impl, {
 계약에는 buffer capacity·overflow 선언 자리가 없다(계약이 타입이라 값을 담을 수 없다). Main에서 source를 만들 때 옵션으로 준다: `eventSource(data$, { buffer })`. 생략하면 기본값(`capacity: 100`, `overflow: "error"`)을 쓴다. capacity 검증(양의 정수 등)은 기존 `event()` descriptor가 하던 검사를 그대로 옮긴다.
 
 > **개정 (RD-029, `ROADMAP.md#RD-029`)**: 위 capacity 검증은 "source 생성 시점"이 아니라 `createBridgeServer` 등록 단계(registration)로 옮겼다. `overflow` 값(`"error" | "drop-oldest" | "drop-newest"`)도 같은 단계에서 검증하며, 이전에는 오타가 조용히 `drop-oldest`로 동작했다. `broadcastEvent`/`scopedEvent` helper는 이제 검증을 하지 않는 순수 생성자다 — 헬퍼를 쓰지 않고 직접 작성한 source 객체 리터럴도 registration이 같은 규칙으로 검증하므로, 헬퍼 우회로 검증을 피할 수 없다.
+
+_(개정: RD-049 — 위 본문의 `eventSource(data$, { buffer })`는 실제 API 이름이 아니다. Event source helper는 `broadcastEvent(source, { buffer })`·`scopedEvent(factory, { buffer })`다(`src/main/sources.ts`).)_
 
 ## 결정: `payloadLimits`는 서버 옵션이다(ADR 0004 개정)
 

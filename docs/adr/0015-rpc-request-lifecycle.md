@@ -48,6 +48,8 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 
 가설이 실제로 깨지는 Electron 경로가 있다면(예: `did-start-navigation` 없이 라우팅이 바뀌는 미확인 엣지 케이스), `authorize`가 오래 걸리는 요청이 이미 retire된 옛 세션을 향해 `FORBIDDEN`이나 성공 응답을 잘못 돌려줄 수 있다. 이 가설을 직접 검증하는 자동 test는 없다. 단위 test의 `FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않아 frame 교체를 관측하지 못하고(`.scratch/sender-admission-unification/issues/01-fake-target-frame-id.md`), Electron acceptance(multi-window reload·창 닫기)는 retire 경로만 거치며 `authorize` 대기 중 navigation 시나리오를 갖지 않는다. 가설이 깨졌다는 의심이 들면 Electron acceptance에 navigation 중 `authorize`가 지연되는 시나리오를 추가해 재현을 시도한다. _(개정: [ADR 0019](0019-navigation-retire-on-commit.md) — RD-025가 이 문단이 예로 든 "`did-start-navigation` 없이 라우팅이 바뀌는 엣지 케이스"를 실제로 실행 실험(DELTA-02, Electron 44.4.5)으로 찾아냈다: 오류 페이지 commit(`ERR_CONNECTION_REFUSED`)이 `did-navigate` 없이 `did-fail-load`만 내며 `routingId`를 바꾼다. retire 신호를 `did-navigate` + `did-fail-load`(routingId 일치) 조합으로 바꿔 이 case를 포함하도록 고쳤다 — "틀렸을 때의 대가"가 우려한 시나리오가 실제로 존재했고, 대응은 이 ADR이 기록한다.)_
 
+_(개정: RD-049 — "`FakeTarget.isCurrentMainFrame`은 `frameId`를 비교하지 않는다"는 RD-018 이후 맞지 않다. `FakeTarget`(`test/main/fake-ipc.ts`)은 현재 main frame id를 들고 `frameId`까지 비교한다. 단위 test가 frame 교체 뒤 거부를 관측할 수 있다.)_
+
 ## 동작
 
 **불변**: 와이어 프로토콜, 오류 코드, 진단 이벤트 종류·개수·판정 순서, ADR 0009 §10(handler 실제 종료 시 slot 반환), ADR 0011의 `authorize` 예외 → `INTERNAL` 분류, `CANCELLED` 우선 순위. 중복 `requestId`가 앞선 요청을 취소하는 기존 동작도 유지한다(`rpc-requests.test.ts` "Duplicate requestId handling"이 고정한다).

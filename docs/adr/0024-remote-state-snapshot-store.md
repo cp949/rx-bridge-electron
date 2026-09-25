@@ -14,6 +14,8 @@ React 사용처는 `RemoteState<T>`를 `useSyncExternalStore`에 연결하기 �
 
 `snapshot` 참조 안정성은 이미 보장돼 있다. `LocalGeneration#snapshot`(`packages/rx-bridge-electron/src/renderer/local-generation.ts:49`)은 값이 바뀔 때만 새 snapshot 객체를 만들고, 그 외에는 같은 참조를 돌려준다. adapter가 `getSnapshot`에서 캐시를 따로 둘 필요가 없다는 근거다.
 
+_(개정: RD-049 — "값이 바뀔 때만 새 snapshot 객체"는 맞지 않다. `LocalGeneration`은 상태 전이와 `next` 도착마다 새 snapshot 객체를 만든다. 같은 값이 다시 와도 새 객체다. 그 사이의 읽기는 같은 참조를 돌려준다 — `getSnapshot` 캐시가 필요 없다는 결론은 그대로다.)_
+
 ## 결정
 
 `/renderer`에 `snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T>`를 추가한다.

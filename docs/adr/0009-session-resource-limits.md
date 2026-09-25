@@ -23,6 +23,12 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 12. **payload 한도 적용 지점**: `electron-adapter.ts`와 `preload/expose-bridge.ts`는 envelope 구조(깊이·항목 수·문자열 길이 모두 `Number.MAX_SAFE_INTEGER`)만 검사하고 payload 한도는 강제하지 않는다. payload 한도는 서버가 계약 기준(`contract.payloadLimits`와 기본값의 병합)으로만 적용한다. 계약이 기본값보다 큰 한도를 선언하면 그 한도가 adapter를 거쳐 handler까지 실제로 적용된다.
 13. **ID 계약**: 워터마크 대상은 stream `subscriptionId`뿐(RPC `requestId`는 대상이 아니다). 형식은 `<nonce>:<scope>:<seq base36>`(`src/renderer/ids.ts`의 `createOpaqueId` 산출 형식, `src/protocol/opaque-id.ts`의 `parseOpaqueIdSequence`가 파싱한다). 형식 오류는 `INVALID_ARGUMENT`로 reject한다. 워터마크 이하(재사용·늦은 도착)는 메시지 없이 조용히 무시한다.
 
+_(개정: RD-049 — 결정 2·10·11·12의 일부 서술은 현재 코드와 다르다. 결정 자체(적용 위치, 오류 코드, slot 계산 단위)는 그대로다. 항목별 차이는 아래와 같다.)_
+
+- 결정 2·12: 서버 생성은 `createBridgeServer(impl, options)`이고 payload 한도 기준은 `options.payloadLimits`와 기본값의 병합이다([ADR 0012](0012-lightweight-type-contract.md)). 결정 12의 "adapter는 envelope 구조만 검사"는 [ADR 0016](0016-sender-admission.md) 이후 맞지 않다 — adapter는 parse하지 않고 server가 parse한다. preload는 크기 한도 없이 구조만 검사한다.
+- 결정 10: 응답을 먼저 보내는 것은 deadline뿐이다. Renderer `cancel`과 세션 retire는 handler에 넘긴 `AbortSignal`만 abort하고, 응답(`CANCELLED`)은 handler가 끝날 때 보낸다. 그보다 deadline이 먼저 오면 그 시점에 `CANCELLED`로 보낸다(`src/main/rpc-requests.ts`의 `dispatch`). slot을 handler 종료 때 반환한다는 규칙은 그대로다.
+- 결정 11: `NOT_FOUND`는 slot을 즉시 반환하는 경로가 아니라 slot을 잡기 전에 끝난다. [ADR 0014](0014-stream-lookup-before-authorize.md)가 등록 조회를 slot 획득 앞으로 옮겼다. RPC도 같다([ADR 0015](0015-rpc-request-lifecycle.md)).
+
 ### 기본값
 
 | 옵션                              | 기본값     | 비고                                                        |
@@ -36,6 +42,9 @@ Main에는 RPC timeout이 없었다(Renderer `rpc-client.ts`의 로컬 30초 tim
 ## 대안과 기각 사유
 
 - **Renderer가 사전 차단**: Renderer는 신뢰 경계 밖에 있는 코드가 아니지만, 여러 Renderer 프로세스가 Main 자원을 공유하는 구조상 강제 지점은 공유 자원을 실제로 쥔 Main이어야 한다. Renderer 쪽 차단은 우회 가능한 힌트일 뿐이라 채택하지 않았다.
+
+_(개정: RD-049 — "Renderer는 신뢰 경계 밖에 있는 코드가 아니지만"은 [ADR 0016](0016-sender-admission.md)의 "Renderer는 신뢰 경계 밖"과 충돌한다. 현재 기준은 후자다. Main이 강제 지점이어야 한다는 기각 근거는 그대로 성립한다 — Renderer 쪽 차단은 우회할 수 있다.)_
+
 - **계약에 자원 한도를 둔다**: `payloadLimits`처럼 계약 단위로 두면 도메인 작성자가 배포 환경의 동시성·시간 상한까지 결정하게 된다. 자원 한도는 서버를 띄우는 쪽(운영자)의 책임이라 서버 생성 옵션으로 분리했다.
 - **와이어 프로토콜에 `timeoutMs`를 싣는다**: Main deadline은 Renderer의 로컬 timeout과 독립적으로 동작해도 충분하다 — 둘 중 먼저 확정되는 응답이 이긴다. 프로토콜을 바꾸면 기존 transport 구현체와의 호환성이 깨진다.
 - **FIFO used-ID 목록**: 사용한 ID를 유한 크기 FIFO 큐로 보관하는 방식도 검토했으나, 큐가 가득 차면 오래된 항목이 빠져나가 그 ID가 다시 유효해지는 재사용 윈도우가 생긴다. 워터마크는 순서가 보장되는 한 채널(`channels.control`)에서 도착 순서와 생성 순서가 같다는 전제로 O(1) 메모리와 완전한 재사용 차단을 동시에 만족한다.
