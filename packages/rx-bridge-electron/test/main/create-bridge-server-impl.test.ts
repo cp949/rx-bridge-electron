@@ -525,6 +525,24 @@ describe("createBridgeServer(impl, options): payloadLimits", () => {
       }),
     ).toThrow(TypeError);
   });
+
+  test.each([
+    "maxDepth",
+    "maxEntries",
+    "maxStringBytes",
+    "maxTotalBytes",
+  ] as const)("명시적 undefined인 %s는 생성 시점에 실패한다", (key) => {
+    const { impl } = buildImpl();
+    expect(() =>
+      createBridgeServer(impl, {
+        payloadLimits: { [key]: undefined } as never,
+      }),
+    ).toThrow(
+      new RegExp(
+        `^Payload limit '${key}' must be a non-negative safe integer\\.$`,
+      ),
+    );
+  });
 });
 
 describe("createBridgeServer(impl, options): 세션 자원 한도", () => {

@@ -67,7 +67,9 @@ const PAYLOAD_LIMIT_KEYS = [
 
 /**
  * `options.payloadLimits`를 검증한다. 부분 지정을 허용한다(`ResourceLimits`와
- * 같은 패턴) — 생략한 필드는 `defaultLimits`를 그대로 쓴다.
+ * 같은 패턴) — 생략한 필드는 `defaultLimits`를 그대로 쓴다. 명시적
+ * `undefined`는 네 필드(`maxDepth`·`maxEntries`·`maxStringBytes`·
+ * `maxTotalBytes`) 모두 거부한다(생략과 다르다).
  */
 function assertPartialPayloadLimits(
   payloadLimits: Partial<PayloadLimits> | undefined,
@@ -78,20 +80,12 @@ function assertPartialPayloadLimits(
       throw new TypeError(`Unknown payload limit '${key}'.`);
     }
   }
-  for (const key of ["maxDepth", "maxEntries", "maxStringBytes"] as const) {
+  for (const key of PAYLOAD_LIMIT_KEYS) {
     if (!Object.hasOwn(payloadLimits, key)) continue;
     const value = payloadLimits[key];
     if (!Number.isSafeInteger(value) || (value as number) < 0) {
       throw new TypeError(
         `Payload limit '${key}' must be a non-negative safe integer.`,
-      );
-    }
-  }
-  if (Object.hasOwn(payloadLimits, "maxTotalBytes")) {
-    const value = payloadLimits.maxTotalBytes;
-    if (value !== undefined && (!Number.isSafeInteger(value) || value < 0)) {
-      throw new TypeError(
-        "Payload limit 'maxTotalBytes' must be a non-negative safe integer.",
       );
     }
   }
