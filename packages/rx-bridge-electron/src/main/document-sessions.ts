@@ -12,6 +12,15 @@ export interface DocumentSession {
   readonly target: AttachedTarget;
   readonly clientId: string;
   readonly signal: AbortSignal;
+  /** retire 사유. 살아 있는 세션은 `undefined`다. */
+  readonly retireReason: RetireReason | undefined;
+  /**
+   * retire 통지를 등록한다. 이미 retire된 세션이면 `listener`를 반환 전에
+   * 동기 호출하고 no-op 해제 함수를 돌려준다. 그 외에는 호출마다 독립
+   * 등록이다 — 같은 함수를 두 번 등록하면 두 번 호출된다. 반환된 해제
+   * 함수는 자기 등록만 지우고 멱등이다.
+   */
+  onRetire(listener: () => void): () => void;
 }
 
 /** sender admission이 낼 수 있는 사유만 좁힌 부분집합. */
@@ -31,19 +40,60 @@ export type Admission =
 type LifecycleReason =
   "main-frame-navigation" | "render-process-gone" | "destroyed";
 
-/** `session.signal`에 실리는 retire 사유. lifecycle 3종에 detach·dispose·새 clientId를 더한다. */
+/** `retireReason`에 실리는 retire 사유. lifecycle 3종에 detach·dispose·새 clientId를 더한다. */
 export type RetireReason = LifecycleReason | "detach" | "dispose" | "replaced";
+
+/** `DocumentSession` 구현. 비공개 `AbortController`와 사유를 쥔다. module 밖에는 interface로만 보인다. */
+class SessionImpl implements DocumentSession {
+  public readonly target: AttachedTarget;
+  public readonly clientId: string;
+  readonly #controller = new AbortController();
+  #reason: RetireReason | undefined;
+
+  public constructor(target: AttachedTarget, clientId: string) {
+    this.target = target;
+    this.clientId = clientId;
+  }
+
+  public get signal(): AbortSignal {
+    return this.#controller.signal;
+  }
+
+  public get retireReason(): RetireReason | undefined {
+    return this.#reason;
+  }
+
+  /** 사유를 먼저 설정하고 abort한다. 두 번째 호출은 no-op이다. */
+  public retire(reason: RetireReason): void {
+    if (this.#reason !== undefined) return;
+    this.#reason = reason;
+    this.#controller.abort(reason);
+  }
+
+  public onRetire(listener: () => void): () => void {
+    if (this.#reason !== undefined) {
+      listener();
+      return () => {};
+    }
+    const wrapper = (): void => listener();
+    this.#controller.signal.addEventListener("abort", wrapper, {
+      once: true,
+    });
+    return () => {
+      this.#controller.signal.removeEventListener("abort", wrapper);
+    };
+  }
+}
 
 interface Attachment {
   readonly target: AttachedTarget;
   readonly removeLifecycle: () => void;
-  current: DocumentSession | undefined;
+  current: SessionImpl | undefined;
 }
 
 export class DocumentSessions {
   readonly #attachments = new Map<number, Attachment>();
   readonly #retiredClients = new Map<number, Set<string>>();
-  readonly #controllers = new WeakMap<DocumentSession, AbortController>();
   readonly #diagnostics: DiagnosticsSink | undefined;
   readonly #resourceLimits: ResourceLimits;
   #disposed = false;
@@ -106,13 +156,7 @@ export class DocumentSessions {
       attachment.current !== undefined
     )
       return { reason: "sender-unauthorized" };
-    const controller = new AbortController();
-    const session: DocumentSession = {
-      target: attachment.target,
-      clientId,
-      signal: controller.signal,
-    };
-    this.#controllers.set(session, controller);
+    const session = new SessionImpl(attachment.target, clientId);
     attachment.current = session;
     recordDiagnostic(this.#diagnostics, { type: "session-opened" });
     return { session };
@@ -122,7 +166,7 @@ export class DocumentSessions {
     const admitted = this.#admit(sender);
     if (typeof admitted === "string") return { reason: admitted };
     const session = admitted.current;
-    return session?.clientId === clientId && !session.signal.aborted
+    return session?.clientId === clientId && session.retireReason === undefined
       ? { session }
       : { reason: "sender-unauthorized" };
   }
@@ -167,7 +211,7 @@ export class DocumentSessions {
         if (oldest === undefined) break;
         retired.delete(oldest);
       }
-      this.#controllers.get(session)?.abort(reason);
+      session.retire(reason);
     }
     if (reason === "destroyed") this.#retiredClients.delete(webContentsId);
   }
