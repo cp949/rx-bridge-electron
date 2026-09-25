@@ -15,11 +15,12 @@ interface StateBridge {
   };
 }
 
+const CONNECTION_KEY = "state:hardware/connection$";
+const CONNECTION_MANIFEST = { state: [CONNECTION_KEY] };
+
 describe("renderer RemoteState", () => {
   test("shares one remote generation and updates the snapshot before delivering legitimate undefined", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const observed: Array<{
@@ -40,9 +41,7 @@ describe("renderer RemoteState", () => {
       type: "subscribe",
       key: "state:hardware/connection$",
     });
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -78,15 +77,11 @@ describe("renderer RemoteState", () => {
   });
 
   test("delivers the current value synchronously to a late subscriber joining an active generation", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -115,15 +110,11 @@ describe("renderer RemoteState", () => {
   });
 
   test("delivers a legitimate undefined current value synchronously to a late subscriber", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -145,15 +136,11 @@ describe("renderer RemoteState", () => {
   });
 
   test("does not open an additional remote subscription for a late subscriber", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const first = state.subscribe(() => {});
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -164,26 +151,18 @@ describe("renderer RemoteState", () => {
         values: ["a"],
       }),
     );
-    expect(
-      transport.controls.filter((command) => command.type === "subscribe"),
-    ).toHaveLength(1);
+    expect(transport.subscribeCommands()).toHaveLength(1);
 
     const second = state.subscribe(() => {});
-    expect(
-      transport.controls.filter((command) => command.type === "subscribe"),
-    ).toHaveLength(1);
+    expect(transport.subscribeCommands()).toHaveLength(1);
 
     first.unsubscribe();
     second.unsubscribe();
-    expect(
-      transport.controls.filter((command) => command.type === "subscribe"),
-    ).toHaveLength(1);
+    expect(transport.subscribeCommands()).toHaveLength(1);
   });
 
   test("does not deliver to a late subscriber joining before subscribed", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
@@ -194,9 +173,7 @@ describe("renderer RemoteState", () => {
     expect(firstValues).toEqual([]);
     expect(secondValues).toEqual([]);
 
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -215,16 +192,12 @@ describe("renderer RemoteState", () => {
   });
 
   test("does not deliver to a late subscriber joining after subscribed but before the first batch", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -249,9 +222,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("replays the in-flight value once to a subscriber that joins reentrantly from another subscriber's callback", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
@@ -264,9 +235,7 @@ describe("renderer RemoteState", () => {
         second = state.subscribe((innerValue) => secondValues.push(innerValue));
       }
     });
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -286,16 +255,12 @@ describe("renderer RemoteState", () => {
   });
 
   test("delivers the current value synchronously to firstValueFrom and does not disturb existing subscribers", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
-    const subscriptionId = transport.subscriptionIdFor(
-      "state:hardware/connection$",
-    );
+    const subscriptionId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(subscriptionId, { type: "subscribed", sequence: 0 }),
     );
@@ -333,9 +298,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("does not replay a value after a remote complete and before a fresh subscribed", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
@@ -346,7 +309,7 @@ describe("renderer RemoteState", () => {
         completed += 1;
       },
     });
-    const firstId = transport.subscriptionIdFor("state:hardware/connection$");
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -363,9 +326,7 @@ describe("renderer RemoteState", () => {
     expect(nextValues).toEqual([]);
     expect(state.snapshot).toEqual({ status: "connecting", active: true });
 
-    const subscribeCommands = transport.controls.filter(
-      (command) => command.type === "subscribe",
-    );
+    const subscribeCommands = transport.subscribeCommands();
     expect(subscribeCommands).toHaveLength(2);
     const secondId = subscribeCommands[1]!.subscriptionId;
     expect(secondId).not.toBe(firstId);
@@ -385,9 +346,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("does not replay a value after a remote error and before a fresh subscribed", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
@@ -396,7 +355,7 @@ describe("renderer RemoteState", () => {
       next: (value) => firstValues.push(value),
       error: (error) => errors.push(error),
     });
-    const firstId = transport.subscriptionIdFor("state:hardware/connection$");
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -417,9 +376,7 @@ describe("renderer RemoteState", () => {
     expect(nextValues).toEqual([]);
     expect(state.snapshot).toEqual({ status: "connecting", active: true });
 
-    const subscribeCommands = transport.controls.filter(
-      (command) => command.type === "subscribe",
-    );
+    const subscribeCommands = transport.subscribeCommands();
     expect(subscribeCommands).toHaveLength(2);
     const secondId = subscribeCommands[1]!.subscriptionId;
     expect(secondId).not.toBe(firstId);
@@ -439,14 +396,12 @@ describe("renderer RemoteState", () => {
   });
 
   test("opens a new ID without replaying stale data and discards the closed generation", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const firstValues: Array<string | undefined> = [];
     const first = state.subscribe((value) => firstValues.push(value));
-    const firstId = transport.subscriptionIdFor("state:hardware/connection$");
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -457,12 +412,7 @@ describe("renderer RemoteState", () => {
 
     const nextValues: Array<string | undefined> = [];
     const next = state.subscribe((value) => nextValues.push(value));
-    const subscribeCommands = transport.controls.filter(
-      (
-        command,
-      ): command is Extract<typeof command, { readonly type: "subscribe" }> =>
-        command.type === "subscribe",
-    );
+    const subscribeCommands = transport.subscribeCommands();
     const secondId = subscribeCommands[1]?.subscriptionId;
     expect(secondId).toBeDefined();
     expect(secondId).not.toBe(firstId);
@@ -488,9 +438,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("opens a fresh generation when a terminal callback subscribes again", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
     const state = api.hardware.state.connection$;
     const snapshots: unknown[] = [];
@@ -503,7 +451,7 @@ describe("renderer RemoteState", () => {
         snapshots.push(state.snapshot);
       },
     });
-    const firstId = transport.subscriptionIdFor("state:hardware/connection$");
+    const firstId = transport.subscriptionIdFor(CONNECTION_KEY);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -514,9 +462,7 @@ describe("renderer RemoteState", () => {
       streamMessage(firstId, { type: "complete", sequence: 2 }),
     );
 
-    const subscribeCommands = transport.controls.filter(
-      (command) => command.type === "subscribe",
-    );
+    const subscribeCommands = transport.subscribeCommands();
     expect(subscribeCommands).toHaveLength(2);
     const secondId = subscribeCommands[1]!.subscriptionId;
     expect(secondId).not.toBe(firstId);
@@ -541,9 +487,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("registers one listener per API, handles synchronous delivery, and removes it on disposal", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     transport.controlHook = (command) => {
       if (command.type !== "subscribe") {
         return;
@@ -580,9 +524,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("exposes dispose() as the same function reference as Symbol.dispose", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     const api = await createRendererApi<StateBridge>({ transport });
 
     expect(typeof api.dispose).toBe("function");
@@ -590,9 +532,7 @@ describe("renderer RemoteState", () => {
   });
 
   test("api.dispose() tears down active stream subscriptions", async () => {
-    const transport = new FakeTransport({
-      manifest: { state: ["state:hardware/connection$"] },
-    });
+    const transport = new FakeTransport({ manifest: CONNECTION_MANIFEST });
     transport.controlHook = (command) => {
       if (command.type !== "subscribe") {
         return;

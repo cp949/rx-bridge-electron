@@ -12,17 +12,18 @@ interface EventBridge {
   };
 }
 
+const FAULT_KEY = "event:hardware/fault$";
+const FAULT_MANIFEST = { event: [FAULT_KEY] };
+
 describe("renderer remote Event", () => {
   test("shares a generation, gates values on subscribed, and never replays", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     const first = api.hardware.event.fault$.subscribe((value) =>
       firstValues.push(value),
     );
-    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const id = transport.subscriptionIdFor(FAULT_KEY, 0);
 
     transport.emitStream(
       streamMessage(id, {
@@ -63,9 +64,7 @@ describe("renderer remote Event", () => {
   });
 
   test("delivers a batch synchronously in order before ACK and ignores non-increasing sequences", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
@@ -76,7 +75,7 @@ describe("renderer remote Event", () => {
     const subscription = api.hardware.event.fault$.subscribe((value) =>
       timeline.push(value),
     );
-    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const id = transport.subscriptionIdFor(FAULT_KEY, 0);
     transport.emitStream(
       streamMessage(id, { type: "subscribed", sequence: 5 }),
     );
@@ -106,9 +105,7 @@ describe("renderer remote Event", () => {
   });
 
   test("acknowledges an accepted batch after a synchronous last-subscriber unsubscribe", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const timeline: string[] = [];
     transport.controlHook = (command) => {
@@ -123,7 +120,7 @@ describe("renderer remote Event", () => {
       timeline.push(value);
       subscription.unsubscribe();
     });
-    const id = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const id = transport.subscriptionIdFor(FAULT_KEY, 0);
     transport.emitStream(
       streamMessage(id, { type: "subscribed", sequence: 0 }),
     );
@@ -140,9 +137,7 @@ describe("renderer remote Event", () => {
   });
 
   test("closes only the current generation and discards wrong-session and closed-ID messages", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const firstValues: string[] = [];
     let completed = 0;
@@ -152,7 +147,7 @@ describe("renderer remote Event", () => {
         completed += 1;
       },
     });
-    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const firstId = transport.subscriptionIdFor(FAULT_KEY, 0);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -177,7 +172,7 @@ describe("renderer remote Event", () => {
     api.hardware.event.fault$.subscribe({
       error: (error) => errors.push(error),
     });
-    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
+    const secondId = transport.subscriptionIdFor(FAULT_KEY, 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
       streamMessage(secondId, { type: "subscribed", sequence: 0 }),
@@ -198,9 +193,7 @@ describe("renderer remote Event", () => {
   });
 
   test("opens a fresh generation when an error callback subscribes again", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
@@ -209,7 +202,7 @@ describe("renderer remote Event", () => {
         api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
       },
     });
-    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const firstId = transport.subscriptionIdFor(FAULT_KEY, 0);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -222,7 +215,7 @@ describe("renderer remote Event", () => {
     );
 
     expect(transport.subscribeCommands()).toHaveLength(2);
-    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
+    const secondId = transport.subscriptionIdFor(FAULT_KEY, 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
       streamMessage(firstId, { type: "batch", sequence: 2, values: ["late"] }),
@@ -241,9 +234,7 @@ describe("renderer remote Event", () => {
   });
 
   test("opens a fresh generation when a complete callback subscribes again", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const api = await createRendererApi<EventBridge>({ transport });
     const nextValues: string[] = [];
 
@@ -252,7 +243,7 @@ describe("renderer remote Event", () => {
         api.hardware.event.fault$.subscribe((value) => nextValues.push(value));
       },
     });
-    const firstId = transport.subscriptionIdFor("event:hardware/fault$", 0);
+    const firstId = transport.subscriptionIdFor(FAULT_KEY, 0);
     transport.emitStream(
       streamMessage(firstId, { type: "subscribed", sequence: 0 }),
     );
@@ -261,7 +252,7 @@ describe("renderer remote Event", () => {
     );
 
     expect(transport.subscribeCommands()).toHaveLength(2);
-    const secondId = transport.subscriptionIdFor("event:hardware/fault$", 1);
+    const secondId = transport.subscriptionIdFor(FAULT_KEY, 1);
     expect(secondId).not.toBe(firstId);
     transport.emitStream(
       streamMessage(firstId, { type: "batch", sequence: 2, values: ["late"] }),
@@ -280,9 +271,7 @@ describe("renderer remote Event", () => {
   });
 
   test("routes subscribed and a synchronous first batch through the pre-registered generation", async () => {
-    const transport = new FakeTransport({
-      manifest: { event: ["event:hardware/fault$"] },
-    });
+    const transport = new FakeTransport({ manifest: FAULT_MANIFEST });
     const wireOrder: string[] = [];
     transport.controlHook = (command) => {
       if (command.type === "subscribe") {

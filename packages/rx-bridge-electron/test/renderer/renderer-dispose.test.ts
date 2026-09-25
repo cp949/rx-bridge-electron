@@ -24,6 +24,12 @@ interface AppBridge {
   };
 }
 
+const BRIDGE_MANIFEST = {
+  rpc: ["rpc:hardware/connect"],
+  state: ["state:hardware/status$"],
+  event: ["event:hardware/log$"],
+};
+
 type UnsubscribeCommand = Extract<
   RendererStreamCommand,
   { readonly type: "unsubscribe" }
@@ -41,13 +47,7 @@ async function setup(): Promise<{
   readonly transport: FakeTransport;
   readonly api: RendererApi<AppBridge>;
 }> {
-  const transport = new FakeTransport({
-    manifest: {
-      rpc: ["rpc:hardware/connect"],
-      state: ["state:hardware/status$"],
-      event: ["event:hardware/log$"],
-    },
-  });
+  const transport = new FakeTransport({ manifest: BRIDGE_MANIFEST });
   const api = await createRendererApi<AppBridge>({ transport });
   return { transport, api };
 }
@@ -435,13 +435,7 @@ describe("api.dispose() root shutdown", () => {
   });
 
   test("RPC 확정 중 rpc-settled sink에서 마지막 구독을 해제하면 종료 정리가 한 번만 닫는다", async () => {
-    const transport = new FakeTransport({
-      manifest: {
-        rpc: ["rpc:hardware/connect"],
-        state: ["state:hardware/status$"],
-        event: ["event:hardware/log$"],
-      },
-    });
+    const transport = new FakeTransport({ manifest: BRIDGE_MANIFEST });
     const sinkEvents: RendererDiagnostic[] = [];
     let unsubscribeState: (() => void) | undefined;
     const api = await createRendererApi<AppBridge>({
@@ -493,13 +487,7 @@ describe("api.dispose() root shutdown", () => {
   });
 
   test("재진입: batch 전달 중 next 콜백에서 dispose하면 그 batch의 acknowledge를 보내지 않는다", async () => {
-    const transport = new FakeTransport({
-      manifest: {
-        rpc: ["rpc:hardware/connect"],
-        state: ["state:hardware/status$"],
-        event: ["event:hardware/log$"],
-      },
-    });
+    const transport = new FakeTransport({ manifest: BRIDGE_MANIFEST });
     const sinkEvents: RendererDiagnostic[] = [];
     const api = await createRendererApi<AppBridge>({
       transport,
@@ -557,13 +545,7 @@ describe("api.dispose() root shutdown", () => {
   });
 
   test("재진입: 구독 해제 중 subscription-closed sink에서 dispose해도 그 구독의 unsubscribe는 1회 보낸다", async () => {
-    const transport = new FakeTransport({
-      manifest: {
-        rpc: ["rpc:hardware/connect"],
-        state: ["state:hardware/status$"],
-        event: ["event:hardware/log$"],
-      },
-    });
+    const transport = new FakeTransport({ manifest: BRIDGE_MANIFEST });
     const sinkEvents: RendererDiagnostic[] = [];
     let api!: RendererApi<AppBridge>;
     api = await createRendererApi<AppBridge>({
@@ -607,13 +589,7 @@ describe("api.dispose() root shutdown", () => {
   test.each(REENTRY_MATRIX)(
     "재진입 매트릭스: %s 지점에서 %s 재진입은 ADR 0006 종료 계약을 지킨다",
     async (point, action) => {
-      const transport = new FakeTransport({
-        manifest: {
-          rpc: ["rpc:hardware/connect"],
-          state: ["state:hardware/status$"],
-          event: ["event:hardware/log$"],
-        },
-      });
+      const transport = new FakeTransport({ manifest: BRIDGE_MANIFEST });
 
       let api!: RendererApi<AppBridge>;
       let hookFired = false;
