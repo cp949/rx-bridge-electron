@@ -1,6 +1,6 @@
 # operator를 거친 source의 동기 방출 teardown 예외가 진단 없이 버려진다
 
-- Status: open — 한계로 문서화됨. 해결 여부 미결정.
+- Status: closed — 후보 3(한계 유지) 채택. 코드·ADR 변경 없음.
 - 출처: RD-045 리뷰(2026-09-26, `dev` @ `42d3144`). ADR 0025 "한계" 첫 항목.
 
 ## 사실
@@ -38,3 +38,5 @@
 - 채택하면 위 고정 test의 기대를 진단 1건으로 바꾸고, ADR 0025 한계 항목을 개정한다.
 
 ## Comments
+
+- 2026-09-26: 사용자 결정으로 후보 3을 채택하고 닫는다. 후보 2는 구독 중 stop 뒤 도착한 error가 teardown 예외인지 규약을 어긴 source의 늦은 `error`인지 구분하지 못한다. 발생 조건은 operator 경유, 구독 중 동기 terminal, throw하는 teardown이 모두 겹칠 때뿐이다. 고정 test와 ADR 0025 "한계" 항목은 현재 동작을 그대로 기술하므로 바꾸지 않는다.
