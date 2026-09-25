@@ -226,16 +226,21 @@ export class DeliveryWindow {
   /**
    * 값 하나를 수락한다. `accepting`이 아니면 무시한다. buffer에 push하고,
    * Event면 `onDropped`(dropped > 0) → `onQueueDepth`(push 뒤 depth) 순으로
-   * 부른다. `onDropped`가 재진입으로 창을 종결·닫아도 `onQueueDepth`까지 부른
-   * 뒤에 상태를 다시 확인한다(현재 진단 순서 보존). 그 뒤 overflow면
-   * `STREAM_OVERFLOW` terminal을 기록하고 flush 규칙을 적용한다.
+   * 부른다. 각 callback 직후 상태를 다시 확인하고, 종결·닫힘이면 남은
+   * callback 없이 무출력으로 반환한다(닫힌 구독의 진단 꼬리 방지). 그 뒤
+   * overflow면 `STREAM_OVERFLOW` terminal을 기록하고 flush 규칙을 적용한다.
    */
   public accept(value: BridgeValue): AcceptResult {
     if (!this.accepting) {
       return { message: undefined, overflowed: false };
     }
     const result = this.#buffer.push(value);
-    if (result.dropped > 0) this.#onDropped(result.dropped);
+    if (result.dropped > 0) {
+      this.#onDropped(result.dropped);
+      if (this.#closed || this.#concluded) {
+        return { message: undefined, overflowed: false };
+      }
+    }
     if (result.depth !== undefined) this.#onQueueDepth(result.depth);
     if (this.#closed || this.#concluded) {
       return { message: undefined, overflowed: false };

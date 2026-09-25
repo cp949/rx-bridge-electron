@@ -234,7 +234,7 @@ describe("close", () => {
 });
 
 describe("진단 callback 안 재진입", () => {
-  test("onDropped 안에서 preempt해도 onQueueDepth는 불리고 accept는 무출력이다", () => {
+  test("onDropped 안에서 preempt하면 onQueueDepth를 부르지 않고 accept는 무출력이다", () => {
     const events: string[] = [];
     let window!: DeliveryWindow;
     const onDropped = (count: number): void => {
@@ -254,8 +254,33 @@ describe("진단 callback 안 재진입", () => {
     events.length = 0;
 
     const result = window.accept(3);
-    expect(events).toEqual(["dropped:1", "depth:1"]);
+    expect(events).toEqual(["dropped:1"]);
     expect(result).toEqual({ message: undefined, overflowed: false });
+  });
+
+  test("onDropped 안에서 close하면 onQueueDepth를 부르지 않고 accept는 무출력이다", () => {
+    const events: string[] = [];
+    let window!: DeliveryWindow;
+    const onDropped = (count: number): void => {
+      events.push(`dropped:${count}`);
+      window.close();
+    };
+    const onQueueDepth = (depth: number): void => {
+      events.push(`depth:${depth}`);
+    };
+    window = createEventDeliveryWindow(1, "drop-newest", {
+      onDropped,
+      onQueueDepth,
+    });
+    window.open();
+    window.accept(1);
+    window.accept(2);
+    events.length = 0;
+
+    const result = window.accept(3);
+    expect(events).toEqual(["dropped:1"]);
+    expect(result).toEqual({ message: undefined, overflowed: false });
+    expect(window.closed).toBe(true);
   });
 
   test("shift 뒤 onQueueDepth 안에서 preempt하면 batch를 반환하지 않는다", () => {
