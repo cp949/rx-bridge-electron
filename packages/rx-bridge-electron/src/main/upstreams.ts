@@ -22,7 +22,8 @@ import type {
  *   사용자 코드 안에서 동기 `disconnect`가 같은 토큰을 끊을 수 있기
  *   때문이다 — 그러면 이어서 진행하지 않는다.
  * - 연결 요청이 던지면 그 토큰은 연결되지 않은 상태로 남는다(공유 member에서도
- *   빠진다). `disconnect`는 이미 없는 토큰에는 아무 일도 하지 않는다.
+ *   빠지고, 마지막 member였으면 upstream도 해지된다). `disconnect`는 이미
+ *   없는 토큰에는 아무 일도 하지 않는다.
  * - 공유 upstream의 `next`·`error`·`complete`는 그 시점의 member 스냅샷을
  *   순회하고, 각 member를 부르기 직전에 그 토큰이 아직 이 공유에 연결돼
  *   있는지 확인한다. 앞선 member의 sink가 동기로 뒤 member를 `disconnect`하면
@@ -32,8 +33,7 @@ import type {
  *   공유를 건드리지 않게 하기 위해서다.
  * - upstream terminal(`error`·`complete`) 뒤 공유 entry 정리는 이 module이
  *   하지 않는다. 각 member의 sink가 받은 뒤 자기 토큰으로 `disconnect`를
- *   불러야 정리된다(현재 `Subscriptions`와 같다) — 지금 이 DELTA에서는 아직
- *   `Subscriptions`가 그렇게 하도록 배선하지 않는다.
+ *   불러야 정리된다 — `Subscriptions`는 terminal을 기록하면서 해제한다.
  * - `disconnect`는 호출자 identity(토큰 객체)로만 식별하고 멱등이다. 호출자는
  *   handle을 저장하지 않는다.
  *
@@ -64,11 +64,7 @@ interface SharedEntry {
 type TokenEntry =
   | { readonly kind: "connecting" }
   | { readonly kind: "scoped"; readonly subscriber: Subscriber<BridgeValue> }
-  | {
-      readonly kind: "shared";
-      readonly key: string;
-      readonly shared: SharedEntry;
-    };
+  | { readonly kind: "shared"; readonly shared: SharedEntry };
 
 export class Upstreams {
   readonly #shared = new Map<string, SharedEntry>();
@@ -79,9 +75,50 @@ export class Upstreams {
    * Event는 개별 갈래를 탄다(`registration`이 어느 쪽인지 정한다).
    *
    * scoped factory 예외나 non-Observable 반환, 늦은 합류 `getValue()` 예외는
-   * 이 호출이 동기로 던진다. 두 경우 모두 토큰은 연결되지 않은 상태로 남는다.
+   * 이 호출이 동기로 던진다. 던지기 전에 `disconnect(token)`으로 정리하므로
+   * 토큰은 연결되지 않은 상태로 남고, 그 토큰이 공유의 마지막 member였으면
+   * upstream도 해지된다(사용자 코드가 다른 member를 동기로 끊었을 수 있다).
    */
   public connect(
+    token: object,
+    registration: UpstreamRegistration,
+    context: BridgeContext,
+    sink: UpstreamSink,
+  ): void {
+    try {
+      this.#connect(token, registration, context, sink);
+    } catch (error) {
+      this.disconnect(token);
+      throw error;
+    }
+  }
+
+  /**
+   * 토큰의 연결을 끊는다. 미연결 토큰이면 아무 일도 하지 않는다(멱등). 공유
+   * member가 이 토큰을 마지막으로 빠지면 upstream을 해지하고, 그 key의 현재
+   * entry가 이 entry와 같을 때만 map에서 지운다.
+   */
+  public disconnect(token: object): void {
+    const entry = this.#tokens.get(token);
+    if (entry === undefined) return;
+    this.#tokens.delete(token);
+    if (entry.kind === "scoped") {
+      entry.subscriber.unsubscribe();
+      return;
+    }
+    if (entry.kind === "shared") {
+      entry.shared.members.delete(token);
+      if (entry.shared.members.size === 0) {
+        entry.shared.upstream?.unsubscribe();
+        if (this.#shared.get(entry.shared.key) === entry.shared)
+          this.#shared.delete(entry.shared.key);
+      }
+    }
+    // kind === "connecting": 등록만 지우면 된다. connect() 쪽이 사용자 코드
+    // 뒤 이 토큰이 사라졌는지 확인해 더 진행하지 않는다.
+  }
+
+  #connect(
     token: object,
     registration: UpstreamRegistration,
     context: BridgeContext,
@@ -111,32 +148,7 @@ export class Upstreams {
   }
 
   /**
-   * 토큰의 연결을 끊는다. 미연결 토큰이면 아무 일도 하지 않는다(멱등). 공유
-   * member가 이 토큰을 마지막으로 빠지면 upstream을 해지하고, 그 key의 현재
-   * entry가 이 entry와 같을 때만 map에서 지운다(C4).
-   */
-  public disconnect(token: object): void {
-    const entry = this.#tokens.get(token);
-    if (entry === undefined) return;
-    this.#tokens.delete(token);
-    if (entry.kind === "scoped") {
-      entry.subscriber.unsubscribe();
-      return;
-    }
-    if (entry.kind === "shared") {
-      entry.shared.members.delete(token);
-      if (entry.shared.members.size === 0) {
-        entry.shared.upstream?.unsubscribe();
-        if (this.#shared.get(entry.key) === entry.shared)
-          this.#shared.delete(entry.key);
-      }
-    }
-    // kind === "connecting": 등록만 지우면 된다. connect() 쪽이 사용자 코드
-    // 뒤 이 토큰이 사라졌는지 확인해 더 진행하지 않는다.
-  }
-
-  /**
-   * scoped 갈래: 토큰마다 factory가 만든 upstream을 혼자 쓴다. 순서(C1)는
+   * scoped 갈래: 토큰마다 factory가 만든 upstream을 혼자 쓴다. 순서는
    * 토큰을 `connecting`으로 선등록 → factory 호출 → 재확인 → Observable 검사
    * → `Subscriber` 저장 → subscribe다. `Subscriber`를 subscribe 전에 저장해야
    * 동기 방출 중 `disconnect`가 그 `Subscriber`를 끊는다(rxjs가 이후 알림을
@@ -149,18 +161,10 @@ export class Upstreams {
     sink: UpstreamSink,
   ): void {
     this.#tokens.set(token, { kind: "connecting" });
-    let source: Observable<BridgeValue>;
-    try {
-      source = factory(context);
-    } catch (error) {
-      this.#tokens.delete(token);
-      throw error;
-    }
+    const source = factory(context);
     if (this.#tokens.get(token)?.kind !== "connecting") return;
-    if (!(source instanceof Observable)) {
-      this.#tokens.delete(token);
+    if (!(source instanceof Observable))
       throw new TypeError("Scoped factory must return an Observable.");
-    }
     const subscriber = new Subscriber<BridgeValue>({
       next: (value) => sink.next(value),
       error: (error: unknown) => sink.error(error),
@@ -171,7 +175,7 @@ export class Upstreams {
   }
 
   /**
-   * State·broadcast Event 공용 공유 갈래. 순서(C1)는 entry 확보 → member 추가
+   * State·broadcast Event 공용 공유 갈래. 순서는 entry 확보 → member 추가
    * → (첫 member면) `Subscriber` 저장 후 subscribe, (늦은 합류 State면) member
    * 추가 뒤 `getValue()`를 동기로 sink에 전달이다. 첫 member의 현재값은
    * `getValue()`가 아니라 upstream subscribe의 방출로 온다.
@@ -193,7 +197,7 @@ export class Upstreams {
     }
     const entry = shared;
     entry.members.set(token, sink);
-    this.#tokens.set(token, { kind: "shared", key, shared: entry });
+    this.#tokens.set(token, { kind: "shared", shared: entry });
 
     if (isNew) {
       const upstream = new Subscriber<BridgeValue>({
@@ -209,14 +213,7 @@ export class Upstreams {
     }
 
     if (getValue === undefined) return;
-    let value: BridgeValue;
-    try {
-      value = getValue();
-    } catch (error) {
-      entry.members.delete(token);
-      this.#tokens.delete(token);
-      throw error;
-    }
+    const value = getValue();
     const current = this.#tokens.get(token);
     if (
       current === undefined ||
@@ -228,8 +225,8 @@ export class Upstreams {
   }
 
   /**
-   * 공유 upstream의 `next`·`error`·`complete`를 member 스냅샷에 fan-out한다
-   * (C3). 각 member를 부르기 직전에 그 토큰이 아직 이 entry에 연결돼 있는지
+   * 공유 upstream의 `next`·`error`·`complete`를 member 스냅샷에 fan-out한다.
+   * 각 member를 부르기 직전에 그 토큰이 아직 이 entry에 연결돼 있는지
    * 확인한다 — 앞 member의 sink가 동기로 뒤 member를 `disconnect`했으면
    * 건너뛴다.
    */

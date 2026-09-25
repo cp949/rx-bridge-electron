@@ -100,7 +100,7 @@ function endNotice(
 }
 
 /**
- * `WindowMessage`를 wire `StreamMessage`로 조립하는 순수 함수(C10). envelope
+ * `WindowMessage`를 wire `StreamMessage`로 조립하는 순수 함수. envelope
  * 조립(`withEnvelope`)을 이 함수 하나로 모은다 — 창(`DeliveryWindow`)은
  * envelope도 `subscriptionId`도 모른다(RD-034 결정 3 유지).
  */
@@ -474,7 +474,7 @@ export class Subscriptions {
       const error = endNotice(cause, sessionSignal);
       if (error === undefined) return;
       const message = window.preempt(error);
-      // C9: 거부 경로에서 창을 쥔 쪽은 이 메서드 하나뿐이라 `preempt`가
+      // 거부 경로에서 창을 쥔 쪽은 이 메서드 하나뿐이라 `preempt`가
       // `undefined`(닫힘·종결)를 돌려주는 경우는 도달하지 않는다.
       if (message === undefined) return;
       send(streamFrame(command.clientId, command.subscriptionId, message));

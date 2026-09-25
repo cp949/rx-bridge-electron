@@ -10,7 +10,7 @@
  * 본다. sink는 호출 기록 배열이다. 공유 upstream이 terminal(`error`·
  * `complete`)을 낸 뒤의 정리는 이 module이 하지 않는다 — 각 member가 받은
  * terminal에 이어 자기 토큰으로 `disconnect`를 불러야 정리된다(실제
- * `Subscriptions`가 하는 것과 같다, DELTA-02 "## 결정" 참고). 그래서 아래
+ * `Subscriptions`가 하는 것과 같다). 그래서 아래
  * terminal 관련 test의 sink는 필요한 곳에서 자기 disconnect를 함께 흉내
  * 낸다.
  */
@@ -584,5 +584,35 @@ describe("늦은 합류 getValue() throw", () => {
       { type: "next", value: 2 },
       { type: "next", value: 3 },
     ]);
+  });
+
+  test("getValue()가 기존 토큰을 모두 해제한 뒤 throw하면 upstream을 해지하고 다음 연결은 새 subscribe를 만든다", () => {
+    const upstreams = new Upstreams();
+    const key = "state:d/op";
+    const subject = new BehaviorSubject<BridgeValue>(1);
+    const subscribeSpy = vi.spyOn(subject, "subscribe");
+    const tokenA = {};
+    let reentrant = false;
+    const source = Object.assign(subject, {
+      getValue: (): BridgeValue => {
+        if (!reentrant) return 1;
+        upstreams.disconnect(tokenA);
+        throw new Error("getValue boom");
+      },
+    }) as StateRegistrationEntry["source"];
+    const registration = stateRegistration(key, source);
+
+    upstreams.connect(tokenA, registration, fakeContext(), recordingSink());
+    reentrant = true;
+    expect(() =>
+      upstreams.connect({}, registration, fakeContext(), recordingSink()),
+    ).toThrow("getValue boom");
+    expect(subject.observed).toBe(false);
+
+    reentrant = false;
+    const sinkC = recordingSink();
+    upstreams.connect({}, registration, fakeContext(), sinkC);
+    expect(subscribeSpy).toHaveBeenCalledTimes(2);
+    expect(sinkC.calls).toEqual([{ type: "next", value: 1 }]);
   });
 });
