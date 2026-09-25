@@ -12,7 +12,7 @@
 - "런타임 동작" 절은 16줄에 3,928자.
 - 코드 스팬(백틱) 468개. ADR 링크 15개.
 - 정의 없이 쓰는 내부 용어: `generation` 7회, `retire` 5회, `manifest`·`handshake`·`wire`·`slot`·`envelope` 각 4회(`CONTEXT.md` 용어).
-- 절 순서: Hello world(88줄) 바로 뒤 배선 세부(배선 기본값 11줄, 명시 형태 78줄). Renderer 사용법(프레임워크 연동, Event·RPC 직접 사용, TanStack Query)은 297행 이후 "런타임 동작"의 하위 절.
+- 절 순서: Hello world(88줄) 바로 뒤 연결 설정 세부(연결 설정 기본값 11줄, 명시 형태 78줄). Renderer 사용법(프레임워크 연동, Event·RPC 직접 사용, TanStack Query)은 297행 이후 "런타임 동작"의 하위 절.
 - RD마다 절을 덧붙여 왔다(평탄화 RD-044, 진단 RD-045, TanStack 이슈 02, Event·RPC 직접 사용 `1bd9ce8`).
 
 ## 원인
@@ -37,7 +37,7 @@ README에서 줄이거나 링크로 바꿀 후보. 오른쪽이 이미 같은 �
 | ---------------------------------- | ------------------------------------------- |
 | 100행 impl 형태 검사·manifest 생성 | "계약 형태와 등록" 29행                     |
 | 102-111행 `BridgeOperation` 표     | 33행                                        |
-| 117-127행 배선 기본값 표           | "배선 기본값" 52-54행                       |
+| 117-127행 연결 설정 기본값 표      | "연결 설정 기본값" 52-54행                  |
 | 235행 요청 처리 순서               | 35행                                        |
 | 297행 API 트리·경로 규칙           | "RPC와 스트림 계약" 87행                    |
 | 299행 `api.dispose()` 의미         | 87행                                        |
@@ -61,7 +61,7 @@ README는 사용자 가이드로 둔다. 문단당 규칙 1~2개, 목차를 두�
 4. Renderer에서 쓰기: RPC(`CallOptions`·오류 코드 표 1개), State(snapshot 4상태), Event, 오류 처리(종료 원인 표 1개), `api.dispose()`
 5. 프레임워크 연동: React 레시피, Event·RPC 직접 사용, TanStack Query
 6. Main 구현: impl·`authorize`, 스키마, 허용 에러 코드, Event buffer, State source 평탄화
-7. 배선: 보안 설정, 기본값 표, 명시 형태
+7. Electron 연결: 보안 설정, 기본값 표, 명시 형태
 8. 한도·진단: payload·resource limits 표, Main/Renderer 진단 예제
 9. Testing(loopback)
 10. 범위 밖

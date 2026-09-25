@@ -6,11 +6,11 @@
 
 ## 상황
 
-RPC 요청 1건의 상태(slot 점유, 취소용 `AbortController`, retire 연동)는 `DocumentSessions`가 `tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`·`rpcInFlightCount` 6개 메서드와 `SessionState`의 `active`·`runningRpc`, 전역 `#globalRunningRpc`로 나눠 들고 있었다. `create-bridge-server.ts`의 `dispatchRpc`가 이 메서드들과 `rpc-dispatcher.ts`의 `findRpc`·`dispatchRegistered`를 순서대로 손으로 배선했다(등록 조회 → slot → `authorize` → `aborted || current() !== session` 재검사 → deny → `dispatchRegistered` → finally에서 slot 반환·`rpc-finished`). `#retire`도 별도로 `active` Map을 순회하며 진행 중 RPC를 취소하는 루프를 가지고 있었다.
+RPC 요청 1건의 상태(slot 점유, 취소용 `AbortController`, retire 연동)는 `DocumentSessions`가 `tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`·`rpcInFlightCount` 6개 메서드와 `SessionState`의 `active`·`runningRpc`, 전역 `#globalRunningRpc`로 나눠 들고 있었다. `create-bridge-server.ts`의 `dispatchRpc`가 이 메서드들과 `rpc-dispatcher.ts`의 `findRpc`·`dispatchRegistered`를 순서대로 손으로 이어 붙였다(등록 조회 → slot → `authorize` → `aborted || current() !== session` 재검사 → deny → `dispatchRegistered` → finally에서 slot 반환·`rpc-finished`). `#retire`도 별도로 `active` Map을 순회하며 진행 중 RPC를 취소하는 루프를 가지고 있었다.
 
 "요청이 취소됐으면 다른 분류보다 `CANCELLED`가 우선한다"(ADR 0011) 규칙은 `rpc-dispatcher.ts`의 `dispatchRegistered` 안 5개 지점(`authorize` 뒤, `parseBridgeValue` 실패, input schema 실패, handler 뒤, output schema 실패)과 `create-bridge-server.ts`의 `authorize` 뒤 재검사 지점에서 각자 따로 판정했다. 이 재검사(`current() !== session`)는 세션이 `authorize` 대기 중에 더 이상 현재가 아니게 됐는지를 `dispatchRpc`가 `DocumentSessions.current()`를 다시 호출해 확인하는 것으로, `RpcRequests`가 세션 해석 방법을 알아야만 할 수 있는 검사였다.
 
-이 상태와 순서 배선은 [ADR 0014](0014-stream-lookup-before-authorize.md)가 구독(stream) 쪽에 적용한 것과 같은 모양의 문제였다(ROADMAP RD-015). RD-015 완료 시점에 ADR 0014는 "`DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기만 남는다"고 적었고(범위 밖으로 명시), 이 ADR이 그 후속(RD-016)이다.
+이 상태와 순서 연결은 [ADR 0014](0014-stream-lookup-before-authorize.md)가 구독(stream) 쪽에 적용한 것과 같은 모양의 문제였다(ROADMAP RD-015). RD-015 완료 시점에 ADR 0014는 "`DocumentSessions`는 이제 구독 개념을 모른다: RPC 수명주기만 남는다"고 적었고(범위 밖으로 명시), 이 ADR이 그 후속(RD-016)이다.
 
 ## 결정: `RpcRequests` 모듈 하나가 RPC 요청 수명주기 전체를 소유한다
 

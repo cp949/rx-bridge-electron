@@ -102,7 +102,7 @@
    - `control`: unsubscribe(`close`·`dispose`)·acknowledge 전송 throw. dispose 뒤 억제한 acknowledge는 전송 시도 자체가 아니므로 여기서 기록하지 않는다([ADR 0006](0006-shutdown-contract.md)의 RD-031 개정 note 참고).
    - 중복 방지: `transport.invoke` 실패는 `rpc-settled`(`transport-failed`)만, subscribe 전송 실패는 `subscription-closed`(`transport-failed`)만 기록한다.
 
-9. **`handshake-failed`**: `createRendererApi`가 reject하기 직전에 1회 기록한다. `connect` throw·reject `transport`. `parseHandshakeResponse`의 `VERSION_MISMATCH` `version-mismatch`, 그 외 parse 실패 `malformed`. manifest entry 거부(wire key 문법·카테고리·경로 충돌) `invalid-manifest`. reject 값(`RemoteError("INTERNAL")`과 문구)은 바꾸지 않는다. `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 배선 오류라 기록하지 않는다.
+9. **`handshake-failed`**: `createRendererApi`가 reject하기 직전에 1회 기록한다. `connect` throw·reject `transport`. `parseHandshakeResponse`의 `VERSION_MISMATCH` `version-mismatch`, 그 외 parse 실패 `malformed`. manifest entry 거부(wire key 문법·카테고리·경로 충돌) `invalid-manifest`. reject 값(`RemoteError("INTERNAL")`과 문구)은 바꾸지 않는다. `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 연결 설정 오류라 기록하지 않는다.
 
 10. **기록 시점**: 내부 상태를 갱신한 뒤, 사용자 통지(Promise reject/resolve, subscriber `next`·`error`·`complete`) 전에 동기로 기록한다. sink 안에서 API를 다시 호출해도 내부 상태는 이미 일관된다(종료 경로에서 이 "이미 일관된다"가 실제로 성립하는 근거는 [ADR 0006](0006-shutdown-contract.md)의 RD-030 개정 note를 본다 — `dispose()`의 `rpc-settled` sink 재진입 시점에는 종료 플래그가 수명 객체 하나에서 이미 확정돼 있다).
 

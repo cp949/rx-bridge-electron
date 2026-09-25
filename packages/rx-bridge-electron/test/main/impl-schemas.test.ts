@@ -3,7 +3,7 @@
 // `.scratch/lightweight-contract/spec.md`의 확정 결정 3(요청 처리 순서:
 // `parseBridgeValue(input)` → 입력 스키마 → handler → 출력 스키마 →
 // `parseBridgeValue`+clone)·5(errors map, 목록 밖 코드는 안전한 오류)를
-// 새 impl 기반 API 기준으로 확인한다. DELTA-03/04가 이미 배선해 둔 공유
+// 새 impl 기반 API 기준으로 확인한다. DELTA-03/04가 이미 연결해 둔 공유
 // dispatcher(`rpc-dispatcher.ts`)·`output-boundary.ts`·`subscriptions.ts`가
 // descriptor 경로와 같은 동작을 내는지가 핵심이다.
 import { describe, expect, test } from "vitest";

@@ -158,7 +158,7 @@ type Authorize = (
 1. `resolvePayloadLimits(options.payloadLimits)`. 실패 시 `TypeError`. [08. Payload와 오류 모델](08-payload-and-errors.md)
 2. `buildRegistrationTableFromImpl(impl, schemas, errors)`. 아래 순회.
 3. `resolveResourceLimits(options.resourceLimits)`. [09. 세션 자원 한도](09-resource-limits.md)
-4. `manifestFromTable(table)`로 manifest를 만들고 서버 모듈(`DocumentSessions`·`Subscriptions`·`RpcRequests`)을 배선한다.
+4. `manifestFromTable(table)`로 manifest를 만들고 서버 모듈(`DocumentSessions`·`Subscriptions`·`RpcRequests`)을 조립한다.
 
 잘못된 impl과 잘못된 `resourceLimits`가 함께 있으면 등록 오류가 먼저 난다.
 

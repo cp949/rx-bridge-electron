@@ -286,7 +286,7 @@ export interface CreateRendererApiOptions {
 export async function createRendererApi<B>(
   options?: CreateRendererApiOptions,
 ): Promise<RendererApi<B>> {
-  // `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 배선
+  // `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`는 연결 설정
   // 오류라 기록하지 않는다(ADR 0022 결정 9) — sink 조회보다 먼저 던진다.
   const resolvedTransport = options?.transport ?? resolveGlobalTransport();
   const diagnosticsSink = options?.diagnostics;

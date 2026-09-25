@@ -1,4 +1,4 @@
-# 배선 인자를 선택화하고 고정 기본값을 둔다: namespace/role `"default"`, globalName `"rxBridge"`, electron는 호출 시점 namespace import
+# 연결 설정 인자를 선택화하고 고정 기본값을 둔다: namespace/role `"default"`, globalName `"rxBridge"`, electron는 호출 시점 namespace import
 
 - 관련: RD-014, 체크리스트 `_works/_completed/20260924-08-wiring-shorthand/checklist.md`(로컬 작업 폴더)
 
@@ -6,7 +6,7 @@
 
 ## 문제
 
-`bindElectronBridge`·`exposeBridgeInMainWorld`·`createRendererApi`는 지금 `ipcMain`·`contextBridge`·`ipcRenderer`·`namespace`·`role`·`transport`를 전부 호출자가 명시해야 한다. README hello-world 기준으로 배선 코드가 Main·preload·Renderer 세 지점에 걸쳐 필요 이상으로 길다. 목표는 이 배선을 import를 제외하고 Main 3줄·preload 2줄·Renderer 2줄 이하로 줄이는 것이다. 이 문서는 그 축약이 기존 계약(채널 형식, 서버·어댑터 분리, 보안 경계)을 건드리지 않고 인자 선택화만으로 이루어지도록 기본값과 해석 순서를 고정한다.
+`bindElectronBridge`·`exposeBridgeInMainWorld`·`createRendererApi`는 지금 `ipcMain`·`contextBridge`·`ipcRenderer`·`namespace`·`role`·`transport`를 전부 호출자가 명시해야 한다. README hello-world 기준으로 연결 설정 코드가 Main·preload·Renderer 세 지점에 걸쳐 필요 이상으로 길다. 목표는 이 연결 설정 코드를 import를 제외하고 Main 3줄·preload 2줄·Renderer 2줄 이하로 줄이는 것이다. 이 문서는 그 축약이 기존 계약(채널 형식, 서버·어댑터 분리, 보안 경계)을 건드리지 않고 인자 선택화만으로 이루어지도록 기본값과 해석 순서를 고정한다.
 
 ## 결정: 기존 함수의 인자를 선택화한다. 새 API·병행 API는 만들지 않는다
 
@@ -32,7 +32,7 @@
 
 ## 결정: hello-world에서 `pagehide` dispose 등록을 뺀다. `dispose`는 SPA teardown 용도로 문서화한다
 
-지금까지 hello-world 예제는 Renderer 쪽에서 `window.addEventListener("pagehide", () => api.dispose())`를 등록했다. 이 등록을 hello-world 배선에서 제거한다. 근거:
+지금까지 hello-world 예제는 Renderer 쪽에서 `window.addEventListener("pagehide", () => api.dispose())`를 등록했다. 이 등록을 hello-world 연결 설정에서 제거한다. 근거:
 
 - [ADR 0002](0002-renderer-document-session-ownership.md)에 따라 브리지 자원의 소유자는 BrowserWindow가 아니라 `webContents`의 현재 main-frame 문서 세션이다. navigation·reload·renderer 종료·detach 시 Main이 그 세션을 이미 retire하고 진행 중 작업을 중단한다.
 - [ADR 0006](0006-shutdown-contract.md)이 고정한 Main 쪽 종료 경로(`DocumentSessions`의 lifecycle 이벤트에 따른 세션 정리)는 Renderer가 `dispose()`를 호출하는지와 무관하게 동작한다. 즉 `pagehide`에서 `dispose()`를 부르지 않아도 창을 닫거나 reload하면 Main 자원은 회수된다.

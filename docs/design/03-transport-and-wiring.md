@@ -1,4 +1,4 @@
-# 03. Transport와 배선
+# 03. Transport와 연결 설정
 
 ## 1. 목적과 범위
 
@@ -7,7 +7,7 @@
 - Renderer는 Main에 무엇으로, 어떤 채널로 요청하는가. 무엇이 preload 경계를 넘지 않는가.
 - 와이어 메시지(envelope)는 어떤 모양이고 누가 어디서 검사하는가.
 - Electron adapter는 무엇을 하고 무엇을 하지 않는가.
-- 배선 인자를 생략했을 때 어떤 기본값을 쓰고, 왜 Main·preload·Renderer가 같은 상수를 공유해야 하는가.
+- 연결 설정 인자를 생략했을 때 어떤 기본값을 쓰고, 왜 Main·preload·Renderer가 같은 상수를 공유해야 하는가.
 - test 전용 loopback transport는 어디에 있고 preload와 무엇이 같은가.
 
 다루지 않는 것:
@@ -119,7 +119,7 @@ Renderer가 preload 뒤에서 다시 parse하는 이유: `createRendererApi`는 
 1. Renderer main world에 노출되는 브리지 능력은 `BridgeTransport` 5개 메서드뿐이다. 노출 객체는 `Object.freeze`로 동결한다.
 2. `clientId`는 preload가 소유한다. Renderer 입력은 envelope 필드를 덮어쓸 수 없다.
 3. 모든 와이어 메시지는 `protocolVersion: 1`과 `clientId`를 가진다.
-4. envelope parse·admission·판정·진단은 server(`StreamBridgeServer`)만 한다. adapter는 번역과 채널 배선만 한다.
+4. envelope parse·admission·판정·진단은 server(`StreamBridgeServer`)만 한다. adapter는 번역과 채널 연결만 한다.
 5. Main과 preload의 기본 namespace는 같은 상수 `DEFAULT_ELECTRON_BRIDGE_NAMESPACE`다. preload 기본 `globalName`과 `createRendererApi`가 읽는 전역 이름은 같은 상수 `DEFAULT_BRIDGE_GLOBAL_NAME`이다.
 6. `allowedOrigins`에는 기본값이 없다.
 7. `src/{preload,protocol,renderer,testing}`은 `src/main/*`을 값으로 import하지 않는다(`import type`만 허용, eslint `@typescript-eslint/no-restricted-imports`가 강제). `src/protocol/electron-channels.ts`는 런타임 import가 없는 leaf다.
@@ -146,7 +146,7 @@ Renderer가 preload 뒤에서 다시 parse하는 이유: `createRendererApi`는 
 - stream: preload가 command를 parse하고 envelope를 붙여 send → server `controlStream` → 이 event의 `senderFrame`으로 stream 메시지 송신 → preload `parseStreamMessage` → Renderer 재검사.
 - preload의 stream listener wrapper는 parse 실패와 listener 예외를 모두 삼킨다.
 
-### 배선 기본값
+### 연결 설정 기본값
 
 | 인자                          | 함수                                            | 생략 시                                                                    |
 | ----------------------------- | ----------------------------------------------- | -------------------------------------------------------------------------- |
@@ -164,7 +164,7 @@ Renderer가 preload 뒤에서 다시 parse하는 이유: `createRendererApi`는 
 기본값이 어긋나면 실패하는 이유:
 
 - namespace: Main과 preload가 각자 기본값을 두면 한쪽만 생략했을 때 채널 이름이 달라진다. preload의 invoke는 handler 없는 채널로 가고, send는 아무도 받지 않는다. 조용한 실패를 막으려고 두 지점이 `src/protocol/electron-channels.ts`의 같은 상수를 쓴다. `/main`은 이 상수를 재수출만 한다.
-- globalName: preload가 노출한 이름과 `createRendererApi`가 읽는 이름이 다르면 축약형 Renderer 배선이 항상 `TypeError`로 실패한다. 두 지점이 `src/renderer/transport.ts`의 같은 상수를 쓴다. 이 파일은 `electron`에 의존하지 않아 preload·Renderer 번들이 모두 import한다. `globalName`을 바꾼 앱은 전역을 직접 읽어 `transport`로 넘긴다.
+- globalName: preload가 노출한 이름과 `createRendererApi`가 읽는 이름이 다르면 축약형 Renderer 연결 설정이 항상 `TypeError`로 실패한다. 두 지점이 `src/renderer/transport.ts`의 같은 상수를 쓴다. 이 파일은 `electron`에 의존하지 않아 preload·Renderer 번들이 모두 import한다. `globalName`을 바꾼 앱은 전역을 직접 읽어 `transport`로 넘긴다.
 
 `electron`은 `import * as electron from "electron"`으로 참조한다. Electron 밖(Node test)에서 `electron` 패키지는 실행 파일 경로 문자열만 export하므로 named import는 ESM 링크 단계에서 `SyntaxError`를 낸다. namespace import는 링크되고 없는 프로퍼티는 `undefined`가 되어, 기본값 경로를 탔을 때만 명확한 `TypeError`로 실패한다.
 

@@ -404,7 +404,7 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
   });
 });
 
-describe("createBridgeServer(impl, options): schemas/errors 옵션 배선", () => {
+describe("createBridgeServer(impl, options): schemas/errors 옵션 적용", () => {
   const sendSchema: Schema<{ readonly command: string }> = {
     parse(value) {
       if (

@@ -11,7 +11,7 @@
 
 다루지 않는 것:
 
-- 채널·envelope parse·Electron adapter 배선: [03. Transport와 배선](03-transport-and-wiring.md)
+- 채널·envelope parse·Electron adapter 연결: [03. Transport와 연결 설정](03-transport-and-wiring.md)
 - retire 시 RPC 취소와 응답: [05. RPC](05-rpc.md)
 - retire 시 구독 terminal 통지 규칙(detach·dispose는 `error CANCELLED`, 나머지는 무출력): [06. Main 스트림 전달](06-stream-delivery.md)
 - retired 기록 보관량 `maxRetiredClientsPerWebContents`와 slot 회계: [09. 세션 자원 한도](09-resource-limits.md)
@@ -207,4 +207,4 @@ interface DocumentSession {
 ## 7. 관련 문서
 
 - ADR: [0002](../adr/0002-renderer-document-session-ownership.md), [0006](../adr/0006-shutdown-contract.md), [0009](../adr/0009-session-resource-limits.md), [0015](../adr/0015-rpc-request-lifecycle.md), [0016](../adr/0016-sender-admission.md), [0019](../adr/0019-navigation-retire-on-commit.md), [0020](../adr/0020-stream-terminal-on-retire.md), [0023](../adr/0023-session-retire-interface.md)
-- 설계: [03. Transport와 배선](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [06. Main 스트림 전달](06-stream-delivery.md), [09. 세션 자원 한도](09-resource-limits.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)
+- 설계: [03. Transport와 연결 설정](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [06. Main 스트림 전달](06-stream-delivery.md), [09. 세션 자원 한도](09-resource-limits.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)

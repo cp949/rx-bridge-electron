@@ -1,5 +1,5 @@
 /**
- * upstream 연결(`Upstreams`, RD-036)을 `Subscriptions` 배선 없이 직접
+ * upstream 연결(`Upstreams`, RD-036)을 `Subscriptions`를 거치지 않고 직접
  * 검증한다. State·broadcast Event의 key별 공유, scoped Event의 구독별
  * upstream, 늦은 합류, 동기 재진입 해제, fan-out 스냅샷, terminal 전파를
  * 다룬다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다 —

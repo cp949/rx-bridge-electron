@@ -108,8 +108,8 @@ export function createBridgeServer<B>(
 
 /**
  * `RegistrationTable`로부터 실제 `StreamBridgeServer`를 만드는 코어.
- * 옵션 해석(`createBridgeServer`)과 배선(`buildBridgeServer`)을 나눈다.
- * 배선은 해석을 마친 값만 받는다.
+ * 옵션 해석(`createBridgeServer`)과 조립(`buildBridgeServer`)을 나눈다.
+ * 조립은 해석을 마친 값만 받는다.
  */
 function buildBridgeServer(
   table: RegistrationTable,

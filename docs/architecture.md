@@ -48,11 +48,11 @@ Event buffer(용량과 overflow 정책)는 계약이 값을 가질 수 없으므
 
 Electron 어댑터는 `allowedOrigins`를 받아 attach 시점에 현재 main frame·허용 origin 판정 함수(`isCurrentMainFrame`/`isAllowedOrigin`)를 만들어 target에 실어 보낸다 — 실제 판정은 Main의 sender admission(아래 "문서 세션과 정리")이 한다. 데모 앱의 authorization은 `main` 역할에 전체 공개 계약을 허용하고 `monitor` 역할에는 State/Event만 허용한다. 알 수 없는 역할은 허용되지 않는다. 앱은 별도로 navigation 및 window 생성 정책, sandbox, context isolation, preload 설정을 유지해야 한다.
 
-## 배선 기본값
+## 연결 설정 기본값
 
 `bindElectronBridge({ ipcMain?, server, namespace?, allowedOrigins })`가 반환하는 `attach(contents, role?)`으로 Electron IPC 채널을 연결한다. `ipcMain`을 생략하면 호출 시점에 `import * as electron from "electron"`(네임스페이스 import)으로 얻은 `electron.ipcMain`을 읽고, 주입값이 있으면 항상 그 값이 우선한다. `namespace`를 생략하면 Main·preload 공통 기본값 `"default"`를 쓰며 채널은 `rx-bridge-electron:v1:default:*`가 된다. `role`을 생략하면 `"default"`다. role은 `authorize`의 `context.windowRole`로 전달되는 입력이므로, 역할로 인가를 나누는 앱은 창마다 명시한다.
 
-preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBridge`·`ipcRenderer`를 호출 시점에 `electron.*`에서 해석하고(주입 우선), `namespace` 기본값은 Main과 같은 상수를 공유한다(정의 위치는 `src/protocol/electron-channels.ts`의 `DEFAULT_ELECTRON_BRIDGE_NAMESPACE`·`ELECTRON_BRIDGE_CHANNELS`이고, `/main`은 이를 재수출한다). `globalName` 기본값은 `"rxBridge"`다. Renderer의 `createRendererApi<B>(options?)`는 `options?.transport`를 생략하면 `globalThis.rxBridge`를 읽는다 — `globalName`을 기본값과 다르게 바꾼 소비자는 transport를 직접 만들어 넘겨야 하며, 그 경로에서만 `declare global`이 다시 필요하다. 두 기본값(`globalName`과 `createRendererApi`가 읽는 전역 이름)이 어긋나면 축약형 배선이 항상 실패하므로 두 지점은 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`, `src/renderer/transport.ts`)를 공유한다.
+preload의 `exposeBridgeInMainWorld(options?)`도 같은 방식으로 `contextBridge`·`ipcRenderer`를 호출 시점에 `electron.*`에서 해석하고(주입 우선), `namespace` 기본값은 Main과 같은 상수를 공유한다(정의 위치는 `src/protocol/electron-channels.ts`의 `DEFAULT_ELECTRON_BRIDGE_NAMESPACE`·`ELECTRON_BRIDGE_CHANNELS`이고, `/main`은 이를 재수출한다). `globalName` 기본값은 `"rxBridge"`다. Renderer의 `createRendererApi<B>(options?)`는 `options?.transport`를 생략하면 `globalThis.rxBridge`를 읽는다 — `globalName`을 기본값과 다르게 바꾼 소비자는 transport를 직접 만들어 넘겨야 하며, 그 경로에서만 `declare global`이 다시 필요하다. 두 기본값(`globalName`과 `createRendererApi`가 읽는 전역 이름)이 어긋나면 축약형 연결 설정이 항상 실패하므로 두 지점은 같은 상수(`DEFAULT_BRIDGE_GLOBAL_NAME`, `src/renderer/transport.ts`)를 공유한다.
 
 이 기본값들은 기존 함수의 인자를 선택화한 것이며 별도의 API를 추가하지 않는다 — 모든 인자를 명시하는 기존 호출은 동작이 바뀌지 않는다. `pagehide`에서 `api.dispose()`를 자동 호출하던 hello-world 예제는 이제 그 등록을 두지 않는다: navigation·창 파괴 시 Main이 이미 문서 세션을 retire하므로(위 "문서 세션과 정리" 참고) 불필요했다. `dispose()`는 브리지가 살아있는 동안 Renderer가 스스로 정리를 끝내려 할 때(SPA teardown) 쓰는 용도로 남는다. 근거와 기각한 대안은 [ADR 0013](adr/0013-wiring-defaults.md)에 있다.
 

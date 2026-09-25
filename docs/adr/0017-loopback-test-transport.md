@@ -67,7 +67,7 @@ export function createLoopbackTransport(
 
 ## 거부한 대안
 
-- **`./main`에 추가**: main 진입점은 Electron Main 프로세스에서 서버·배선을 만드는 책임만 진다. loopback을 여기 두면 "test 전용"이라는 소비자 구분이 export 목록에서 사라지고, main을 import하는 것만으로 test 유틸리티까지 번들에 끌려온다는 인상을 준다. 별도 subpath가 이 경계를 명시한다.
+- **`./main`에 추가**: main 진입점은 Electron Main 프로세스에서 서버와 IPC 연결 설정을 만드는 책임만 진다. loopback을 여기 두면 "test 전용"이라는 소비자 구분이 export 목록에서 사라지고, main을 import하는 것만으로 test 유틸리티까지 번들에 끌려온다는 인상을 준다. 별도 subpath가 이 경계를 명시한다.
 - **호출자가 직접 `server.attach`를 호출한 뒤 transport를 만드는 형태**: `createLoopbackTransport`가 `target`을 받는 형태였다면 호출자가 `AttachedTarget`의 4개 필드(`isCurrentMainFrame`/`isAllowedOrigin`/`onLifecycle`/`role`)를 직접 구현해야 했다 — admission 판정 로직(`DocumentSessions#admit`)의 존재를 test 작성자가 알아야 한다는 뜻이다. `server`만 받고 내부에서 고정 target을 만드는 현재 형태가 이 지식을 감춘다.
 - **`createLoopbackBridge(impl)`(impl에서 server까지 내부에서 만드는 형태)**: server를 loopback이 소유하면 한 server에 여러 transport를 붙이는 용도(다중 창 흉내)를 표현할 수 없고, 호출자가 server 옵션(`authorize`·`schemas`·`diagnostics` 등)을 직접 조립하는 기존 test 패턴과도 어긋난다. `server`는 호출자가 만든다.
 - **참조를 그대로 전달(clone 생략)**: 빠르지만 실제 IPC 경계(구조적 복제, 함수·클래스 인스턴스 불가)를 흉내 내지 못한다 — clone 관련 버그가 loopback을 쓰는 test에서 재현되지 않는다.

@@ -6,7 +6,7 @@
 
 ## 상황
 
-미등록 stream key로 구독을 요청하면 `authorize`까지 도달했다. `authorize`가 deny하면 `FORBIDDEN`으로 끝나 RPC(미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`)와 다르게 동작했다. `authorize`가 allow하면 그제서야 `StreamHub.subscribe`가 등록을 조회해 `NOT_FOUND`로 끝났다 — 같은 미등록 key가 `authorize` 결과에 따라 다른 오류 코드로 끝났다는 뜻이다. 구독 1건의 상태도 두 곳(`DocumentSessions`의 watermark·slot, `StreamHub`의 consumer)에 나뉘어 있어 `create-bridge-server.ts`의 `controlStream`이 `beginStream → authorize → finishStream → current → subscribe → onClose → releaseStream` 호출 순서를 손으로 배선했다.
+미등록 stream key로 구독을 요청하면 `authorize`까지 도달했다. `authorize`가 deny하면 `FORBIDDEN`으로 끝나 RPC(미등록 key는 `authorize` 호출 여부와 무관하게 항상 `NOT_FOUND`)와 다르게 동작했다. `authorize`가 allow하면 그제서야 `StreamHub.subscribe`가 등록을 조회해 `NOT_FOUND`로 끝났다 — 같은 미등록 key가 `authorize` 결과에 따라 다른 오류 코드로 끝났다는 뜻이다. 구독 1건의 상태도 두 곳(`DocumentSessions`의 watermark·slot, `StreamHub`의 consumer)에 나뉘어 있어 `create-bridge-server.ts`의 `controlStream`이 `beginStream → authorize → finishStream → current → subscribe → onClose → releaseStream` 호출 순서를 손으로 이어 붙였다.
 
 ## 결정: stream 처리 순서를 ID 형식 → watermark → 등록 조회 → slot → `authorize`로 바꾼다
 

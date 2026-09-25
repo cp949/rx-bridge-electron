@@ -103,7 +103,7 @@ _(리뷰 수정, 2026-09-25: `subscription-opened` 진단 sink가 동기 unsubsc
 
 ## 범위 밖
 
-slot 회계(RPC `running`, 구독 pending+consumers) — 반환 시점 의미가 세션 retire 노출 방식과 다르다. 리뷰 03 후보 04(payload limits 해석)·05(`LocalGeneration` kind 분기)와 리뷰 03 잔재 목록. `create-bridge-server.ts` 배선, `authorization.ts`, 공개 API(`DocumentSession`은 `src/main/index.ts`의 공개 export가 아니다), wire 모양, 오류 코드·문구, 진단 종류. Renderer 쪽 동작. _(개정: RD-041 — slot 회계는 내부 module `SessionSlots`가 소유하게 됐다. 이 ADR이 정한 `onRetire` 계약(등록·해제, 이미 retire된 세션에서의 즉시 호출) 자체는 바뀌지 않았다 — `SessionSlots`의 lease가 그 계약을 감싸 slot과 함께 노출한다.)_
+slot 회계(RPC `running`, 구독 pending+consumers) — 반환 시점 의미가 세션 retire 노출 방식과 다르다. 리뷰 03 후보 04(payload limits 해석)·05(`LocalGeneration` kind 분기)와 리뷰 03 잔재 목록. `create-bridge-server.ts`의 모듈 조립, `authorization.ts`, 공개 API(`DocumentSession`은 `src/main/index.ts`의 공개 export가 아니다), wire 모양, 오류 코드·문구, 진단 종류. Renderer 쪽 동작. _(개정: RD-041 — slot 회계는 내부 module `SessionSlots`가 소유하게 됐다. 이 ADR이 정한 `onRetire` 계약(등록·해제, 이미 retire된 세션에서의 즉시 호출) 자체는 바뀌지 않았다 — `SessionSlots`의 lease가 그 계약을 감싸 slot과 함께 노출한다.)_
 
 ## 관련 ADR
 

@@ -10,7 +10,7 @@
 - retire 시 활성 구독에 보내는 stream terminal 통지 판정: [06. Main 스트림 전달](06-stream-delivery.md)
 - retire 시 진행 중 RPC 취소와 `CANCELLED` 우선 guard: [05. RPC](05-rpc.md)
 - 루트 `dispose` 이름 예약과 manifest 거부: [02. Renderer API](02-renderer-api.md)
-- loopback test transport의 `dispose()`(detach만 하고 server는 끝내지 않는다): [03. Transport와 배선](03-transport-and-wiring.md)
+- loopback test transport의 `dispose()`(detach만 하고 server는 끝내지 않는다): [03. Transport와 연결 설정](03-transport-and-wiring.md)
 
 ## 2. 모델
 
@@ -180,5 +180,5 @@ retired client ID 기록은 dispose 뒤에도 남는다. `destroyed` 수명 사�
 
 ## 7. 관련 문서
 
-- ADR: [0005 Renderer API 모양(`dispose` 이름)](../adr/0005-renderer-api-shape.md), [0006 종료 계약](../adr/0006-shutdown-contract.md), [0013 배선 기본값(`pagehide` dispose 제거)](../adr/0013-wiring-defaults.md), [0020 retire 시 stream 종료 통지](../adr/0020-stream-terminal-on-retire.md), [0022 Renderer 진단](../adr/0022-renderer-diagnostics.md)
+- ADR: [0005 Renderer API 모양(`dispose` 이름)](../adr/0005-renderer-api-shape.md), [0006 종료 계약](../adr/0006-shutdown-contract.md), [0013 연결 설정 기본값(`pagehide` dispose 제거)](../adr/0013-wiring-defaults.md), [0020 retire 시 stream 종료 통지](../adr/0020-stream-terminal-on-retire.md), [0022 Renderer 진단](../adr/0022-renderer-diagnostics.md)
 - 설계 문서: [02. Renderer API](02-renderer-api.md), [04. 문서 세션](04-document-session.md), [05. RPC](05-rpc.md), [06. Main 스트림 전달](06-stream-delivery.md), [07. Renderer 스트림과 State](07-renderer-streams.md), [09. 세션 자원 한도](09-resource-limits.md), [11. 진단](11-diagnostics.md)

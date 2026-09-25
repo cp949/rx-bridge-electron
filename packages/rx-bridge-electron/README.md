@@ -16,7 +16,7 @@
 4. [Renderer에서 쓰기](#renderer에서-쓰기): API 모양, RPC, State, Event, 오류 코드, 구독 종료 원인, `api.dispose()`
 5. [프레임워크 연동](#프레임워크-연동): React, Event·RPC 직접 사용, TanStack Query
 6. [Main 구현](#main-구현): `impl`과 `authorize`, 스키마, 허용 에러 코드, Event buffer, State source 교체
-7. [배선](#배선): 보안 설정, 기본값, 명시 형태
+7. [Electron 연결](#electron-연결): 보안 설정, 기본값, 명시 형태
 8. [한도와 진단](#한도와-진단): 값 규칙과 크기 한도, 세션 자원 한도, Main 진단, Renderer 진단
 9. [테스트](#테스트)
 10. [범위 밖](#범위-밖)
@@ -109,7 +109,7 @@ const api = await createRendererApi<AppBridge>();
 ```
 
 ```ts
-// Renderer — 사용 예(배선이 아닙니다)
+// Renderer — 사용 예(연결 설정이 아닙니다)
 await api.device.rpc.connect();
 api.device.state.connection.subscribe({
   next: console.log,
@@ -549,7 +549,9 @@ devices$
 const source = currentValueSource(connection);
 ```
 
-## 배선
+## Electron 연결
+
+Main·preload·Renderer를 Electron IPC로 잇는 연결 설정입니다. [시작하기](#시작하기)의 "Electron IPC에 연결", "Preload", "브리지에 연결" 블록이 여기에 해당합니다.
 
 ### 보안 설정
 
@@ -811,7 +813,7 @@ server.dispose();
 - `dispose()` 뒤 그 transport의 구독은 종료 통지를 받지 않고 `RemoteState`는 `current`로 남습니다. 먼저 `api.dispose()`를 부르세요.
 - 같은 `webContentsId`로 새 loopback transport를 만들면 앞 transport의 구독은 `CANCELLED "Bridge session ended."`로 끝납니다.
 
-운영 코드에서는 쓰지 않습니다. Renderer는 고정 preload transport만 받아야 합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)). 전달 시점과 예외 처리의 세부는 [ADR 0017](../../docs/adr/0017-loopback-test-transport.md)과 [설계 03. Transport와 배선](../../docs/design/03-transport-and-wiring.md)에 있습니다.
+운영 코드에서는 쓰지 않습니다. Renderer는 고정 preload transport만 받아야 합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)). 전달 시점과 예외 처리의 세부는 [ADR 0017](../../docs/adr/0017-loopback-test-transport.md)과 [설계 03. Transport와 연결 설정](../../docs/design/03-transport-and-wiring.md)에 있습니다.
 
 ## 범위 밖
 

@@ -704,7 +704,7 @@ describe("StreamBridgeServer.handshake direct calls", () => {
 });
 
 /**
- * RD-014 배선 축약(ADR 0013): `bindElectronBridge`의 `ipcMain`·`namespace`,
+ * RD-014 연결 설정 축약(ADR 0013): `bindElectronBridge`의 `ipcMain`·`namespace`,
  * `attach`의 `role`을 생략했을 때의 기본값과 미주입 오류 경로.
  */
 describe("bindElectronBridge argument defaults (RD-014)", () => {

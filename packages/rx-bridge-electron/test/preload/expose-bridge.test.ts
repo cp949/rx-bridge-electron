@@ -44,7 +44,7 @@ class FakeIpcRenderer {
 }
 
 /**
- * RD-014 배선 축약(ADR 0013): `exposeBridgeInMainWorld`의 `contextBridge`·`ipcRenderer`·
+ * RD-014 연결 설정 축약(ADR 0013): `exposeBridgeInMainWorld`의 `contextBridge`·`ipcRenderer`·
  * `namespace`, `options` 자체를 생략했을 때의 기본값과 미주입 오류 경로.
  */
 describe("exposeBridgeInMainWorld argument defaults (RD-014)", () => {

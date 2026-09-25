@@ -1,6 +1,6 @@
 /**
- * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)을 `Subscriptions` 배선
- * 없이 직접 검증한다. "수락 → ack 대기 → 다음 값 | terminal" 순서, State
+ * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)을 `Subscriptions`를
+ * 거치지 않고 직접 검증한다. "수락 → ack 대기 → 다음 값 | terminal" 순서, State
  * 최신값 교체, Event `BoundedQueue` overflow 3정책, 선점 종료(`preempt`)의
  * 폐기 규칙, `close()` 멱등, 진단 callback 안 재진입, 대기 값 수 조회를
  * 다룬다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다 —

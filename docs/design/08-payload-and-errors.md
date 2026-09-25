@@ -13,7 +13,7 @@
 
 - RPC 처리 순서 전체와 `CANCELLED` 우선 guard의 적용 지점: [05. RPC](05-rpc.md)
 - 세션 자원 한도(`RESOURCE_EXHAUSTED`·`DEADLINE_EXCEEDED`의 판정): [09. 세션 자원 한도](09-resource-limits.md)
-- 채널·envelope 모양·protocol version: [03. Transport와 배선](03-transport-and-wiring.md)
+- 채널·envelope 모양·protocol version: [03. Transport와 연결 설정](03-transport-and-wiring.md)
 - sender admission 판정 순서: [04. 문서 세션](04-document-session.md)
 - 스트림 terminal 전달 순서·overflow 시점: [06. Main 스트림 전달](06-stream-delivery.md)
 - 진단 이벤트 목록과 `RejectReason` 판정 지점: [11. 진단](11-diagnostics.md)
@@ -100,7 +100,7 @@ envelope parse(`parse*` 함수)도 `parseBridgeValue`로 envelope 전체를 순�
 
 크기 한도로 기능하지 않는다. 크기는 서버가 `payloadLimits`로만 강제한다.
 
-어느 위치가 어떤 `parse*`를 호출하는지(server·preload·Renderer, adapter는 없음)는 [03. Transport와 배선](03-transport-and-wiring.md)이 소유한다. Renderer는 preload가 이미 검사한 응답을 다시 parse한다. 코드는 공유하고 신뢰는 공유하지 않는다.
+어느 위치가 어떤 `parse*`를 호출하는지(server·preload·Renderer, adapter는 없음)는 [03. Transport와 연결 설정](03-transport-and-wiring.md)이 소유한다. Renderer는 preload가 이미 검사한 응답을 다시 parse한다. 코드는 공유하고 신뢰는 공유하지 않는다.
 
 ## 3. 불변식
 
@@ -240,4 +240,4 @@ RPC의 취소는 `CANCELLED "Request cancelled."`다. stream의 취소는 retire
 ## 7. 관련 문서
 
 - ADR: [0004 제한된 payload 프로필](../adr/0004-validated-bounded-payloads.md), [0011 authorize 예외 INTERNAL](../adr/0011-authorize-exception-internal.md), [0012 경량 타입 계약](../adr/0012-lightweight-type-contract.md)(`payloadLimits` 서버 옵션 개정), [0016 sender admission](../adr/0016-sender-admission.md)(envelope parse 소유, `ENVELOPE_LIMITS`), [0010 운영 진단](../adr/0010-operational-diagnostics.md)(`PayloadLimitError` 도입)
-- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 배선](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [06. Main 스트림 전달](06-stream-delivery.md), [09. 세션 자원 한도](09-resource-limits.md), [11. 진단](11-diagnostics.md)
+- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 연결 설정](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [06. Main 스트림 전달](06-stream-delivery.md), [09. 세션 자원 한도](09-resource-limits.md), [11. 진단](11-diagnostics.md)

@@ -16,19 +16,19 @@
 
 ## 주제
 
-| 문서                                                  | 주제                                                                       |
-| ----------------------------------------------------- | -------------------------------------------------------------------------- |
-| [01. 계약과 등록](01-contract.md)                     | 타입 계약, `BridgeImpl`, 등록 table, operation key, 선택 스키마·에러 map   |
-| [02. Renderer API](02-renderer-api.md)                | handshake manifest 해석, 계층형 호출 트리, 동결 객체, 예약 이름            |
-| [03. Transport와 배선](03-transport-and-wiring.md)    | 신뢰 경계, 고정 preload transport, 채널·envelope, 배선 기본값, loopback    |
-| [04. 문서 세션](04-document-session.md)               | 렌더러 문서 세션, sender admission, client ID, retire 사유와 시점          |
-| [05. RPC](05-rpc.md)                                  | RPC 요청 수명주기(Main·Renderer), 처리 순서, 취소·deadline, 최종 결과 하나 |
-| [06. Main 스트림 전달](06-stream-delivery.md)         | 구독 수명주기, 전달 창(ack·sequence·terminal), upstream 공유, Event buffer |
-| [07. Renderer 스트림과 State](07-renderer-streams.md) | multiplexer, local generation, `RemoteState` snapshot, `snapshotStore`     |
-| [08. Payload와 오류 모델](08-payload-and-errors.md)   | 값 프로필, 한도, 출력 경계, 오류 코드 체계                                 |
-| [09. 세션 자원 한도](09-resource-limits.md)           | 동시 RPC·구독 slot, RPC deadline, retired client ID 보관량                 |
-| [10. 종료](10-shutdown.md)                            | Renderer `dispose()`, `server.dispose()`, bind `dispose()`, 재진입         |
-| [11. 진단](11-diagnostics.md)                         | Main·Renderer 진단 이벤트, 기록 금지 항목, sink 격리                       |
+| 문서                                                    | 주제                                                                         |
+| ------------------------------------------------------- | ---------------------------------------------------------------------------- |
+| [01. 계약과 등록](01-contract.md)                       | 타입 계약, `BridgeImpl`, 등록 table, operation key, 선택 스키마·에러 map     |
+| [02. Renderer API](02-renderer-api.md)                  | handshake manifest 해석, 계층형 호출 트리, 동결 객체, 예약 이름              |
+| [03. Transport와 연결 설정](03-transport-and-wiring.md) | 신뢰 경계, 고정 preload transport, 채널·envelope, 연결 설정 기본값, loopback |
+| [04. 문서 세션](04-document-session.md)                 | 렌더러 문서 세션, sender admission, client ID, retire 사유와 시점            |
+| [05. RPC](05-rpc.md)                                    | RPC 요청 수명주기(Main·Renderer), 처리 순서, 취소·deadline, 최종 결과 하나   |
+| [06. Main 스트림 전달](06-stream-delivery.md)           | 구독 수명주기, 전달 창(ack·sequence·terminal), upstream 공유, Event buffer   |
+| [07. Renderer 스트림과 State](07-renderer-streams.md)   | multiplexer, local generation, `RemoteState` snapshot, `snapshotStore`       |
+| [08. Payload와 오류 모델](08-payload-and-errors.md)     | 값 프로필, 한도, 출력 경계, 오류 코드 체계                                   |
+| [09. 세션 자원 한도](09-resource-limits.md)             | 동시 RPC·구독 slot, RPC deadline, retired client ID 보관량                   |
+| [10. 종료](10-shutdown.md)                              | Renderer `dispose()`, `server.dispose()`, bind `dispose()`, 재진입           |
+| [11. 진단](11-diagnostics.md)                           | Main·Renderer 진단 이벤트, 기록 금지 항목, sink 격리                         |
 
 ## 작성 규칙
 

@@ -34,6 +34,10 @@ _Avoid_: RPC 호출(call), dispatch
 `category:domain/op` 형식의 식별자다(예: `rpc:device/connect`). 등록 table의 key, handshake manifest의 key, `authorize(context, operation)`가 받는 `BridgeOperation`의 `key`, 진단 이벤트의 `key`가 모두 이 형식을 쓴다. `BridgeOperation`은 같은 key를 `category`·`domain`(segment 배열)·`operation`으로 분해해 함께 담은 동결 객체이고, Main 등록이 operation마다 한 번 만든다 — `authorize`를 쓰는 앱 코드가 wire key 문자열을 파싱하지 않게 하려는 것이다([ADR 0018](docs/adr/0018-authorize-structured-operation.md)). 문법(생성·분해, segment·예약어 검증, 경로 충돌 검사)은 `src/protocol/operation-key.ts` 하나가 소유하고, Main 등록(`buildRegistrationTableFromImpl`)과 Renderer manifest 파서(`createRendererApi`)가 각각 호출한다.
 _Avoid_: table key(`domain/op`, category 없는 조회 전용 표기 — 더는 쓰지 않는다)
 
+**연결 설정 (IPC setup)**:
+Main·preload·Renderer를 Electron IPC로 잇는 설정 코드다. Main의 `bindElectronBridge`·`attach`, preload의 `exposeBridgeInMainWorld`, Renderer의 `createRendererApi`가 해당한다. 생략 가능한 인자와 기본값은 [ADR 0013](docs/adr/0013-wiring-defaults.md)이 정한다. 서버 내부 모듈을 엮는 코드는 "조립"이라 부르고 이 용어와 구분한다.
+_Avoid_: 배선(wiring)
+
 **계약 (contract)**:
 런타임 값이 아니라 순수 TS 타입 `B`다. 도메인들의 중첩 객체 타입이며, 각 도메인 노드는 `rpc`·`state`·`event` 중 있는 카테고리만 키로 갖고 그 외 키는 하위 namespace로 재귀 처리한다(ADR 0007 계층). 값을 갖지 않으므로 런타임 계약 조합·등록 함수가 없다.
 _Avoid_: 계약을 런타임 descriptor 트리로 조합하던 옛 함수들(제거됨, 근거는 ADR 0012)

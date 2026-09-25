@@ -13,7 +13,7 @@
 다루지 않는 것:
 
 - operation key 문법과 예약어 규칙 자체, manifest 생성: [01. 계약과 등록](01-contract.md)
-- transport 해석(`globalThis.rxBridge`), handshake envelope·version 검사: [03. Transport와 배선](03-transport-and-wiring.md)
+- transport 해석(`globalThis.rxBridge`), handshake envelope·version 검사: [03. Transport와 연결 설정](03-transport-and-wiring.md)
 - RPC 함수 호출 뒤의 동작, `CallOptions` 의미: [05. RPC](05-rpc.md)
 - `RemoteState`·Event `Observable` 내부 동작: [07. Renderer 스트림과 State](07-renderer-streams.md)
 - `api.dispose()` 종료 의미: [10. 종료](10-shutdown.md)
@@ -94,7 +94,7 @@ interface CallOptions {
 
 ### `createRendererApi<B>(options?)`
 
-1. transport를 해석한다. `options.transport`가 없으면 `globalThis.rxBridge`를 읽고, transport 모양이 아니면 `TypeError`를 던진다. 배선 오류라 진단을 기록하지 않는다. [03. Transport와 배선](03-transport-and-wiring.md)
+1. transport를 해석한다. `options.transport`가 없으면 `globalThis.rxBridge`를 읽고, transport 모양이 아니면 `TypeError`를 던진다. 연결 설정 오류라 진단을 기록하지 않는다. [03. Transport와 연결 설정](03-transport-and-wiring.md)
 2. `transport.connect()`를 기다린다. throw나 reject는 `RemoteError("INTERNAL", "Bridge handshake failed.")`가 된다. 원래 오류 내용은 버린다.
 3. `parseHandshakeResponse`로 응답을 파싱한다. `VERSION_MISMATCH`면 `"Unsupported bridge handshake."`, 그 외 실패는 `"Malformed bridge handshake."`이고 둘 다 code `INTERNAL`이다. manifest는 정확히 `rpc`·`state`·`event` 키를 갖고 각각 문자열 배열이어야 한다.
 4. manifest entry를 `rpc` → `state` → `event` 배열 순서, 배열 안에서는 선언 순서로 검증하고 트리에 넣는다. 첫 실패에서 `RemoteError("INTERNAL")`를 던진다.
@@ -171,5 +171,5 @@ Renderer는 Main 검증에 기대지 않는다. Main이 만든 값을 그대로 
 
 ## 7. 관련 문서
 
-- ADR: [0007 계층형 Renderer API](../adr/0007-hierarchical-renderer-api.md), [0021 동결 객체 트리](../adr/0021-renderer-frozen-api-tree.md), [0005 루트 dispose와 평면안(대체됨)](../adr/0005-renderer-api-shape.md), [0013 배선 기본값](../adr/0013-wiring-defaults.md), [0006 종료 계약](../adr/0006-shutdown-contract.md)
-- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 배선](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [07. Renderer 스트림과 State](07-renderer-streams.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)
+- ADR: [0007 계층형 Renderer API](../adr/0007-hierarchical-renderer-api.md), [0021 동결 객체 트리](../adr/0021-renderer-frozen-api-tree.md), [0005 루트 dispose와 평면안(대체됨)](../adr/0005-renderer-api-shape.md), [0013 연결 설정 기본값](../adr/0013-wiring-defaults.md), [0006 종료 계약](../adr/0006-shutdown-contract.md)
+- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 연결 설정](03-transport-and-wiring.md), [05. RPC](05-rpc.md), [07. Renderer 스트림과 State](07-renderer-streams.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)

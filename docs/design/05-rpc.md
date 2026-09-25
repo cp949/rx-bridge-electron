@@ -15,7 +15,7 @@ RPC 요청 1건이 Main과 Renderer에서 어떤 순서로 판정되고, 취소�
 
 다루지 않는 것:
 
-- envelope·채널·preload 배선: [03. Transport와 배선](03-transport-and-wiring.md)
+- envelope·채널·preload 연결 설정: [03. Transport와 연결 설정](03-transport-and-wiring.md)
 - sender admission과 retire 사유·시점: [04. 문서 세션](04-document-session.md)
 - 값 프로필, payload 한도, 출력 경계(`parseOutput`) 내부 순서, 오류 코드 전체 표, `authorize` 예외 분류: [08. Payload와 오류 모델](08-payload-and-errors.md)
 - slot 한도 수치, slot 회계, `maxRpcDurationMs` 설정 규칙: [09. 세션 자원 한도](09-resource-limits.md)
@@ -172,4 +172,4 @@ slot은 실제로 실행 중인 작업 수를 센다. 응답 시점에 반환하
 ## 7. 관련 문서
 
 - ADR: [0009](../adr/0009-session-resource-limits.md), [0011](../adr/0011-authorize-exception-internal.md), [0014](../adr/0014-stream-lookup-before-authorize.md), [0015](../adr/0015-rpc-request-lifecycle.md), [0006](../adr/0006-shutdown-contract.md), [0019](../adr/0019-navigation-retire-on-commit.md), [0023](../adr/0023-session-retire-interface.md)
-- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 배선](03-transport-and-wiring.md), [04. 문서 세션](04-document-session.md), [06. Main 스트림 전달](06-stream-delivery.md), [08. Payload와 오류 모델](08-payload-and-errors.md), [09. 세션 자원 한도](09-resource-limits.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)
+- 설계 문서: [01. 계약과 등록](01-contract.md), [03. Transport와 연결 설정](03-transport-and-wiring.md), [04. 문서 세션](04-document-session.md), [06. Main 스트림 전달](06-stream-delivery.md), [08. Payload와 오류 모델](08-payload-and-errors.md), [09. 세션 자원 한도](09-resource-limits.md), [10. 종료](10-shutdown.md), [11. 진단](11-diagnostics.md)

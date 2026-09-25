@@ -131,7 +131,7 @@ Renderer의 예외는 `code` 하나다. `cause: "remote-error"`일 때만 `Remot
 
 `transport-failed`의 `channel`: `cancel`은 RPC 취소 중 `transport.cancel` throw(RPC 자체는 원래 원인으로 `rpc-settled`), `control`은 unsubscribe·acknowledge 전송 throw.
 
-기록하지 않는 것: 모르는 `subscriptionId`의 메시지(unsubscribe와 Main 전송 사이의 정상 경합), dispose 뒤 도착한 메시지, dispose 뒤 억제한 acknowledge, `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`(배선 오류), 종료 뒤 subscribe(`LocalGeneration`이 multiplexer에 닿기 전에 거부한다).
+기록하지 않는 것: 모르는 `subscriptionId`의 메시지(unsubscribe와 Main 전송 사이의 정상 경합), dispose 뒤 도착한 메시지, dispose 뒤 억제한 acknowledge, `transport` 생략 시 전역 transport가 없어 던지는 `TypeError`(연결 설정 오류), 종료 뒤 subscribe(`LocalGeneration`이 multiplexer에 닿기 전에 거부한다).
 
 ## 3. 불변식
 
