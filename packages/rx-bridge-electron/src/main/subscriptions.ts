@@ -56,6 +56,12 @@ interface Consumer {
   readonly onSessionAbort: () => void;
   /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
   readonly window: DeliveryWindow;
+  /**
+   * `subscribed`(0) 송신 여부. 송신 직전에 켠다. `onSessionAbort`가 이 값으로
+   * retire 처리를 가른다 — 꺼져 있으면(시작 전) 거부 전용 창으로 통지하고,
+   * 켜져 있으면(활성) 이 창을 `preempt`한다.
+   */
+  opened: boolean;
 }
 
 /** 세션 1개가 소유한 구독 상태. `pending`+`consumers` 합이 slot 점유 수다. */
@@ -262,9 +268,11 @@ export class Subscriptions {
     this.#liveStates.add(state);
     session.signal.addEventListener("abort", entry.onAbort, { once: true });
     if (session.signal.aborted) {
+      // 세션이 등록 이전에 이미 retire됐다 — "abort" listener는 지난 이벤트를
+      // 받지 못하므로 여기서 직접 `onAbort`를 불러 같은 처리(삭제·prune·
+      // controller.abort()·통지, ADR 0020)를 맡긴다.
       session.signal.removeEventListener("abort", entry.onAbort);
-      state.pending.delete(command.subscriptionId);
-      this.#pruneIfEmpty(state);
+      entry.onAbort();
       return;
     }
 
@@ -349,6 +357,8 @@ export class Subscriptions {
    * 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된 pending
    * `onAbort`가 retire 통지를 맡는다. `false`면 이미 취소됐거나(unsubscribe·
    * retire) signal이 abort된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
+   * (등록 직후, 이 메서드에 닿기 전에 이미 retire된 경우는 호출부가 같은
+   * `entry.onAbort`를 직접 불러 처리한다 — RD-037.)
    */
   #finishPending(
     session: DocumentSession,
@@ -410,7 +420,20 @@ export class Subscriptions {
       registration,
       controller,
       window,
+      opened: false,
       onSessionAbort: () => {
+        if (!consumer.opened) {
+          // `subscribed` 송신 전 retire(시작 전 거부와 같은 창) — 활성 구독의
+          // `preempt` 대신 `#endUnstarted`가 sequence 0·1을 매겨 통지한다.
+          this.#close(consumer);
+          this.#endUnstarted(
+            command,
+            send,
+            { kind: "retired" },
+            session.signal,
+          );
+          return;
+        }
         const error = endNotice({ kind: "retired" }, session.signal);
         if (error !== undefined) {
           const message = consumer.window.preempt(error);
@@ -429,9 +452,12 @@ export class Subscriptions {
       once: true,
     });
     if (session.signal.aborted) {
-      this.#close(consumer);
+      // 세션이 등록 이전에 이미 retire됐다 — "abort" listener는 지난 이벤트를
+      // 받지 못하므로 여기서 직접 `onSessionAbort`를 불러 open 전 분기를 태운다.
+      consumer.onSessionAbort();
       return;
     }
+    consumer.opened = true;
     this.#send(consumer, window.open());
     if (window.closed) return;
     try {
@@ -453,11 +479,12 @@ export class Subscriptions {
   }
 
   /**
-   * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire)의 통지:
-   * `subscribed`(0) 전후로 `endNotice`를 평가해 `error`(1)를 보낸다. 앞 평가는
-   * 진단 sink가 동기로 일으킨 retire를, 뒤 평가는 `send` 중 동기 retire를
-   * 반영한다. 거부 전용 창(`createRejectionDeliveryWindow`)이 두 sequence를
-   * 매긴다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+   * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire, `subscribed`
+   * 송신 전 retire된 consumer, RD-037)의 통지: `subscribed`(0) 전후로
+   * `endNotice`를 평가해 `error`(1)를 보낸다. 앞 평가는 진단 sink가 동기로
+   * 일으킨 retire를, 뒤 평가는 `send` 중 동기 retire를 반영한다. 거부 전용
+   * 창(`createRejectionDeliveryWindow`)이 두 sequence를 매긴다. 전송 실패는
+   * 삼킨다(ADR 0020 결정 6).
    */
   #endUnstarted(
     command: SubscribeCommand,

@@ -39,6 +39,8 @@
 
 _(개정: RD-032 — 시작 전 거부 응답을 보내기 직전이나 `subscribed` 전송 도중 retire된 구독도 통지 대상이다. retire 사유가 `detach`·`dispose`면 원래 거부 대신 `subscribed`(0) 뒤 `CANCELLED "Bridge session ended."`로 마감한다(결정 3의 "이미 기록된 terminal을 대체한다"와 같은 규칙). 보내기 직전 창은 `diagnostics.record`가 `rejected` 진단을 받는 중 동기로 detach·dispose할 때 생기며 실제 adapter에서도 열린다 — 이전에는 `subscribed`조차 보내지 않았다. `subscribed` 전송 도중 창은 실제 adapter(`webContents.send`)와 loopback 전달이 비동기라 생기지 않고, 동기 `send`를 쓰는 embedder나 test에서만 관찰된다.)_
 
+_(개정: RD-037 — `session-opened`·`subscription-opened` 진단 창에서 동기로 detach·dispose가 일어나 등록 시점에 이미 retire된 pending 구독·consumer(`subscribed` 송신 전)도 통지 대상이다. retire 사유가 `detach`·`dispose`면 `subscribed`(0) 뒤 `CANCELLED "Bridge session ended."`로 마감한다. 이전에는 이 두 경로가 무통지였다 — pending은 조용히 정리만 하고, consumer는 통지 없이 닫았다.)_
+
 ### 3. 쌓인 값은 버리고 종료 메시지를 바로 보낸다
 
 ACK 대기 중이던 값, 아직 보내지 않은 `pendingState`/`pendingEvents`, 이미 기록된 terminal(overflow `error`·upstream `complete` 대기 등) 모두 전달하지 않는다. 세션이 끝나면 ACK를 받을 방법 자체가 없다(`current()`가 거부한다) — 정상 flush 경로(`#flush`)를 거치지 않고 다음 sequence 번호로 종료 메시지를 즉시 보낸다.
