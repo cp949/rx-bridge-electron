@@ -1267,6 +1267,81 @@ describe("Main stream lifecycle and ordering", () => {
       queuedEvents: 0,
     });
   });
+
+  test("a shared value reaching a consumer after its terminal was recorded in the same fan-out is not delivered", async () => {
+    const { server, events } = harness({
+      capacity: 2,
+      overflow: "drop-oldest",
+    });
+    const first = testSubscriptionId(1);
+    const second = testSubscriptionId(2);
+    const sendFirst = (message: StreamMessage) => {
+      if (message.type === "batch" && message.sequence === 2) events.complete();
+    };
+    const messages: StreamMessage[] = [];
+    const sendSecond = (message: StreamMessage) => messages.push(message);
+    await server.controlStream(
+      sender(),
+      command("subscribe", first, "client-1", "event:hardware/change$"),
+      sendFirst,
+    );
+    await server.controlStream(
+      sender(),
+      command("subscribe", second, "client-1", "event:hardware/change$"),
+      sendSecond,
+    );
+    events.next(1);
+    await server.controlStream(sender(), ack(first, 1), sendFirst);
+    events.next(2);
+    expect(server.getDiagnosticsSnapshot().queuedEvents).toBe(0);
+    await server.controlStream(sender(), ack(second, 1), sendSecond);
+    expect(
+      messages.map((message) => ({
+        type: message.type,
+        sequence: message.sequence,
+      })),
+    ).toEqual([
+      { type: "subscribed", sequence: 0 },
+      { type: "batch", sequence: 1 },
+      { type: "complete", sequence: 2 },
+    ]);
+  });
+
+  test("a shared value reaching a consumer closed earlier in the same fan-out records no validation-failed", async () => {
+    const { server, events, diagnostics } = harness();
+    const first = testSubscriptionId(1);
+    const second = testSubscriptionId(2);
+    const sendSecond = () => {};
+    const sendFirst = (message: StreamMessage) => {
+      if (message.type === "error")
+        void server.controlStream(
+          sender(),
+          command("unsubscribe", second),
+          sendSecond,
+        );
+    };
+    await server.controlStream(
+      sender(),
+      command("subscribe", first, "client-1", "event:hardware/change$"),
+      sendFirst,
+    );
+    await server.controlStream(
+      sender(),
+      command("subscribe", second, "client-1", "event:hardware/change$"),
+      sendSecond,
+    );
+    diagnostics.record.mockClear();
+    events.next((() => 1) as unknown as number);
+    expect(
+      diagnostics.record.mock.calls.map(
+        ([event]) => (event as { type: string }).type,
+      ),
+    ).toEqual([
+      "validation-failed",
+      "subscription-closed",
+      "subscription-closed",
+    ]);
+  });
 });
 
 describe("Main stream terminal notify on retire", () => {

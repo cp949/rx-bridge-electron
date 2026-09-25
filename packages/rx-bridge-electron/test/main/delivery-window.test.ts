@@ -3,8 +3,8 @@
  * 없이 직접 검증한다. "수락 → ack 대기 → 다음 값 | terminal" 순서, State
  * 최신값 교체, Event `BoundedQueue` overflow 3정책, 선점 종료(`preempt`)의
  * 폐기 규칙, `close()` 멱등, 진단 callback 안 재진입, 대기 값 수 조회를
- * 다룬다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다
- * (checklist 결정 1).
+ * 다룬다. 이 파일은 RD-015 결정 5("구독 모듈 직접 test 없음")의 예외다 —
+ * 창은 `BoundedQueue`와 같은 등급의 순수 module이라 직접 검증한다(RD-034).
  */
 import { describe, expect, test, vi } from "vitest";
 
@@ -160,6 +160,29 @@ describe("대기 값 drain 뒤 terminal", () => {
       });
       expect(window.ack(3)).toBeUndefined();
       expect(window.end({ type: "complete" }).recorded).toBe(false);
+    },
+  );
+});
+
+describe("terminal 기록 뒤 수락 중단", () => {
+  test.each([
+    ["State", () => createStateDeliveryWindow()],
+    ["Event", () => createEventDeliveryWindow(2, "drop-oldest")],
+  ])(
+    "%s는 terminal을 기록한 뒤 ack 대기 중 들어온 값을 받지 않고 ack 뒤 terminal을 반환한다",
+    (_label, create) => {
+      const window = create();
+      window.open();
+      window.accept(1);
+      expect(window.end({ type: "complete" }).recorded).toBe(true);
+      expect(window.accepting).toBe(false);
+
+      expect(window.accept(2)).toEqual({
+        message: undefined,
+        overflowed: false,
+      });
+      expect(window.queuedValueCount()).toBe(0);
+      expect(window.ack(1)).toEqual({ type: "complete", sequence: 2 });
     },
   );
 });
