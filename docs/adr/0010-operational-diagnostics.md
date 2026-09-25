@@ -109,7 +109,3 @@ Main에는 `DiagnosticsSink` hook이 이미 있었지만 이벤트가 5종(`rpc-
 ## 범위 밖
 
 Renderer 진단(후속: [ADR 0022](0022-renderer-diagnostics.md)), `authorize` 예외의 응답 코드 불일치(RPC는 `INVALID_ARGUMENT`, stream은 `INTERNAL`) 수정(후속으로 [ADR 0011](0011-authorize-exception-internal.md)에서 둘 다 `INTERNAL`로 통일), 누적 카운터, `stream-queue` 기록 빈도 변경, 워터마크 이하 subscriptionId·중복 구독의 조용한 무시에 이벤트 추가, RPC 시작 이벤트.
-
-## 이전(migration)
-
-README "호환성 변경" 절([packages/rx-bridge-electron/README.md](../../packages/rx-bridge-electron/README.md))에 `rpc-finished.outcome` 필드 추가를 적는다 — `BridgeDiagnostic`을 망라해 분기하던 기존 sink 구현은 이 필드와 새 이벤트 6종을 처리하도록 확인해야 한다.

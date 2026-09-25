@@ -30,7 +30,3 @@ stream 거부 진단(`authorize-denied`)은 이제 slot 반환 전에 기록된�
 ## 한계
 
 - Renderer는 `authorize` 예외와 handler의 비선언 예외를 구분하지 못한다. 둘 다 `INTERNAL`이다. 호스트가 원인을 알아야 하면 `authorize` 안에서 직접 기록한다.
-
-## 이전(migration)
-
-와이어 형식과 오류 코드 집합은 바뀌지 않는다. RPC `authorize` 예외 시 Renderer의 `RemoteError`가 `INVALID_ARGUMENT "Invalid bridge request."`에서 `INTERNAL "Internal bridge error."`로 바뀐다. `INVALID_ARGUMENT`로 이 경우를 처리하던 소비자는 `INTERNAL`을 처리한다. 별도 이전 API는 두지 않는다.

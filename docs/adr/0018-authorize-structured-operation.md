@@ -49,7 +49,3 @@ type Authorize = (
 - 진단 이벤트(`BridgeDiagnostic`)의 `key`는 wire key 문자열 그대로다. 진단은 로그·모니터링용이라 문자열이 저장·출력에 적합하고, 진단에서 문자열을 파싱하는 사용처는 확인되지 않았다.
 - `protocol/operation-key.ts`는 계속 비공개다. `./protocol`은 `OperationCategory`를 re-export하지 않는다.
 - `authorize` 호출 순서(등록 조회 → 슬롯 → `authorize`), 미등록 key의 `NOT_FOUND`([ADR 0014](0014-stream-lookup-before-authorize.md)), 예외·reject의 `INTERNAL`([ADR 0011](0011-authorize-exception-internal.md)), abort 시 `CANCELLED` 우선([ADR 0015](0015-rpc-request-lifecycle.md)), 와이어 형식은 바뀌지 않는다.
-
-## 이전(migration)
-
-외부 사용 이력이 없다(버전 `0.0.0`, npm 배포 이력 없음). README "호환성 변경" 절에 항목을 추가하지 않는다. 저장소 안 사용처(demo, README 예시, Electron multi-window test)만 고친다.

@@ -36,12 +36,12 @@ _Avoid_: table key(`domain/op`, category 없는 조회 전용 표기 — 더는 
 
 **계약 (contract)**:
 런타임 값이 아니라 순수 TS 타입 `B`다. 도메인들의 중첩 객체 타입이며, 각 도메인 노드는 `rpc`·`state`·`event` 중 있는 카테고리만 키로 갖고 그 외 키는 하위 namespace로 재귀 처리한다(ADR 0007 계층). 값을 갖지 않으므로 런타임 계약 조합·등록 함수가 없다.
-_Avoid_: 계약을 런타임 descriptor 트리로 조합하던 옛 함수들(제거됨, 근거·이전 방법은 ADR 0012)
+_Avoid_: 계약을 런타임 descriptor 트리로 조합하던 옛 함수들(제거됨, 근거는 ADR 0012)
 
 **`BridgeApi<B>` / `BridgeImpl<B>`**:
 계약 타입 `B`에서 파생하는 타입. `BridgeApi<B>`는 Renderer 호출 트리의 기본 모양(RPC→`Promise`, State→`RemoteState`, Event→`Observable`)이고, `BridgeImpl<B>`는 Main이 `createBridgeServer<B>(impl, options)`에 넘기는 구현 타입(RPC handler, `CurrentValueSource`, `EventSource`)이다. 계약과 구현의 일치는 이 두 타입이 같은 `B`에서 파생한다는 사실 자체로 컴파일 타임에 보장된다.
 Renderer 소비자가 `createRendererApi<B>()`로 받는 공개 타입은 `RendererApi<B>`다 — `BridgeApi<B>`의 RPC마다 `CallOptions`(취소·타임아웃) 인자를 더하고 루트에 `dispose()`를 붙인 것이다.
-_Avoid_: 계약에서 Renderer 타입을 추론하던 옛 타입, 도메인 조합 함수가 반환하던 구현 객체(모두 제거됨, 근거·이전 방법은 ADR 0012)
+_Avoid_: 계약에서 Renderer 타입을 추론하던 옛 타입, 도메인 조합 함수가 반환하던 구현 객체(모두 제거됨, 근거는 ADR 0012)
 
 **`SchemasFor<B>` / `ErrorsFor<B>`**:
 계약과 같은 모양의 선택적 중첩 map 타입. `SchemasFor<B>`는 `createBridgeServer`의 `options.schemas`에 두는 operation 단위 선택 검증 스키마(없으면 도메인 스키마 없이 통과, 구조·크기 검사는 항상 유지)이고, `ErrorsFor<B>`는 `options.errors`에 두는 RPC별 허용 도메인 에러 코드 목록이다.

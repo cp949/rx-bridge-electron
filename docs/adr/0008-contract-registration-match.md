@@ -46,10 +46,3 @@
 ## 결정: `DomainImplementation`을 통합하고 `StreamDomainImplementation`을 제거한다
 
 공개 `DomainImplementation<Name extends string = string>`(`src/main/types.ts`)은 이제 `domainName`·`rpc`·`state`·`event` 네 필드를 모두 가진 단일 타입이다. 이전에 `implement-domain.ts`가 별도로 export하던 `StreamDomainImplementation extends DomainImplementation`(state·event 추가분)는 제거했다. `createBridgeServer`는 `DomainImplementation[]`를 그대로 받고, `StreamHub`에 넘길 때 쓰던 `as readonly StreamDomainImplementation[]` 캐스팅도 제거했다 — 인자 타입과 `StreamHub`가 기대하는 형태가 이제 같은 타입이라 캐스팅이 필요 없다.
-
-## 이전(migration)
-
-- `implementDomain`이 반환한 값을 만든 뒤 handler 안에서 `input as ...`으로 좁히던 코드는 제거한다. `input`은 이제 descriptor의 입력 타입으로 추론된다.
-- `StreamDomainImplementation`을 import하거나 타입 표기에 쓰던 코드는 `DomainImplementation`으로 바꾼다. state·event가 없는 도메인도 이제 같은 타입을 쓴다.
-- 계약에는 선언되어 있지만 `createBridgeServer` 호출 시 구현을 넘기지 않던 도메인이 있다면, 이전에는 서버 생성이 성공하고 해당 operation을 호출한 시점에야 `NOT_FOUND`로 실패했다. 이제는 서버 생성 자체가 `TypeError("Missing domain implementation '<name>'.")`로 실패한다. 테스트 fixture나 데모 조합에서 의도적으로 일부 도메인을 비워 두었다면 지금 시점에 걸린다.
-- 출력 스키마에 `.transform`처럼 입력·출력 형태가 다를 수 있는 스키마를 쓰는 handler는, `implementDomain`이 요구하는 반환 타입이 스키마의 **출력** 타입(`O`)이라는 점을 확인한다. handler가 변환 전 형태를 반환하도록 캐스팅해 두었다면 이제 타입 오류로 드러난다 — 캐스팅을 지우고 변환 후 타입에 맞는 값을 반환하도록 고친다.

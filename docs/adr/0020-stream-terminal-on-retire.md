@@ -86,10 +86,6 @@ frame 소멸 등으로 전송이 실패해도 catch해서 무시한다(best-effo
 - `unsubscribe`·`acknowledge`·`cancel` 거부는 이 ADR 이후에도 응답하지 않는다(호출 자체가 fire-and-forget이라 응답 대상이 없다) — [ADR 0016](0016-sender-admission.md) 결정 3의 "cancel/control 응답: 없음(무시)"는 subscribe를 제외하고는 그대로 유효하다. 아래 "관련 ADR" 참고.
 - parse 실패(`malformed-envelope`·`version-mismatch`) subscribe는 응답하지 않는다 — `subscriptionId`를 신뢰할 수 없어 어느 구독에 보낼지 판정할 수 없다.
 
-## 이전(migration)
-
-외부 사용 이력이 없다(버전 `0.0.0`, npm 배포 이력 없음). README "호환성 변경" 절에 항목을 추가하지 않는다.
-
 ## 관련 ADR
 
 - [ADR 0006](0006-shutdown-contract.md) — "범위 밖" 절이 이 통지를 후속 과제로 남겼다. 이 ADR이 그 과제를 처리한다(해당 절에 개정 표시를 남겼다).

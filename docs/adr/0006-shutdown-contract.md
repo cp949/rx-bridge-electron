@@ -1,6 +1,6 @@
 # 종료(dispose)는 되돌릴 수 없는 최종 상태이고, Renderer와 Main 양쪽에서 진행 중 작업을 로컬로 확정한다
 
-`docs/adr/0005-renderer-api-shape.md`는 Renderer 루트에 `api.dispose()`(및 같은 참조인 `api[Symbol.dispose]`)를 두기로 이름과 존재만 결정하고, 종료가 실제로 무엇을 하는지는 의도적으로 비워 두었다. 이 문서는 그 의미를 Renderer `api.dispose()`, Main `server.dispose()`, bind `dispose()` 세 지점에 대해 고정한다. 호환성은 유지하지 않는다 — breaking을 허용하고, 이전 방법은 마지막 절에 적는다.
+`docs/adr/0005-renderer-api-shape.md`는 Renderer 루트에 `api.dispose()`(및 같은 참조인 `api[Symbol.dispose]`)를 두기로 이름과 존재만 결정하고, 종료가 실제로 무엇을 하는지는 의도적으로 비워 두었다. 이 문서는 그 의미를 Renderer `api.dispose()`, Main `server.dispose()`, bind `dispose()` 세 지점에 대해 고정한다.
 
 ## Renderer: `api.dispose()`
 
@@ -49,12 +49,6 @@ bind `dispose()`(`electron-adapter.ts`의 `bindElectronBridge` 반환값)는 자
 Main이 스트림을 닫을 때 Renderer에 terminal 메시지를 통지하는 프로토콜 확장은 이 문서의 범위 밖이다. 현재 Main 쪽 종료·retire는 Renderer에 능동적으로 알리지 않으며, 이는 별도 후속 과제로 남긴다. 이 문서는 새 오류 코드를 도입하지 않는다 — Renderer는 `CANCELLED`, Main은 `FORBIDDEN`/`INVALID_ARGUMENT` 기존 코드만 쓴다.
 
 _(개정: ADR 0020 — 문서가 살아있는 채로 세션이 끝나는 경우(detach·`server.dispose()`·bind `dispose()`)에 한해 이 과제를 처리했다. 활성·`authorize` 대기 구독은 `error CANCELLED`, retire 뒤 새 subscribe는 `error FORBIDDEN`을 받는다 — 새 오류 코드는 추가하지 않았다. navigation·`render-process-gone`·`destroyed`처럼 문서 자신이 함께 사라지는 retire와 API 전체 차원의 끊김 신호는 여전히 범위 밖이다.)_
-
-## 이전(migration)
-
-- `dispose()` 호출 뒤에도 진행 중이던 RPC의 결과를 기다리던 코드는, `dispose()` 전에 해당 RPC를 `await`하도록 순서를 바꾼다. `dispose()` 이후에는 그 RPC가 `CANCELLED`로 확정된다.
-- 종료 후 `subscribe()` 오류를 `INTERNAL` 코드로 판별하던 코드는 `CANCELLED`로 바꾼다.
-- Main에서 `server.dispose()` 또는 `bindElectronBridge(...).dispose()` 호출 뒤 같은 인스턴스를 다시 `attach()`해 재사용하던 코드는 없어야 한다 — 종료는 되돌릴 수 없으므로, 다시 연결하려면 새 `createBridgeServer`와 새 `bindElectronBridge`를 만든다.
 
 이 결정과 근거는 이 문서와 README의 dispose 절에 반영한다. `docs/adr/0005-renderer-api-shape.md`는 수정하지 않는다 — 그 문서가 결정한 "이름과 존재"는 이 문서가 다루는 "의미"와 층이 다르다.
 

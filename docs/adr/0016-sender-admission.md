@@ -45,7 +45,7 @@ _(개정: ADR 0020 — 위 표의 "cancel/control 응답" 열은 cancel·unsubsc
 
 ## 결정 2: envelope parse(version 포함)를 server로 옮기고 adapter는 번역만 한다
 
-`StreamBridgeServer`의 `handshake`·`controlStream`, 부모 `BridgeServer`의 `dispatchRpc`·`cancel`이 모두 `unknown` 값을 받는다(breaking — 아래 "이전" 참고). 각 메서드는 채널에 맞는 `parseHandshakeRequest`·`parseWireRpcRequest`·`parseWireCancelRequest`·`parseWireStreamCommand`를 가장 먼저 호출한다. 한도는 옛 adapter가 쓰던 값(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)을 그대로 쓴다 — `options.payloadLimits`(contract 단계 한도)는 이 envelope 단계에 적용하지 않는다. 적용하면 `payload-too-large`가 `malformed-envelope`로 흡수돼 두 사유가 구분되지 않기 때문이다.
+`StreamBridgeServer`의 `handshake`·`controlStream`, 부모 `BridgeServer`의 `dispatchRpc`·`cancel`이 모두 `unknown` 값을 받는다. 각 메서드는 채널에 맞는 `parseHandshakeRequest`·`parseWireRpcRequest`·`parseWireCancelRequest`·`parseWireStreamCommand`를 가장 먼저 호출한다. 한도는 옛 adapter가 쓰던 값(`maxDepth`·`maxEntries`·`maxStringBytes` = `Number.MAX_SAFE_INTEGER`, `maxTotalBytes` 없음)을 그대로 쓴다 — `options.payloadLimits`(contract 단계 한도)는 이 envelope 단계에 적용하지 않는다. 적용하면 `payload-too-large`가 `malformed-envelope`로 흡수돼 두 사유가 구분되지 않기 때문이다.
 
 _(개정: RD-039 — 부모 interface `BridgeServer`는 삭제됐다. `dispatchRpc`·`cancel`은 이제 `StreamBridgeServer`에 직접 선언돼 있다. 결정 내용은 그대로다.)_
 
@@ -87,14 +87,6 @@ cancel·control(비-subscribe)은 거부해도 응답을 만들지 않는다(voi
 - 후보 05: 채널 상수·envelope builder·opaque ID를 protocol 모듈로 옮기는 것(TRP-002). preload는 계속 `electron-adapter.ts`에서 `ELECTRON_BRIDGE_CHANNELS`를 import한다. — RD-019에서 처리(위 개정 표시, [ADR 0013](0013-wiring-defaults.md)).
 - 후보 06: loopback adapter. 이 ADR의 새 시그니처(`unknown` 인자, server가 판정 전부 소유)는 그 adapter를 만들 수 있는 전제만 마련한다 — adapter 자체는 이 작업의 범위가 아니다. — RD-020에서 처리([ADR 0017](0017-loopback-test-transport.md)).
 - `DocumentSessions.retiredClientCount`(test 전용 인터페이스), `RejectReason` enum 값 추가·삭제, wire 응답에 거부 사유 싣기.
-
-## 이전(migration)
-
-`StreamBridgeServer`(`handshake`·`controlStream`)와 부모 `BridgeServer`(`dispatchRpc`·`cancel`)를 직접 구현하거나 직접 호출하는 코드는 두 가지를 바꿔야 한다: (1) 두 번째 인자에 각 채널의 envelope 객체(`{ protocolVersion, clientId, ... }`)를 넘긴다 — 이전처럼 `clientId` 문자열만 넘기면 컴파일은 통과하지만 런타임에 `malformed-envelope`로 거부된다. (2) `handshake`의 반환 타입이 `unknown`에서 `HandshakeResponse | RpcResponse`로 좁혀진다 — 성공은 `HandshakeResponse`(`manifest` 보유), 거부는 `error.code === "INVALID_ARGUMENT"`인 `RpcResponse`다.
-
-구조 오류 input(Symbol·함수·순환 참조 등)은 server를 직접 호출해도 이제 등록 조회·`authorize` 전에 envelope parse에서 `malformed-envelope` + `INVALID_ARGUMENT "Invalid bridge request."`로 거부된다 — 이전에는 in-process 호출자만 등록 조회 → `authorize` → `invalid-input` 순서를 거쳤다(IPC 경로는 adapter가 먼저 parse했으므로 이미 이 동작이었다).
-
-`recordAdapterRejection` Symbol(ADR 0010 §14)은 삭제한다 — export한 적이 없으므로(`src/main/index.ts`에 없음) 라이브러리 사용자에게 이전 조치는 없다. README "호환성 변경" 절에 시그니처 변경(unknown 인자, handshake 반환 타입)과 진단 사유 변경(frame·origin 사유가 모든 채널에 적용, cancel 거부 기록, `version-mismatch`가 운영 경로에서 기록되고 RPC wire 응답이 `VERSION_MISMATCH`, 구조 오류 input의 `malformed-envelope`, 미attach handshake의 `sender-unauthorized`)을 적는다.
 
 ## 관련 ADR
 

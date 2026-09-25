@@ -57,7 +57,3 @@ DELTA-02(`_works/20260925-02-navigation-commit-retire/DELTA-02.md`)가 Electron 
 
 - [ADR 0015](0015-rpc-request-lifecycle.md) — "근거 가설"과 "틀렸을 때의 대가" 절이 `did-start-navigation` 기준으로 세션 현재성과 `session.signal` abort의 동치를 서술했다. 이 ADR이 선택한 조합 신호로 그 가설 문구를 개정한다(해당 절에 인라인 개정 표시를 남겼다). 새 가설 문구: "main frame `routingId`는 `did-navigate` 또는 (`did-fail-load`이면서 그 시점의 `contents.mainFrame.routingId`가 이벤트의 `frameRoutingId`와 일치하는 경우) 없이는 바뀌지 않는다."
 - [ADR 0016](0016-sender-admission.md) — sender admission 판정(`#admit`, `isCurrentMainFrame`)의 현재 구조. 이 ADR은 그 판정 로직을 바꾸지 않는다.
-
-## 이전(migration)
-
-외부 사용 이력이 없다(버전 `0.0.0`, npm 배포 이력 없음). README "호환성 변경" 절에 항목을 추가하지 않는다.

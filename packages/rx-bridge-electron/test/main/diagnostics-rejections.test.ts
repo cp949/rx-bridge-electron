@@ -424,8 +424,7 @@ describe("rejected diagnostic reasons", () => {
 
   test("RPC malformed-envelope for a structural error, not payload-too-large", async () => {
     // server가 envelope parse(input 포함)를 admission보다 먼저 하므로, 구조 오류
-    // input은 등록 조회 전에 malformed-envelope로 거부된다(key 없음, ADR 0016
-    // "이전").
+    // input은 등록 조회 전에 malformed-envelope로 거부된다(key 없음, ADR 0016).
     const { server, diagnostics } = setup({});
     await server.dispatchRpc(
       sender(),

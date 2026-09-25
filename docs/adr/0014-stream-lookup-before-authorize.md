@@ -37,7 +37,3 @@ wire 메시지 순서, [ADR 0009](0009-session-resource-limits.md) §11의 slot 
 ## 범위 밖
 
 RPC 수명주기(`tryAcquireRpc`·`beginRpc`·`finishRpc`·`releaseRpc`·`cancelRpc`, RPC `keyOf`) — 후속 ROADMAP.md#RD-016(완료, [ADR 0015](0015-rpc-request-lifecycle.md)). sender admission 통합, `recordAdapterRejection` Symbol, version-mismatch 도달 불가 분기 — 후속 ROADMAP.md#RD-018(완료, [ADR 0016](0016-sender-admission.md)). 와이어 형식·채널·handshake·공개 export 변경(`Subscriptions`는 공개 export가 아니다 — `StreamHub`와 마찬가지로 내부 구현이다).
-
-## 이전(migration)
-
-미등록 stream key에 `authorize` deny 시 `FORBIDDEN`을 기대하던 소비자는 이제 `authorize` 호출 여부와 무관하게 `NOT_FOUND`를 받는다. `authorize` 콜백은 미등록 key를 더 이상 받지 않는다 — 모든 key를 무조건 허용하던 구현이라도 동작에 영향은 없다(미등록 key는 등록 조회에서 먼저 걸러진다). 와이어 형식과 오류 코드 집합은 바뀌지 않는다. README "호환성 변경" 절에 이 이전을 적는다.

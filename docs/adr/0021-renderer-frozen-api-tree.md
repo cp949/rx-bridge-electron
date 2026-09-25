@@ -29,7 +29,3 @@
 
 - 공개 호출 형태 `api.<domain path>.rpc|state|event.<operation>`, `RendererApi<B>` 타입, manifest 판정 규칙([ADR 0007](0007-hierarchical-renderer-api.md)), wire 형식.
 - 없는 경로 `undefined`, thenable 아님, 쓰기 거부, 루트 `dispose` 예약과 `api.dispose === api[Symbol.dispose]`([ADR 0006](0006-shutdown-contract.md)).
-
-## 이전(migration)
-
-외부 사용 이력이 없다(버전 `0.0.0`, npm 배포 이력 없음). README "호환성 변경" 절에 항목을 추가하지 않는다. 관측이 바뀌는 것은 `Object.isFrozen(api)`(`true`), `Symbol.dispose in api`(`true`), descriptor의 `value`·`writable: false`·`configurable: false`다.

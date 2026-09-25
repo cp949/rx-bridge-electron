@@ -66,10 +66,6 @@ retire는 요청 등록 시 `session.signal`에 `{ once: true }` abort listener�
 - deadline 만료 뒤 Renderer `cancel`이 `rpc-cancelled`를 추가로 기록하는 기존 동작(이중 계산 가능성). 이 작업이 characterization test로 고정만 했다 — 후속 이슈(`.scratch/rpc-deadline-cancel-diagnostic/issues/01-deadline-cancel-diagnostic.md`)에서 "먼저 확정된 원인 하나만 기록"으로 해결했다([ADR 0010](0010-operational-diagnostics.md) §8).
 - wire 형식·채널·handshake·공개 export 변경. `RpcRequests`는 `src/main/index.ts`의 공개 export가 아니다 — `Subscriptions`와 같은 내부 구현이다.
 
-## 이전(migration)
-
-와이어 형식, 오류 코드, 진단 이벤트 종류·순서는 바뀌지 않는다. `RpcRequests`·`rpc-dispatcher.ts` 모두 공개 export였던 적이 없으므로 라이브러리 사용자에게 이전 조치는 없다. `docs/adr/0010-operational-diagnostics.md` §7·§10이 참조하던 옛 파일·메서드 이름(`rpc-dispatcher.ts`, `tryAcquireRpc`/`releaseRpc`)만 이 ADR을 가리키도록 개정 표시를 남긴다(결정 내용 자체는 바뀌지 않는다).
-
 ## 관련 ADR
 
 - [ADR 0009](0009-session-resource-limits.md) — 세션별 RPC 슬롯 한도와 §10 slot 반환 시점(이 ADR이 그대로 보존한다).
