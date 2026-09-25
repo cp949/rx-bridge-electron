@@ -146,7 +146,7 @@ function streamFrame(
  */
 export class Subscriptions {
   readonly #table: RegistrationTable;
-  readonly #upstreams = new Upstreams();
+  readonly #upstreams: Upstreams;
   readonly #sessions = new WeakMap<DocumentSession, SessionState>();
   /**
    * 구독을 하나 이상 가진 세션의 `SessionState`만 담는다(비면 즉시 제거) —
@@ -172,6 +172,9 @@ export class Subscriptions {
     this.#diagnostics = diagnostics;
     this.#authorize = authorize;
     this.#slots = new SessionSlots(resourceLimits.maxSubscriptions);
+    this.#upstreams = new Upstreams((key) =>
+      recordDiagnostic(diagnostics, { type: "upstream-teardown-failed", key }),
+    );
   }
 
   public subscriptionCount(): number {

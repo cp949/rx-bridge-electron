@@ -36,9 +36,16 @@ import type {
  *   불러야 정리된다 — `Subscriptions`는 terminal을 기록하면서 해제한다.
  * - `disconnect`는 호출자 identity(토큰 객체)로만 식별하고 멱등이다. 호출자는
  *   handle을 저장하지 않는다.
+ * - 사용자 source의 teardown 예외는 이 module 밖으로 나가지 않는다(RD-045).
+ *   upstream 해지는 `#release` 한 곳을 거치며, 예외를 잡아 생성자 콜백
+ *   `onTeardownError(key)`로 알린다. 공유 entry는 해지 전에 map에서 지운다 —
+ *   해지가 던져도 같은 key의 다음 연결은 새 upstream을 만든다. 동기 방출 중
+ *   이미 닫힌 upstream에 teardown이 붙으며 던지면(rxjs가 그 자리에서 실행한다)
+ *   `subscribe` 호출의 예외도 같은 콜백으로 알리고 삼킨다.
  *
  * 이 module이 모르는 것: `DocumentSession`, `authorize`, 전달 창
- * (`DeliveryWindow`), 진단(`DiagnosticsSink`), wire envelope. upstream
+ * (`DeliveryWindow`), 진단(`DiagnosticsSink` — teardown 예외는 콜백으로만
+ * 알린다), wire envelope. upstream
  * `error`는 원래 값을 그대로 sink로 넘긴다 — 내부 오류로 번역하는 것은
  * `Subscriptions`가 한다.
  */
@@ -63,12 +70,22 @@ interface SharedEntry {
 /** 토큰 하나의 연결 기록. `connecting`은 사용자 코드를 부르는 동안의 자리표시다. */
 type TokenEntry =
   | { readonly kind: "connecting" }
-  | { readonly kind: "scoped"; readonly subscriber: Subscriber<BridgeValue> }
+  | {
+      readonly kind: "scoped";
+      readonly key: string;
+      readonly subscriber: Subscriber<BridgeValue>;
+    }
   | { readonly kind: "shared"; readonly shared: SharedEntry };
 
 export class Upstreams {
   readonly #shared = new Map<string, SharedEntry>();
   readonly #tokens = new WeakMap<object, TokenEntry>();
+  readonly #onTeardownError: (key: string) => void;
+
+  /** `onTeardownError`는 사용자 teardown이 던질 때 그 upstream의 key로 불린다. 생략하면 조용히 삼킨다. */
+  public constructor(onTeardownError: (key: string) => void = () => {}) {
+    this.#onTeardownError = onTeardownError;
+  }
 
   /**
    * 토큰을 upstream에 연결한다. State·broadcast Event는 공유 갈래, scoped
@@ -95,23 +112,25 @@ export class Upstreams {
 
   /**
    * 토큰의 연결을 끊는다. 미연결 토큰이면 아무 일도 하지 않는다(멱등). 공유
-   * member가 이 토큰을 마지막으로 빠지면 upstream을 해지하고, 그 key의 현재
-   * entry가 이 entry와 같을 때만 map에서 지운다.
+   * member가 이 토큰을 마지막으로 빠지면 그 key의 현재 entry가 이 entry와 같을
+   * 때만 map에서 지우고, 그다음 upstream을 해지한다. 해지 예외는 던지지 않는다.
    */
   public disconnect(token: object): void {
     const entry = this.#tokens.get(token);
     if (entry === undefined) return;
     this.#tokens.delete(token);
     if (entry.kind === "scoped") {
-      entry.subscriber.unsubscribe();
+      this.#release(entry.subscriber, entry.key);
       return;
     }
     if (entry.kind === "shared") {
-      entry.shared.members.delete(token);
-      if (entry.shared.members.size === 0) {
-        entry.shared.upstream?.unsubscribe();
-        if (this.#shared.get(entry.shared.key) === entry.shared)
-          this.#shared.delete(entry.shared.key);
+      const shared = entry.shared;
+      shared.members.delete(token);
+      if (shared.members.size === 0) {
+        if (this.#shared.get(shared.key) === shared)
+          this.#shared.delete(shared.key);
+        if (shared.upstream !== undefined)
+          this.#release(shared.upstream, shared.key);
       }
     }
     // kind === "connecting": 등록만 지우면 된다. connect() 쪽이 사용자 코드
@@ -144,7 +163,41 @@ export class Upstreams {
       );
       return;
     }
-    this.#connectScoped(token, registration.delivery.factory, context, sink);
+    this.#connectScoped(
+      token,
+      registration.bridgeOperation.key,
+      registration.delivery.factory,
+      context,
+      sink,
+    );
+  }
+
+  /** upstream을 해지한다. 사용자 teardown 예외는 `onTeardownError(key)`로 알리고 삼킨다. */
+  #release(upstream: Subscription, key: string): void {
+    try {
+      upstream.unsubscribe();
+    } catch {
+      this.#onTeardownError(key);
+    }
+  }
+
+  /**
+   * `source`를 `upstream`으로 구독한다. 던졌는데 `upstream`이 이미 닫혀
+   * 있으면 동기 방출 중 해지된 구독에 붙은 teardown이 그 자리에서 던진
+   * 것이다 — `onTeardownError(key)`로 알리고 삼킨다. 닫히지 않았으면 다시
+   * 던진다(`connect`가 정리한다).
+   */
+  #subscribe(
+    source: Observable<BridgeValue>,
+    upstream: Subscriber<BridgeValue>,
+    key: string,
+  ): void {
+    try {
+      source.subscribe(upstream);
+    } catch (error) {
+      if (!upstream.closed) throw error;
+      this.#onTeardownError(key);
+    }
   }
 
   /**
@@ -156,6 +209,7 @@ export class Upstreams {
    */
   #connectScoped(
     token: object,
+    key: string,
     factory: (context: BridgeContext) => Observable<BridgeValue>,
     context: BridgeContext,
     sink: UpstreamSink,
@@ -170,8 +224,8 @@ export class Upstreams {
       error: (error: unknown) => sink.error(error),
       complete: () => sink.complete(),
     });
-    this.#tokens.set(token, { kind: "scoped", subscriber });
-    source.subscribe(subscriber);
+    this.#tokens.set(token, { kind: "scoped", key, subscriber });
+    this.#subscribe(source, subscriber, key);
   }
 
   /**
@@ -207,8 +261,8 @@ export class Upstreams {
         complete: () => this.#fanOut(entry, (member) => member.complete()),
       });
       entry.upstream = upstream;
-      source.subscribe(upstream);
-      if (entry.members.size === 0) upstream.unsubscribe();
+      this.#subscribe(source, upstream, key);
+      if (entry.members.size === 0) this.#release(upstream, key);
       return;
     }
 

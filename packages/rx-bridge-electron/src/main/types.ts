@@ -107,7 +107,13 @@ export type BridgeDiagnostic =
   | { readonly type: "session-opened" }
   | { readonly type: "session-closed" }
   | { readonly type: "subscription-opened"; readonly key: string }
-  | { readonly type: "subscription-closed"; readonly key: string };
+  | { readonly type: "subscription-closed"; readonly key: string }
+  /**
+   * 사용자 State·Event source의 teardown이 upstream 해지 중 예외를 던졌다
+   * (RD-045). 예외는 삼키고 정리는 끝난다. upstream 단위라 공유 upstream은
+   * 마지막 구독의 `subscription-closed` 뒤에 기록될 수 있다.
+   */
+  | { readonly type: "upstream-teardown-failed"; readonly key: string };
 export interface DiagnosticsSink {
   record(event: BridgeDiagnostic): void;
 }
