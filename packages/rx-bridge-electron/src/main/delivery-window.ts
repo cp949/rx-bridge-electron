@@ -26,7 +26,10 @@ export type WindowTerminal =
   | { readonly type: "complete" }
   | { readonly type: "error"; readonly error: RpcErrorPayload };
 
-/** `accept()` 반환. `overflowed`는 이 호출이 `STREAM_OVERFLOW` terminal을 새로 기록했는지다(C2). */
+/**
+ * `accept()` 반환. `overflowed`는 이 호출이 `STREAM_OVERFLOW` terminal을 새로
+ * 기록했는지다 — 호출자는 이 값으로 terminal 기록 직후 source를 분리한다.
+ */
 export interface AcceptResult {
   readonly message: WindowMessage | undefined;
   readonly overflowed: boolean;
@@ -34,14 +37,18 @@ export interface AcceptResult {
 
 /**
  * `end()` 반환. `recorded`가 `false`면 이미 종결·닫힘이거나 terminal이 이미
- * 기록돼 있어 "무시됨"이라는 뜻이다(C2).
+ * 기록돼 있어 "무시됨"이라는 뜻이다. `true`면 호출자는 source를 분리한 뒤
+ * `message`(있으면)를 보낸다.
  */
 export interface EndResult {
   readonly recorded: boolean;
   readonly message: WindowMessage | undefined;
 }
 
-/** 창 진단 callback. `onDropped`·`onQueueDepth`는 State 버퍼에서는 호출되지 않는다(결정 6, C4). */
+/**
+ * 창 진단 callback. 발생 지점에서 동기로 호출되고, 창은 callback이 돌아온 뒤
+ * 자기 상태를 다시 확인한다. State 버퍼에서는 호출되지 않는다.
+ */
 export interface DeliveryWindowCallbacks {
   readonly onDropped?: (count: number) => void;
   readonly onQueueDepth?: (depth: number) => void;
@@ -71,14 +78,14 @@ interface DeliveryBuffer {
   shift(): ShiftOutcome;
   /** `preempt()`에서 대기 값을 모두 버릴 때 쓴다. */
   discardAll(): void;
-  /** 대기 값 수(C6). */
+  /** 대기 값 수. */
   readonly pendingCount: number;
 }
 
 /**
  * State buffer 정책: 최신값 1칸 덮어쓰기. push는 이전 값을 버리고 drop·진단이
- * 없다. `queuedValueCount()`에는 항상 0으로 잡힌다(C6) — 내부에 값이 있어도
- * 대기 "큐"로 취급하지 않는다.
+ * 없다. `queuedValueCount()`에는 항상 0으로 잡힌다 — 내부에 값이 있어도
+ * 대기 "큐"로 취급하지 않는다(`queuedEvents` 진단 값 보존).
  */
 function createStateBuffer(): DeliveryBuffer {
   let hasValue = false;
@@ -154,7 +161,7 @@ const overflowError: RpcErrorPayload = {
  * 분리는 호출자(`Subscriptions`)가 맡는다. State/Event 차이는 생성 시 주입한
  * `DeliveryBuffer` 하나로만 표현되고, 이 클래스 안에는 `kind` 분기가 없다.
  *
- * 상태는 두 단계다(C1). "종결"은 terminal 메시지를 반환했거나 `preempt`한
+ * 상태는 두 단계다. "종결"은 terminal 메시지를 반환했거나 `preempt`한
  * 뒤이고, "닫힘"은 `close()` 뒤다. 종결 뒤에도 `close()` 전까지는 `closed`가
  * `false`다 — 수명 정리 멱등성은 `close()`의 반환값에 달려 있기 때문이다.
  */
@@ -165,9 +172,9 @@ export class DeliveryWindow {
   #sequence = 0;
   #inFlight: number | undefined;
   #pendingTerminal: WindowTerminal | undefined;
-  /** terminal 메시지를 반환했거나 `preempt`한 뒤(C1의 "종결"). */
+  /** terminal 메시지를 반환했거나 `preempt`한 뒤("종결"). */
   #concluded = false;
-  /** `close()` 호출 여부(C1의 "닫힘"). */
+  /** `close()` 호출 여부("닫힘"). */
   #closed = false;
 
   public constructor(
@@ -179,30 +186,44 @@ export class DeliveryWindow {
     this.#onQueueDepth = callbacks.onQueueDepth ?? ((): void => {});
   }
 
-  /** 창을 연다. sequence 0의 `subscribed`를 반환한다. 이후 sequence는 창이 매긴다(결정 11). */
+  /** 창을 연다. sequence 0의 `subscribed`를 반환한다. 이후 sequence도 모두 창이 매긴다. */
   public open(): WindowMessage {
     return { type: "subscribed", sequence: 0 };
   }
 
-  /** 대기 값 수(C6). Event는 buffer depth, State는 항상 0이다. */
+  /** 대기 값 수. Event는 buffer depth, State는 항상 0이다. */
   public queuedValueCount(): number {
     return this.#buffer.pendingCount;
   }
 
-  /** `close()` 호출 여부. 종결(terminal 반환·`preempt`) 상태는 포함하지 않는다 — "## 결정" 참고. */
+  /**
+   * `close()` 호출 여부. 종결(terminal 반환·`preempt`) 상태는 포함하지 않는다 —
+   * 호출자는 이 값으로 "그 사이 `close()`가 동기로 불렸는가"만 확인한다.
+   */
   public get closed(): boolean {
     return this.#closed;
   }
 
   /**
-   * 값 하나를 수락한다. 종결·닫힘이면 무시한다. buffer에 push하고, Event면
-   * `onDropped`(dropped > 0) → `onQueueDepth`(push 뒤 depth) 순으로 부른다.
-   * 두 callback이 재진입으로 창을 종결·닫아도 이 순서 자체는 지킨다(결정
-   * 13). 그 뒤 상태를 다시 확인하고, overflow면 `STREAM_OVERFLOW` terminal을
-   * 기록한 뒤 flush 규칙을 적용한다.
+   * 새 값을 받는지 여부. 종결·닫힘이거나 terminal이 기록돼 있으면 `false`다 —
+   * terminal 기록 뒤 도착한 값은 ack 대기 중이어도 버린다. 호출자는 값을
+   * 검증(`parseOutput`)하기 전에 이 값을 확인한다.
+   */
+  public get accepting(): boolean {
+    return (
+      !this.#closed && !this.#concluded && this.#pendingTerminal === undefined
+    );
+  }
+
+  /**
+   * 값 하나를 수락한다. `accepting`이 아니면 무시한다. buffer에 push하고,
+   * Event면 `onDropped`(dropped > 0) → `onQueueDepth`(push 뒤 depth) 순으로
+   * 부른다. `onDropped`가 재진입으로 창을 종결·닫아도 `onQueueDepth`까지 부른
+   * 뒤에 상태를 다시 확인한다(현재 진단 순서 보존). 그 뒤 overflow면
+   * `STREAM_OVERFLOW` terminal을 기록하고 flush 규칙을 적용한다.
    */
   public accept(value: BridgeValue): AcceptResult {
-    if (this.#closed || this.#concluded) {
+    if (!this.accepting) {
       return { message: undefined, overflowed: false };
     }
     const result = this.#buffer.push(value);
@@ -230,7 +251,7 @@ export class DeliveryWindow {
   /**
    * terminal을 기록한다. 이미 종결·닫힘이거나 terminal이 기록돼 있으면
    * `recorded: false`(무시됨)를 돌려준다. 아니면 기록하고 flush를 적용한 뒤
-   * `recorded: true`와 flush 결과(있으면)를 돌려준다(C2).
+   * `recorded: true`와 flush 결과(있으면)를 돌려준다.
    */
   public end(terminal: WindowTerminal): EndResult {
     if (
@@ -259,7 +280,7 @@ export class DeliveryWindow {
     return { type: "error", sequence, error };
   }
 
-  /** 창을 닫는다. 처음 호출에서만 `true`를 돌려준다(C1) — 이후 모든 입력은 무출력이다. */
+  /** 창을 닫는다. 처음 호출에서만 `true`를 돌려준다 — 호출자의 수명 정리 멱등성이 이 값에 달려 있다. 이후 모든 입력은 무출력이다. */
   public close(): boolean {
     if (this.#closed) return false;
     this.#closed = true;
@@ -268,9 +289,10 @@ export class DeliveryWindow {
 
   /**
    * flush 규칙: `inFlight`가 없고 대기 값이 있으면 shift한다(Event면
-   * `onQueueDepth`를 부르고, 그 재진입으로 종결·닫히면 아무것도 반환하지
-   * 않는다 — 결정 12와 같은 효과). 아니면 sequence를 올려 `inFlight`로
-   * 기록한 뒤 `batch`를 반환한다(C3). 대기 값이 없고 terminal이 기록돼
+   * `onQueueDepth`를 부르고, 그 재진입으로 종결·닫히면 꺼낸 값을 버리고
+   * 아무것도 반환하지 않는다 — terminal 뒤 batch 방지). 아니면 sequence를
+   * 올려 `inFlight`로 기록한 뒤 `batch`를 반환한다. 송신 전에 기록하므로
+   * 동기 `send` 안에서 재진입한 `ack`이 곧바로 다음 값을 꺼낸다. 대기 값이 없고 terminal이 기록돼
    * 있으면 terminal 메시지를 반환하고 종결 상태가 된다.
    */
   #flush(): WindowMessage | undefined {
@@ -310,7 +332,7 @@ export function createStateDeliveryWindow(
 
 /**
  * Event consumer용 창을 만든다. `capacity`·`overflow`는 registration이 이미
- * 검증·동결한 값을 그대로 받는다(C5) — 여기서는 다시 검증하지 않는다.
+ * 검증·동결한 값을 그대로 받는다 — 여기서는 다시 검증하지 않는다.
  */
 export function createEventDeliveryWindow(
   capacity: number,

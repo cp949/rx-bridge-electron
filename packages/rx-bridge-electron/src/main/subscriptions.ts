@@ -370,8 +370,8 @@ export class Subscriptions {
     // registration이 이미 capacity·overflow를 검증하고 동결 복사본을
     // 저장했으므로(`registration.ts`의 `normalizeEventBuffer`), 여기서
     // `createEventDeliveryWindow`가 만드는 `BoundedQueue` 생성은 공개
-    // seam에서 예외에 도달할 수 없다(C5, "## 결정" 참고). `subscribed`
-    // 송신 앞, try 밖에서 만든다.
+    // seam에서 예외에 도달할 수 없다. 창이 `subscribed`(0)를 반환하므로
+    // `subscribed` 송신 앞, try 밖에서 만든다.
     const window: DeliveryWindow =
       registration.kind === "event"
         ? createEventDeliveryWindow(
@@ -544,6 +544,9 @@ export class Subscriptions {
   }
 
   #next(consumer: Consumer, raw: unknown): void {
+    // fan-out 순회 스냅샷 안에서 앞 consumer의 동기 send가 이 consumer를
+    // 닫거나 terminal을 기록할 수 있다. 검증 전에 확인해 버린다.
+    if (!consumer.window.accepting) return;
     let value: BridgeValue;
     try {
       value = parseOutput(consumer.registration.output, raw, this.#limits);
