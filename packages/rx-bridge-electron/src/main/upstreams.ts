@@ -41,13 +41,14 @@ import type {
  *   `onTeardownError(key)`로 알린다. 공유 entry는 해지 전에 map에서 지운다 —
  *   해지가 던져도 같은 key의 다음 연결은 새 upstream을 만든다. 동기 방출 중
  *   이미 닫힌 upstream에 teardown이 붙으며 던지면(rxjs가 그 자리에서 실행한다)
- *   `subscribe` 호출의 예외도 같은 콜백으로 알리고 삼킨다.
+ *   `subscribe` 호출의 예외도 같은 콜백으로 알리고 삼킨다. operator를 거친
+ *   source는 rxjs가 이 예외를 이미 닫힌 upstream의 `error`로 보내 버리므로
+ *   던지지도 알리지도 않는다.
  *
  * 이 module이 모르는 것: `DocumentSession`, `authorize`, 전달 창
  * (`DeliveryWindow`), 진단(`DiagnosticsSink` — teardown 예외는 콜백으로만
- * 알린다), wire envelope. upstream
- * `error`는 원래 값을 그대로 sink로 넘긴다 — 내부 오류로 번역하는 것은
- * `Subscriptions`가 한다.
+ * 알린다), wire envelope. upstream `error`는 원래 값을 그대로 sink로 넘긴다
+ * — 내부 오류로 번역하는 것은 `Subscriptions`가 한다.
  */
 
 /** upstream이 값·terminal을 전달하는 대상. observer 모양이다. */

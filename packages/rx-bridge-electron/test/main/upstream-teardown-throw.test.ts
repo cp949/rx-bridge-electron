@@ -5,10 +5,11 @@
  * `server.dispose()`, 전송 실패 뒤 close, 동기 방출 중 이미 닫힌 upstream에
  * teardown이 붙는 경로를 server seam에서 구독하며 검증한다. 각 경로는 예외를
  * 밖으로 내보내지 않고 `upstream-teardown-failed` 진단을 key와 함께 1건
- * 남겨야 한다. Main `uncaughtException`은 테스트 동안 vitest listener를 떼고
- * 직접 모아 본다.
+ * 남겨야 한다. 예외: operator를 거친 source의 동기 방출 경로는 rxjs가 예외를
+ * 닫힌 upstream의 `error`로 버려 진단이 남지 않는다(ADR 0025 한계). Main
+ * `uncaughtException`은 테스트 동안 vitest listener를 떼고 직접 모아 본다.
  */
-import { BehaviorSubject, Observable, Subject } from "rxjs";
+import { BehaviorSubject, Observable, Subject, map } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
 import {
@@ -242,6 +243,7 @@ describe("공유 upstream entry 정리", () => {
     expect(subscriptions()).toBe(2);
     expect(teardownFailures()).toEqual([stateFailure]);
   });
+
   test("teardown 안에서 같은 key를 동기로 다시 구독해도 새 upstream에 연결된다", async () => {
     const subject = new Subject<number>();
     let subscriptions = 0;
@@ -369,9 +371,7 @@ describe("동기 방출 중 이미 닫힌 upstream의 teardown throw", () => {
       { diagnostics: sink },
     );
     server.attach(new FakeTarget(1));
-    let subscription!: Awaited<
-      ReturnType<ReturnType<typeof rendererDocument>["subscribe"]>
-    >;
+    let subscription!: TestSubscription;
     const errors = await collectUncaught(async () => {
       subscription = await rendererDocument(server).subscribe(EVENT);
       await subscription.ack();
@@ -399,5 +399,31 @@ describe("동기 방출 중 이미 닫힌 upstream의 teardown throw", () => {
     expect(errors).toEqual([]);
     expect(throwing.subscriptions()).toBe(2);
     expect(teardownFailures()).toEqual([eventFailure, eventFailure]);
+  });
+
+  test("operator를 거친 scoped Event가 구독 중 동기로 끝나고 teardown이 throw하면 예외 없이 끝나지만 진단은 남지 않는다", async () => {
+    const throwing = completesThenThrows(7);
+    const { sink, teardownFailures } = diagnosticsSpy();
+    const server = createBridgeServer(
+      {
+        hardware: {
+          event: {
+            change$: scopedEvent(() =>
+              throwing.source.pipe(map((value) => value)),
+            ),
+          },
+        },
+      },
+      { diagnostics: sink },
+    );
+    server.attach(new FakeTarget(1));
+    let subscription!: TestSubscription;
+    const errors = await collectUncaught(async () => {
+      subscription = await rendererDocument(server).subscribe(EVENT);
+      await subscription.ack();
+    });
+    expect(errors).toEqual([]);
+    expect(subscription.types()).toEqual(["subscribed", "batch", "complete"]);
+    expect(teardownFailures()).toEqual([]);
   });
 });
