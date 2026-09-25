@@ -1,15 +1,3 @@
-import type { RpcErrorPayload } from "../protocol/index.js";
-import type { DocumentSession } from "./document-sessions.js";
-import { recordDiagnostic } from "./diagnostics.js";
-import { internalError } from "./error-serializer.js";
-import type {
-  Authorize,
-  BridgeContext,
-  BridgeOperation,
-  DiagnosticsSink,
-  SenderIdentity,
-} from "./types.js";
-
 /**
  * RPC·stream이 공유하는 authorize 판정 단계(ADR 0011 결정 1·2·4, ADR 0018
  * `BridgeOperation` 전달, ADR 0010 `authorize-denied` 진단)가 소유하는 불변식은
@@ -25,6 +13,20 @@ import type {
  * 호출, 또는 구독과 `subscribed` 전송 사이에 await가 없었다), 이 module을
  * 무조건 `await`하면 microtask 하나가 끼어들어 그 순서가 깨진다.
  */
+
+import type { RpcErrorPayload } from "../protocol/index.js";
+import type { DocumentSession } from "./document-sessions.js";
+import { recordDiagnostic } from "./diagnostics.js";
+import { internalError } from "./error-serializer.js";
+import type {
+  Authorize,
+  BridgeContext,
+  BridgeOperation,
+  DiagnosticsSink,
+  SenderIdentity,
+} from "./types.js";
+
+/** authorize 판정 단계의 결과. 호출자가 RPC 응답이나 stream 프레임으로 번역한다. */
 export type AuthorizeVerdict =
   | { readonly type: "allowed" }
   | { readonly type: "rejected"; readonly error: RpcErrorPayload }
