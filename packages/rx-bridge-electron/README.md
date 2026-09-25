@@ -398,7 +398,7 @@ const server = createBridgeServer(impl, {
 
 한도를 넘으면 세션별로 격리된 오류로 끝나고 다른 세션에는 영향이 없습니다: 동시 RPC·구독 수 초과는 `RESOURCE_EXHAUSTED`, Main deadline 경과는 `DEADLINE_EXCEEDED`(handler의 `AbortSignal`도 abort됩니다). `AbortSignal`을 무시하는 handler는 자기 세션의 RPC 슬롯만 계속 점유합니다. 근거는 [ADR 0009](../../docs/adr/0009-session-resource-limits.md)에 있습니다.
 
-`createBridgeServer`의 `diagnostics` 옵션으로 `DiagnosticsSink`를 연결하면 RPC 완료(성공·실패 `outcome` 포함)·취소·Main deadline 만료, 출력 검증 실패, Event 큐 깊이·드롭, 보안·입력·자원 한도 거부 사유(`rejected`, 11개 `RejectReason`), 세션·구독의 생성과 해제를 닫힌 타입 이벤트로 관측할 수 있습니다. 사유는 enum 코드, 식별자는 등록된 와이어 key만 실리며 자격 증명·원시 payload·origin·clientId·requestId·subscriptionId·`Error` 객체는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다.
+`createBridgeServer`의 `diagnostics` 옵션으로 `DiagnosticsSink`를 연결하면 RPC 완료(성공·실패 `outcome` 포함)·취소·Main deadline 만료, 출력 검증 실패, Event 큐 깊이·드롭, 보안·입력·자원 한도 거부 사유(`rejected`, 11개 `RejectReason`), 세션·구독의 생성과 해제, State·Event source teardown의 예외(`upstream-teardown-failed` — 예외는 bridge가 삼키고 정리를 마칩니다)를 닫힌 타입 이벤트로 관측할 수 있습니다. 사유는 enum 코드, 식별자는 등록된 와이어 key만 실리며 자격 증명·원시 payload·origin·clientId·requestId·subscriptionId·`Error` 객체는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 bridge 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다.
 
 ```ts
 const server = createBridgeServer(impl, {
