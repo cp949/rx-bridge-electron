@@ -5,7 +5,7 @@ import {
   createRendererApi,
   createOpaqueId,
 } from "../../src/renderer/index.js";
-import { FakeTransport } from "./fake-transport.js";
+import { FakeTransport, rpcError, rpcSuccess } from "./fake-transport.js";
 
 interface AppBridge {
   readonly hardware: {
@@ -14,19 +14,6 @@ interface AppBridge {
         readonly connected: boolean;
       };
     };
-  };
-}
-
-function success(
-  requestId: string,
-  result: { readonly connected: boolean } = { connected: true },
-) {
-  return {
-    protocolVersion: 1 as const,
-    clientId: "client-1",
-    type: "success" as const,
-    requestId,
-    result,
   };
 }
 
@@ -56,7 +43,7 @@ describe("renderer RPC races", () => {
       );
 
       if (first === "response") {
-        transport.resolveInvocation(0, success(requestId));
+        transport.resolveInvocation(0, rpcSuccess(requestId));
         await Promise.resolve();
         controller.abort();
       } else {
@@ -103,7 +90,7 @@ describe("renderer RPC races", () => {
       );
 
       if (first === "response") {
-        transport.resolveInvocation(0, success(requestId));
+        transport.resolveInvocation(0, rpcSuccess(requestId));
         await Promise.resolve();
         timeoutCallback();
       } else {
@@ -157,7 +144,7 @@ describe("renderer RPC races", () => {
     );
     transport.resolveInvocation(
       0,
-      success(transport.invocations[0]!.requestId),
+      rpcSuccess(transport.invocations[0]!.requestId),
     );
     await expect(resultPromise).resolves.toEqual({ connected: true });
     controller.abort();
@@ -235,7 +222,7 @@ describe("renderer RPC races", () => {
     expect(transport.cancellations).toEqual([requestId]);
     expect(vi.getTimerCount()).toBe(0);
 
-    transport.resolveInvocation(0, success(requestId));
+    transport.resolveInvocation(0, rpcSuccess(requestId));
     await Promise.resolve();
   });
 
@@ -269,16 +256,14 @@ describe("renderer RPC races", () => {
     const api = await createRendererApi<AppBridge>({ transport });
     const remotePromise = api.hardware.rpc.connect({ deviceId: "d1" });
     const remoteRequestId = transport.invocations[0]!.requestId;
-    transport.resolveInvocation(0, {
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "error",
-      error: {
+    transport.resolveInvocation(
+      0,
+      rpcError(remoteRequestId, {
         code: "DEVICE_BUSY",
         message: "Device is busy.",
         details: { retryable: true },
-      },
-    });
+      }),
+    );
     await expect(remotePromise).rejects.toEqual(
       expect.objectContaining({
         name: "RemoteError",
@@ -288,13 +273,7 @@ describe("renderer RPC races", () => {
     );
 
     const malformedPromise = api.hardware.rpc.connect({ deviceId: "d1" });
-    transport.invocationResults[1]!.resolve({
-      protocolVersion: 1,
-      clientId: "client-1",
-      type: "success",
-      requestId: remoteRequestId,
-      result: { connected: true },
-    });
+    transport.invocationResults[1]!.resolve(rpcSuccess(remoteRequestId));
     await expect(malformedPromise).rejects.toMatchObject({ code: "INTERNAL" });
   });
 
@@ -412,7 +391,7 @@ describe("renderer RPC dispose", () => {
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
     transport.resolveInvocation(
       0,
-      success(transport.invocations[0]!.requestId),
+      rpcSuccess(transport.invocations[0]!.requestId),
     );
     await expect(resultPromise).resolves.toEqual({ connected: true });
 
@@ -444,7 +423,7 @@ describe("renderer RPC dispose", () => {
     const requestId = transport.invocations[0]!.requestId;
 
     api.dispose();
-    transport.resolveInvocation(0, success(requestId));
+    transport.resolveInvocation(0, rpcSuccess(requestId));
 
     await expect(resultPromise).rejects.toMatchObject({ code: "CANCELLED" });
   });
