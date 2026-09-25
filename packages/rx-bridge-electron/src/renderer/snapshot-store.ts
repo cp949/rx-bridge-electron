@@ -1,6 +1,7 @@
 import type { Subscription } from "rxjs";
 
 import type { RemoteState, RemoteStateSnapshot } from "../contract/index.js";
+import { onGenerationOpened } from "./local-generation.js";
 
 /**
  * `RemoteState<T>`를 외부 store 계약(React `useSyncExternalStore` 등이 기대하는
@@ -16,14 +17,18 @@ const cache = new WeakMap<RemoteState<unknown>, RemoteStateStore<unknown>>();
 /**
  * `state`를 `RemoteStateStore<T>`로 감싼다. 네 가지를 지킨다.
  * - listener들은 `state` 구독 하나를 공유한다. 구독이 없거나 끝난 상태에서
- *   listener가 들어오면 새로 구독하고, 마지막 listener가 나가면 해제한다.
- *   그래서 새 listener가 연 generation의 변경도 기존 listener 전원에게 알린다.
+ *   listener가 들어오면 새로 구독한다. listener가 있는 동안 새로 열린
+ *   generation(남이 연 것 포함)에도 합류해 유지하고 알린다 — 스스로 새
+ *   generation을 열지는 않는다(새 listener 진입 때는 예외). 마지막
+ *   listener가 나가면 해제한다.
  * - `error`는 알림으로만 쓰고 삼킨다: onChange를 호출할 뿐 예외를 다시 던지지
  *   않는다. 원인이 필요하면 `state`를 직접 구독한다.
  * - 원격 `complete`·`error` 뒤에는 스스로 재구독하지 않는다. 새 listener가
  *   들어올 때까지 snapshot은 `stale`(또는 `uninitialized`)에서 멈춘다.
  * - 같은 `state` 객체로 다시 부르면 같은 store(같은 `subscribe`·`getSnapshot`
- *   참조)를 돌려준다. `WeakMap` 캐시가 이를 보장한다.
+ *   참조)를 돌려준다. `WeakMap` 캐시가 이를 보장한다. `state`가 사용자
+ *   fake(내부 신호를 못 받는 `RemoteState` 구현)이면 이 합류 없이
+ *   RD-043 그대로 이벤트 기반으로 동작한다.
  */
 export function snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T> {
   const cached = cache.get(state as RemoteState<unknown>);
@@ -51,11 +56,33 @@ export function snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T> {
     open = false;
     notify();
   };
+  // 남이(또는 store 자신이) 연 generation의 "열렸다" 신호. 합류 먼저, 알림은
+  // 그다음이다 — 먼저 notify하면 listener가 동기로 generation을 닫을 수
+  // 있고, 그 뒤의 합류는 자동 재구독이 되어 버린다.
+  const handleOpened = (): void => {
+    if (!open) {
+      open = true;
+      upstream = state.subscribe({
+        next: notify,
+        error: finish,
+        complete: finish,
+      });
+    }
+    notify();
+  };
+  let openedListenerHandle: (() => void) | undefined;
 
   const store: RemoteStateStore<T> = Object.freeze({
     subscribe: (onChange: () => void): (() => void) => {
       const listener = { onChange };
+      const isFirstListener = listeners.size === 0;
       listeners.add(listener);
+      // `state.subscribe` 호출(아래)보다 먼저 등록해야 store 자신이 여는
+      // generation의 신호도 받는다(listener가 자기 구독의 connecting 알림을
+      // 받는다).
+      if (isFirstListener) {
+        openedListenerHandle = onGenerationOpened(state, handleOpened);
+      }
       if (!open) {
         open = true;
         upstream = state.subscribe({
@@ -71,6 +98,8 @@ export function snapshotStore<T>(state: RemoteState<T>): RemoteStateStore<T> {
         open = false;
         upstream?.unsubscribe();
         upstream = undefined;
+        openedListenerHandle?.();
+        openedListenerHandle = undefined;
       };
     },
     getSnapshot: () => state.snapshot,
