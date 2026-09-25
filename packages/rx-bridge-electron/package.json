@@ -1,6 +1,6 @@
 {
   "name": "@cp949/rx-bridge-electron",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Type-safe Electron IPC bridge for trusted local UIs: RPC, State, and Event over RxJS",
   "keywords": [
     "electron",
