@@ -7,13 +7,15 @@ import { currentValueSource } from "../../src/main/sources.js";
 import type { ResourceLimits } from "../../src/main/index.js";
 import type { StreamMessage } from "../../src/protocol/index.js";
 import { FakeTarget, sender } from "./fake-ipc.js";
-import { testSubscriptionId } from "./subscription-ids.js";
+import { rendererDocument } from "./renderer-document.js";
 
 type AppBridge = {
   hardware: {
     state: { current$: number };
   };
 };
+
+const KEY = "state:hardware/current$";
 
 function setup(resourceLimits?: Partial<ResourceLimits>) {
   const source = new BehaviorSubject(1);
@@ -30,105 +32,31 @@ function setup(resourceLimits?: Partial<ResourceLimits>) {
   return { server, source, subscribe, target };
 }
 
-const types = (messages: readonly StreamMessage[]) =>
-  messages.map((message) => message.type);
-
 describe("subscriptionId 워터마크", () => {
   test("같은 subscriptionId 재전송은 어떤 stream 메시지도 보내지 않는다", async () => {
     const { server } = setup();
-    const first: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(1),
-        key: "state:hardware/current$",
-      },
-      (message) => first.push(message),
-    );
-    expect(types(first)).toEqual(["subscribed", "batch"]);
-    const second: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(1),
-        key: "state:hardware/current$",
-      },
-      (message) => second.push(message),
-    );
-    expect(second).toEqual([]);
+    const doc = rendererDocument(server);
+    const first = await doc.subscribe(KEY);
+    expect(first.types()).toEqual(["subscribed", "batch"]);
+    const second = await doc.subscribe(KEY, { id: 1 });
+    expect(second.frames).toEqual([]);
   });
 
   test("워터마크보다 작은 sequence의 새 ID는 무시된다", async () => {
     const { server } = setup();
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(5),
-        key: "state:hardware/current$",
-      },
-      () => {},
-    );
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(3),
-        key: "state:hardware/current$",
-      },
-      (message) => messages.push(message),
-    );
-    expect(messages).toEqual([]);
+    const doc = rendererDocument(server);
+    await doc.subscribe(KEY, { id: 5 });
+    const lower = await doc.subscribe(KEY, { id: 3 });
+    expect(lower.frames).toEqual([]);
   });
 
   test("unsubscribe 뒤 같은 ID로 재구독하면 무시된다", async () => {
     const { server } = setup();
-    const id = testSubscriptionId(1);
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: id,
-        key: "state:hardware/current$",
-      },
-      () => {},
-    );
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "unsubscribe",
-        subscriptionId: id,
-      },
-      () => {},
-    );
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: id,
-        key: "state:hardware/current$",
-      },
-      (message) => messages.push(message),
-    );
-    expect(messages).toEqual([]);
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe(KEY);
+    await sub.unsubscribe();
+    const again = await doc.subscribe(KEY, { id: 1 });
+    expect(again.frames).toEqual([]);
   });
 
   test("형식 오류 ID는 subscribed+error(INVALID_ARGUMENT)이고 소스 subscribe를 호출하지 않는다", async () => {
@@ -141,11 +69,14 @@ describe("subscriptionId 워터마크", () => {
         clientId: "client-1",
         type: "subscribe",
         subscriptionId: "not-a-valid-id",
-        key: "state:hardware/current$",
+        key: KEY,
       },
       (message) => messages.push(message),
     );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
+    expect(messages.map((message) => message.type)).toEqual([
+      "subscribed",
+      "error",
+    ]);
     expect(messages[1]).toMatchObject({
       error: {
         code: "INVALID_ARGUMENT",
@@ -157,115 +88,34 @@ describe("subscriptionId 워터마크", () => {
 
   test("한도 초과로 거부된 ID를 재전송하면 무시된다(워터마크가 먼저 갱신됨)", async () => {
     const { server } = setup({ maxSubscriptions: 1 });
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(1),
-        key: "state:hardware/current$",
-      },
-      () => {},
-    );
-    const rejectedId = testSubscriptionId(2);
-    const rejected: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: rejectedId,
-        key: "state:hardware/current$",
-      },
-      (message) => rejected.push(message),
-    );
-    expect(rejected[1]).toMatchObject({
+    const doc = rendererDocument(server);
+    await doc.subscribe(KEY);
+    const rejected = await doc.subscribe(KEY);
+    expect(rejected.frames[1]).toMatchObject({
       error: { code: "RESOURCE_EXHAUSTED" },
     });
-    const retried: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: rejectedId,
-        key: "state:hardware/current$",
-      },
-      (message) => retried.push(message),
-    );
-    expect(retried).toEqual([]);
+    const retried = await doc.subscribe(KEY, { id: 2 });
+    expect(retried.frames).toEqual([]);
   });
 
   test("새 문서 세션에서는 워터마크가 0부터 시작한다", async () => {
     const { server, target } = setup();
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(5),
-        key: "state:hardware/current$",
-      },
-      () => {},
-    );
+    await rendererDocument(server).subscribe(KEY, { id: 5 });
     target.endDocument();
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-2",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(1),
-        key: "state:hardware/current$",
-      },
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    const next = await rendererDocument(server, {
+      clientId: "client-2",
+    }).subscribe(KEY, { id: 1 });
+    expect(next.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("1,000회 subscribe/unsubscribe 반복 뒤에도 정상 동작한다", async () => {
     const { server } = setup();
+    const doc = rendererDocument(server);
     for (let sequence = 1; sequence <= 1000; sequence += 1) {
-      const id = testSubscriptionId(sequence);
-      await server.controlStream(
-        sender(),
-        {
-          protocolVersion: 1,
-          clientId: "client-1",
-          type: "subscribe",
-          subscriptionId: id,
-          key: "state:hardware/current$",
-        },
-        () => {},
-      );
-      await server.controlStream(
-        sender(),
-        {
-          protocolVersion: 1,
-          clientId: "client-1",
-          type: "unsubscribe",
-          subscriptionId: id,
-        },
-        () => {},
-      );
+      const sub = await doc.subscribe(KEY);
+      await sub.unsubscribe();
     }
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      {
-        protocolVersion: 1,
-        clientId: "client-1",
-        type: "subscribe",
-        subscriptionId: testSubscriptionId(1001),
-        key: "state:hardware/current$",
-      },
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    const last = await doc.subscribe(KEY);
+    expect(last.types()).toEqual(["subscribed", "batch"]);
   });
 });
