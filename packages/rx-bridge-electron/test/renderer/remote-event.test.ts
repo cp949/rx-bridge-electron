@@ -231,7 +231,11 @@ describe("renderer remote Event", () => {
       streamMessage(secondId, { type: "subscribed", sequence: 0 }),
     );
     transport.emitStream(
-      streamMessage(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+      streamMessage(secondId, {
+        type: "batch",
+        sequence: 1,
+        values: ["fresh"],
+      }),
     );
     expect(nextValues).toEqual(["fresh"]);
   });
@@ -266,7 +270,11 @@ describe("renderer remote Event", () => {
       streamMessage(secondId, { type: "subscribed", sequence: 0 }),
     );
     transport.emitStream(
-      streamMessage(secondId, { type: "batch", sequence: 1, values: ["fresh"] }),
+      streamMessage(secondId, {
+        type: "batch",
+        sequence: 1,
+        values: ["fresh"],
+      }),
     );
     expect(nextValues).toEqual(["fresh"]);
   });

@@ -491,7 +491,9 @@ describe("rpc-settled diagnostics (ADR 0022 결정 5)", () => {
     });
 
     const resultPromise = api.hardware.rpc.connect({ deviceId: "d1" });
-    transport.invocationResults[0]!.resolve(rpcSuccess("mismatched-request-id"));
+    transport.invocationResults[0]!.resolve(
+      rpcSuccess("mismatched-request-id"),
+    );
     await expect(resultPromise).rejects.toMatchObject({ code: "INTERNAL" });
 
     expect(events).toEqual([

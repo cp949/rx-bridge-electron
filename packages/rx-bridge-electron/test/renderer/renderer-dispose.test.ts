@@ -114,9 +114,15 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     const stateId = transport.subscriptionIdFor("state:hardware/status$");
-    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(stateId, {
+        type: "batch",
+        sequence: 1,
+        values: ["connected"],
+      }),
     );
 
     let eventErrored: unknown;
@@ -132,7 +138,9 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     const eventId = transport.subscriptionIdFor("event:hardware/log$");
-    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      streamMessage(eventId, { type: "subscribed", sequence: 0 }),
+    );
 
     api.dispose();
 
@@ -256,13 +264,21 @@ describe("api.dispose() root shutdown", () => {
 
     api.hardware.event.log$.subscribe({ error: () => {} });
     const eventId = transport.subscriptionIdFor("event:hardware/log$");
-    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      streamMessage(eventId, { type: "subscribed", sequence: 0 }),
+    );
 
     api.hardware.state.status$.subscribe({ error: () => {} });
     const stateId = transport.subscriptionIdFor("state:hardware/status$");
-    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(stateId, {
+        type: "batch",
+        sequence: 1,
+        values: ["connected"],
+      }),
     );
 
     const joinedStateValues: Array<string | undefined> = [];
@@ -322,9 +338,15 @@ describe("api.dispose() root shutdown", () => {
       error: () => {},
     });
     const stateId = transport.subscriptionIdFor("state:hardware/status$");
-    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
     transport.emitStream(
-      streamMessage(stateId, { type: "batch", sequence: 1, values: ["connected"] }),
+      streamMessage(stateId, { type: "subscribed", sequence: 0 }),
+    );
+    transport.emitStream(
+      streamMessage(stateId, {
+        type: "batch",
+        sequence: 1,
+        values: ["connected"],
+      }),
     );
     subscription.unsubscribe();
 
@@ -395,7 +417,9 @@ describe("api.dispose() root shutdown", () => {
       error: () => {},
     });
     const stateId = transport.subscriptionIdFor("state:hardware/status$");
-    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      streamMessage(stateId, { type: "subscribed", sequence: 0 }),
+    );
 
     const lateListener = [...transport.streamListeners][0]!;
 
@@ -443,7 +467,9 @@ describe("api.dispose() root shutdown", () => {
     });
     unsubscribeState = () => subscription.unsubscribe();
     const stateId = transport.subscriptionIdFor("state:hardware/status$");
-    transport.emitStream(streamMessage(stateId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      streamMessage(stateId, { type: "subscribed", sequence: 0 }),
+    );
 
     const controlsBeforeDispose = transport.controls.length;
     api.dispose();
@@ -499,7 +525,9 @@ describe("api.dispose() root shutdown", () => {
       },
     });
     const eventId = transport.subscriptionIdFor("event:hardware/log$");
-    transport.emitStream(streamMessage(eventId, { type: "subscribed", sequence: 0 }));
+    transport.emitStream(
+      streamMessage(eventId, { type: "subscribed", sequence: 0 }),
+    );
     transport.emitStream(
       streamMessage(eventId, {
         type: "batch",
