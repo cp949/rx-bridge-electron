@@ -1,4 +1,8 @@
-import { withEnvelope, type RpcResponse } from "../protocol/index.js";
+import {
+  withEnvelope,
+  type RpcResponse,
+  type TransportErrorCode,
+} from "../protocol/index.js";
 
 /**
  * 파싱조차 실패한 `value`에서 `clientId`·`requestId`를 최대한 복구해 에러
@@ -8,7 +12,7 @@ import { withEnvelope, type RpcResponse } from "../protocol/index.js";
  */
 export function protocolError(
   value: unknown,
-  code: string,
+  code: TransportErrorCode,
   message: string,
 ): RpcResponse {
   const record = value !== null && typeof value === "object" ? value : {};

@@ -5,9 +5,11 @@ import {
   type BridgeValue,
   type PayloadLimits,
   type RpcResponse,
+  type TransportErrorCode,
   type WireRpcRequest,
 } from "../protocol/index.js";
 import { PayloadLimitError } from "../protocol/bridge-value.js";
+import type { LibraryErrorPayload } from "../protocol/messages.js";
 import { authorizeOperation, bridgeContext } from "./authorization.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import type { DocumentSession } from "./document-sessions.js";
@@ -57,7 +59,10 @@ function cancelledIfAborted(
   if (!signal.aborted) return undefined;
   return respond(envelope, {
     type: "error",
-    error: { code: "CANCELLED", message: "Request cancelled." },
+    error: {
+      code: "CANCELLED",
+      message: "Request cancelled.",
+    } satisfies LibraryErrorPayload,
   });
 }
 
@@ -122,7 +127,7 @@ export class RpcRequests {
     sender: SenderIdentity,
     envelope: WireRpcRequest,
   ): Promise<RpcResponse> {
-    const error = (code: string, message: string): RpcResponse =>
+    const error = (code: TransportErrorCode, message: string): RpcResponse =>
       respond(envelope, { type: "error", error: { code, message } });
 
     const registration = this.#lookupRegistration(envelope.key);
@@ -312,7 +317,7 @@ export class RpcRequests {
         error: {
           code: "INVALID_ARGUMENT",
           message: "Invalid bridge argument.",
-        },
+        } satisfies LibraryErrorPayload,
       });
     }
     let input: BridgeValue;
@@ -334,7 +339,7 @@ export class RpcRequests {
         error: {
           code: "INVALID_ARGUMENT",
           message: "Invalid bridge argument.",
-        },
+        } satisfies LibraryErrorPayload,
       });
     }
     let result: BridgeValue;

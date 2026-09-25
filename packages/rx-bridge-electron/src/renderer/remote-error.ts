@@ -1,4 +1,8 @@
-import type { BridgeValue, RpcErrorPayload } from "../protocol/index.js";
+import type {
+  BridgeValue,
+  RpcErrorPayload,
+  TransportErrorCode,
+} from "../protocol/index.js";
 
 export class RemoteError extends Error {
   public readonly code: string;
@@ -24,7 +28,10 @@ export function createDisposedError(): RemoteError {
 }
 
 /** Renderer가 원격 응답 없이 로컬에서 확정하는 RemoteError를 만든다. */
-export function localError(code: string, message: string): RemoteError {
+export function localError(
+  code: TransportErrorCode,
+  message: string,
+): RemoteError {
   return new RemoteError(code, message);
 }
 

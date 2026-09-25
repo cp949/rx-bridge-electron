@@ -4,6 +4,7 @@ export {
   type BridgeValue,
   type PayloadLimits,
 } from "./bridge-value.js";
+export { type TransportErrorCode } from "./error-code.js";
 export { parseOpaqueIdSequence } from "./opaque-id.js";
 export {
   parseHandshakeRequest,
@@ -26,7 +27,6 @@ export {
   type RpcErrorPayload,
   type RpcResponse,
   type StreamMessage,
-  type TransportErrorCode,
   type WireCancelRequest,
   type WireRpcRequest,
   type WireStreamCommand,

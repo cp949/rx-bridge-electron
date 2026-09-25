@@ -4,17 +4,8 @@ import {
   type PayloadLimits,
   parseBridgeValue,
 } from "./bridge-value.js";
+import type { TransportErrorCode } from "./error-code.js";
 import { OPERATION_CATEGORIES } from "./operation-key.js";
-
-export type TransportErrorCode =
-  | "INVALID_ARGUMENT"
-  | "NOT_FOUND"
-  | "FORBIDDEN"
-  | "CANCELLED"
-  | "DEADLINE_EXCEEDED"
-  | "RESOURCE_EXHAUSTED"
-  | "VERSION_MISMATCH"
-  | "INTERNAL";
 
 /** envelope의 protocol version 값. 와이어 형식의 단일 정의 지점(protocol). */
 export const PROTOCOL_VERSION = 1 as const;
@@ -57,6 +48,11 @@ export type RpcErrorPayload = {
   readonly code: string;
   readonly message: string;
   readonly details?: BridgeValue;
+};
+
+/** 라이브러리가 만드는 오류 payload. 공개하지 않는다 — main이 직접 import한다. */
+export type LibraryErrorPayload = RpcErrorPayload & {
+  readonly code: TransportErrorCode;
 };
 
 export type RpcResponse = ProtocolEnvelope &

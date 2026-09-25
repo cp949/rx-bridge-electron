@@ -7,6 +7,7 @@ import {
   type StreamMessage,
   type WireStreamCommand,
 } from "../protocol/index.js";
+import type { LibraryErrorPayload } from "../protocol/messages.js";
 import { authorizeOperation, bridgeContext } from "./authorization.js";
 import {
   createEventDeliveryWindow,
@@ -76,12 +77,12 @@ interface SessionState {
   readonly consumers: Map<string, Consumer>;
 }
 
-const senderUnauthorizedError: RpcErrorPayload = {
+const senderUnauthorizedError: LibraryErrorPayload = {
   code: "FORBIDDEN",
   message: SENDER_UNAUTHORIZED_MESSAGE,
 };
 /** detach·`server.dispose()`로 살아 있는 문서의 세션이 끝날 때 스트림에 보내는 종료 사유. */
-const sessionEndedError: RpcErrorPayload = {
+const sessionEndedError: LibraryErrorPayload = {
   code: "CANCELLED",
   message: "Bridge session ended.",
 };
@@ -207,7 +208,7 @@ export class Subscriptions {
           error: {
             code: "INVALID_ARGUMENT",
             message: "Invalid bridge subscription ID.",
-          },
+          } satisfies LibraryErrorPayload,
         },
         session,
       );
@@ -229,7 +230,10 @@ export class Subscriptions {
         send,
         {
           kind: "rejected",
-          error: { code: "NOT_FOUND", message: "Unknown bridge stream." },
+          error: {
+            code: "NOT_FOUND",
+            message: "Unknown bridge stream.",
+          } satisfies LibraryErrorPayload,
         },
         session,
       );
@@ -253,7 +257,7 @@ export class Subscriptions {
           error: {
             code: "RESOURCE_EXHAUSTED",
             message: "Too many bridge subscriptions.",
-          },
+          } satisfies LibraryErrorPayload,
         },
         session,
       );

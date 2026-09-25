@@ -3,9 +3,10 @@ import {
   type PayloadLimits,
   type RpcErrorPayload,
 } from "../protocol/index.js";
+import type { LibraryErrorPayload } from "../protocol/messages.js";
 
 /** Main의 `INTERNAL` 응답 payload 단일 정의(ADR 0011). */
-export const internalError: RpcErrorPayload = Object.freeze({
+export const internalError: LibraryErrorPayload = Object.freeze({
   code: "INTERNAL",
   message: "Internal bridge error.",
 });

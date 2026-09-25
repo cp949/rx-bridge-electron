@@ -15,6 +15,7 @@
  */
 
 import type { RpcErrorPayload } from "../protocol/index.js";
+import type { LibraryErrorPayload } from "../protocol/messages.js";
 import type { DocumentSession } from "./document-sessions.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import { internalError } from "./error-serializer.js";
@@ -35,7 +36,7 @@ export type AuthorizeVerdict =
 const ALLOWED: AuthorizeVerdict = { type: "allowed" };
 const CANCELLED: AuthorizeVerdict = { type: "cancelled" };
 
-const forbiddenError: RpcErrorPayload = Object.freeze({
+const forbiddenError: LibraryErrorPayload = Object.freeze({
   code: "FORBIDDEN",
   message: "Bridge operation is forbidden.",
 });

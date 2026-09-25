@@ -1,4 +1,5 @@
 import type { BridgeValue, RpcErrorPayload } from "../protocol/index.js";
+import type { LibraryErrorPayload } from "../protocol/messages.js";
 import { BoundedQueue } from "./bounded-queue.js";
 import type { OverflowPolicy } from "./sources.js";
 
@@ -150,7 +151,7 @@ function createEventBuffer(
   };
 }
 
-const overflowError: RpcErrorPayload = {
+const overflowError: LibraryErrorPayload = {
   code: "STREAM_OVERFLOW",
   message: "Event buffer capacity exceeded.",
 };

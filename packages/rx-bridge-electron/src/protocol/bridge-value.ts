@@ -1,3 +1,5 @@
+import type { TransportErrorCode } from "./error-code.js";
+
 /** Values permitted to cross the v1 bridge boundary. */
 export type BridgeValue =
   | undefined
@@ -18,9 +20,9 @@ export interface PayloadLimits {
 
 /** Error safe to return across the bridge for malformed protocol input. */
 export class BridgeProtocolError extends Error {
-  public readonly code: string;
+  public readonly code: TransportErrorCode;
 
-  public constructor(code: string, message: string) {
+  public constructor(code: TransportErrorCode, message: string) {
     super(message);
     this.name = "BridgeProtocolError";
     this.code = code;
