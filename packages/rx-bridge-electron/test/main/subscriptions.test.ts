@@ -1166,64 +1166,8 @@ describe("Main stream lifecycle and ordering", () => {
     await pending;
   });
 
-  test("detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED", async () => {
-    const { server, events, diagnostics, messages, send } = harness({
-      capacity: 2,
-      overflow: "drop-oldest",
-    });
-    const detach = server.attach(new FakeTarget());
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      send,
-    );
-    diagnostics.record.mockImplementation((event: { type: string }) => {
-      if (event.type === "stream-dropped") detach();
-    });
-    events.next(1);
-    events.next(2);
-    events.next(3);
-    events.next(4);
-    events.next(5);
-    expect(
-      messages.map((message) => ({
-        type: message.type,
-        sequence: message.sequence,
-      })),
-    ).toEqual([
-      { type: "subscribed", sequence: 0 },
-      { type: "batch", sequence: 1 },
-      { type: "error", sequence: 2 },
-    ]);
-    expect(messages[1]).toMatchObject({ values: [1] });
-    expect(messages.at(-1)).toMatchObject({
-      error: { code: "CANCELLED", message: "Bridge session ended." },
-    });
-    expect(
-      diagnostics.record.mock.calls
-        .slice(-3)
-        .map(
-          ([event]) =>
-            event as { type: string; count?: number; depth?: number },
-        ),
-    ).toEqual([
-      expect.objectContaining({ type: "stream-dropped", count: 1 }),
-      expect.objectContaining({ type: "session-closed" }),
-      expect.objectContaining({ type: "subscription-closed" }),
-    ]);
-    expect(server.getDiagnosticsSnapshot()).toMatchObject({
-      subscriptions: 0,
-      queuedEvents: 0,
-    });
-  });
-
-  test.each(["drop-newest", "error"] as const)(
-    "detach from the diagnostics sink during stream-dropped records no stream-queue after subscription-closed (%s)",
+  test.each(["drop-oldest", "drop-newest", "error"] as const)(
+    "detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED and records no stream-queue after subscription-closed (%s)",
     async (policy) => {
       const { server, events, diagnostics, messages, send } = harness({
         capacity: 2,
