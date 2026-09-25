@@ -21,7 +21,7 @@
 9. [테스트](#테스트)
 10. [범위 밖](#범위-밖)
 
-동작의 모든 경우와 설계 이유는 [설계 문서](../../docs/design/README.md)에 있습니다. 이 README는 사용법만 다룹니다.
+동작의 모든 경우와 설계 이유는 [설계 문서](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/README.md)에 있습니다. 이 README는 사용법만 다룹니다.
 
 ## 진입점
 
@@ -140,7 +140,7 @@ api.device.state.connection.subscribe({
 - 최상위 도메인 이름 `dispose`는 예약입니다. 하위 도메인이나 operation 이름으로는 쓸 수 있습니다(`api.device.rpc.dispose`).
 - 빈 이름, `.`이 든 이름, `__proto__`·`prototype`·`constructor`·`then`은 어느 위치에도 쓸 수 없습니다.
 
-API 객체는 동결돼 있고 선언되지 않은 경로는 `undefined`입니다. 근거는 [ADR 0007](../../docs/adr/0007-hierarchical-renderer-api.md), 세부는 [설계 02. Renderer API](../../docs/design/02-renderer-api.md)에 있습니다.
+API 객체는 동결돼 있고 선언되지 않은 경로는 `undefined`입니다. 근거는 [ADR 0007](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0007-hierarchical-renderer-api.md), 세부는 [설계 02. Renderer API](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/02-renderer-api.md)에 있습니다.
 
 ### RPC
 
@@ -210,7 +210,7 @@ RPC와 구독의 실패는 `RemoteError`(`code`, `message`, 선택적 `details`)
 | `INTERNAL`           | Main 쪽 결함입니다. 선언하지 않은 handler 예외, 출력 검증 실패, `authorize` 예외·reject, source 오류. 전송 실패(값 규칙을 어긴 입력을 preload가 거부한 경우 포함) | O   | O        | Main 쪽 원인이면 없음                             |
 | `STREAM_OVERFLOW`    | Event buffer가 가득 찼습니다(overflow 정책 `"error"`). 대기 중인 값을 모두 전달한 뒤 옵니다                                                                       | X   | O(Event) | 다시 구독할 수 있지만 빠진 값은 복구되지 않습니다 |
 
-이 밖에 `options.errors`로 허용한 도메인 코드가 handler에서 그대로 옵니다([허용 에러 코드](#허용-에러-코드)). 코드별 메시지와 판정 순서는 [설계 08. Payload와 오류 모델](../../docs/design/08-payload-and-errors.md)의 "오류 코드" 절에 있습니다.
+이 밖에 `options.errors`로 허용한 도메인 코드가 handler에서 그대로 옵니다([허용 에러 코드](#허용-에러-코드)). 코드별 메시지와 판정 순서는 [설계 08. Payload와 오류 모델](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/08-payload-and-errors.md)의 "오류 코드" 절에 있습니다.
 
 ### 구독 종료 원인
 
@@ -234,7 +234,7 @@ State·Event 구독이 어떻게 끝나는지 정리합니다. 끝난 구독은 
 - `RemoteState`는 구독이 끝나면 값이 있었으면 `stale`, 없었으면 `uninitialized`가 됩니다.
 - Main에서 source를 바꿔야 한다면 source를 끝내지 말고 [State source 교체](#state-source-교체)처럼 평탄화합니다.
 
-세션 종료 통지의 세부 규칙은 [설계 04. 문서 세션](../../docs/design/04-document-session.md)과 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
+세션 종료 통지의 세부 규칙은 [설계 04. 문서 세션](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/04-document-session.md)과 [ADR 0020](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
 
 ### `api.dispose()`
 
@@ -245,7 +245,7 @@ State·Event 구독이 어떻게 끝나는지 정리합니다. 끝난 구독은 
 - 종료 뒤의 RPC·subscribe는 Main에 보내지 않고 같은 `CANCELLED`로 끝납니다.
 - 다시 호출하면 아무 일도 하지 않습니다.
 
-창이 떠 있는 동안에는 부를 필요가 없습니다. 창을 닫거나 reload하면 Main이 그 문서의 자원을 회수합니다. SPA 라우팅으로 화면을 벗어나며 그 화면의 호출과 구독을 한꺼번에 끊을 때 씁니다. 근거는 [ADR 0006](../../docs/adr/0006-shutdown-contract.md)과 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.
+창이 떠 있는 동안에는 부를 필요가 없습니다. 창을 닫거나 reload하면 Main이 그 문서의 자원을 회수합니다. SPA 라우팅으로 화면을 벗어나며 그 화면의 호출과 구독을 한꺼번에 끊을 때 씁니다. 근거는 [ADR 0006](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0006-shutdown-contract.md)과 [ADR 0013](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0013-wiring-defaults.md)에 있습니다.
 
 ## 프레임워크 연동
 
@@ -279,7 +279,7 @@ export function useRemoteState<T>(
 - 원격 `complete`·`error` 뒤에는 `stale`·`uninitialized`에서 멈추고 다시 구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하세요. 남아 있던 listener도 새 값을 받습니다.
 - 종료 원인(`RemoteError`)은 store로 알 수 없습니다. 필요하면 `state.subscribe({ error })`로 직접 구독하세요.
 
-다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다. 알림 규칙의 세부는 [설계 07. Renderer 스트림과 State](../../docs/design/07-renderer-streams.md)와 [ADR 0024](../../docs/adr/0024-remote-state-snapshot-store.md)에 있습니다.
+다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다. 알림 규칙의 세부는 [설계 07. Renderer 스트림과 State](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/07-renderer-streams.md)와 [ADR 0024](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0024-remote-state-snapshot-store.md)에 있습니다.
 
 ### Event·RPC 직접 사용
 
@@ -395,7 +395,7 @@ export function useSaveNote() {
 - **`signal` 전달.** TanStack이 query를 취소하면(`cancelQueries`, 결과를 기다리는 observer 없이 unmount 등) RPC가 `RemoteError("CANCELLED")`로 끝나고 Main handler의 `context.signal`도 abort됩니다. query는 error가 되지 않고 이전 상태로 돌아갑니다.
 - **`queryKey`.** 입력값을 key에 넣습니다. TanStack의 기본 key hash는 `JSON.stringify`라 일반 객체·배열·문자열·유한한 수에는 그대로 쓸 수 있습니다. 입력에 `bigint`(throw)나 `NaN`·`Infinity`(`null`로 합쳐짐)가 있으면 `queryKeyHashFn`을 따로 둡니다.
 - **retry 판정.** TanStack query의 기본값은 어떤 오류든 3회 재시도입니다. [오류 코드](#오류-코드) 표에서 재시도 가치가 있는 코드는 `RESOURCE_EXHAUSTED`와 `DEADLINE_EXCEEDED`뿐입니다. 도메인 코드, `api.dispose()` 뒤의 `CANCELLED`, `RemoteError`가 아닌 오류도 재시도하지 않습니다.
-- **재시도 간격.** `timeoutMs`가 지나도 Main의 동시 RPC 한도 칸은 handler가 끝날 때 비워집니다([ADR 0015](../../docs/adr/0015-rpc-request-lifecycle.md)). `signal`을 무시하는 handler 뒤로 곧바로 재시도하면 `DEADLINE_EXCEEDED`가 `RESOURCE_EXHAUSTED`로 바뀔 수 있으므로 `retryDelay`를 0으로 두지 않습니다(기본값은 지수 backoff).
+- **재시도 간격.** `timeoutMs`가 지나도 Main의 동시 RPC 한도 칸은 handler가 끝날 때 비워집니다([ADR 0015](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0015-rpc-request-lifecycle.md)). `signal`을 무시하는 handler 뒤로 곧바로 재시도하면 `DEADLINE_EXCEEDED`가 `RESOURCE_EXHAUSTED`로 바뀔 수 있으므로 `retryDelay`를 0으로 두지 않습니다(기본값은 지수 backoff).
 - **mutation.** TanStack mutation은 기본 재시도 0회이고 `mutationFn`에 `signal`을 주지 않습니다. 재시도를 켜지 않습니다. `DEADLINE_EXCEEDED`는 handler가 부작용을 이미 냈는지 알려주지 않습니다. 취소가 필요하면 직접 만든 `AbortController`의 `signal`을 `CallOptions`로 넘깁니다.
 
 검증 범위: 위 예제는 `@tanstack/react-query` 5.103.2로 타입 검사했습니다. `@tanstack/query-core` 5.103.2의 `QueryClient`와 `createLoopbackTransport`([테스트](#테스트))로 실제 server에 대해 성공·취소·코드별 재시도 횟수를 1회 실행해 확인했습니다. 이 저장소의 test와 CI에는 포함되지 않으므로 TanStack Query 버전이 바뀌면 다시 확인해야 합니다.
@@ -412,9 +412,9 @@ export function useSaveNote() {
 | `state`  | `currentValueSource(source)`. `source`는 `getValue()`를 가진 `Observable`(예: `BehaviorSubject`) |
 | `event`  | `Observable<T>`, `broadcastEvent(...)`, `scopedEvent(...)`                                       |
 
-계약과 어긋나면(누락, 초과, handler·source 형태 오류) 컴파일에 실패합니다. 초과 operation 검사는 TypeScript의 excess property check라 객체 리터럴에만 적용됩니다. 다른 변수를 거쳐 넘긴 객체의 초과 operation은 타입 검사를 통과하고 Renderer에 노출됩니다(Renderer 타입에는 없습니다). 근거는 [ADR 0012](../../docs/adr/0012-lightweight-type-contract.md)에 있습니다.
+계약과 어긋나면(누락, 초과, handler·source 형태 오류) 컴파일에 실패합니다. 초과 operation 검사는 TypeScript의 excess property check라 객체 리터럴에만 적용됩니다. 다른 변수를 거쳐 넘긴 객체의 초과 operation은 타입 검사를 통과하고 Renderer에 노출됩니다(Renderer 타입에는 없습니다). 근거는 [ADR 0012](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0012-lightweight-type-contract.md)에 있습니다.
 
-타입을 우회한 값(`as any` 등)도 `createBridgeServer`가 형태를 검사합니다. handler가 함수인지, state source가 `getValue`를 갖는지 등을 보고, 어기면 `TypeError`를 던집니다. 세부는 [설계 01. 계약과 등록](../../docs/design/01-contract.md)에 있습니다.
+타입을 우회한 값(`as any` 등)도 `createBridgeServer`가 형태를 검사합니다. handler가 함수인지, state source가 `getValue`를 갖는지 등을 보고, 어기면 `TypeError`를 던집니다. 세부는 [설계 01. 계약과 등록](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/01-contract.md)에 있습니다.
 
 `authorize(context, operation)`는 등록된 operation의 RPC 호출과 구독 요청마다 불리는 인가 콜백입니다. `boolean` 또는 `Promise<boolean>`을 돌려줍니다. 생략하면 전부 허용합니다. `operation`은 operation key를 미리 분해한 동결 객체 `BridgeOperation`입니다.
 
@@ -425,7 +425,7 @@ export function useSaveNote() {
 | `domain`    | `["admin", "users"]`         | 도메인 경로 배열                                               |
 | `operation` | `"remove"`                   | operation 이름                                                 |
 
-`BridgeOperation`·`OperationCategory` 타입은 `@cp949/rx-bridge-electron/main`에서 가져옵니다. 근거는 [ADR 0018](../../docs/adr/0018-authorize-structured-operation.md)에 있습니다.
+`BridgeOperation`·`OperationCategory` 타입은 `@cp949/rx-bridge-electron/main`에서 가져옵니다. 근거는 [ADR 0018](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0018-authorize-structured-operation.md)에 있습니다.
 
 ### 스키마
 
@@ -458,7 +458,7 @@ const server = createBridgeServer(impl, {
 - 스키마가 없는 항목은 도메인 검증 없이 통과합니다.
 - 입력 스키마가 실패하면 `INVALID_ARGUMENT`, 출력 스키마가 실패하면 `INTERNAL`입니다.
 
-처리 순서는 [설계 05. RPC](../../docs/design/05-rpc.md)에 있습니다.
+처리 순서는 [설계 05. RPC](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/05-rpc.md)에 있습니다.
 
 스키마를 다른 파일에 두려면 `satisfies SchemasFor<AppBridge>`로 타입 검사를 유지합니다. 여러 operation의 스키마를 조합하는 예는 `packages/rx-bridge-electron/test/main/impl-schemas-fixture.ts`와 `apps/demo/src/main/schemas.ts`에 있습니다.
 
@@ -561,7 +561,7 @@ Main·preload·Renderer를 Electron IPC로 잇는 연결 설정입니다. [시�
 - Main을 종료하기 전에 `bridge.dispose()`를 호출합니다.
 - `dispose()` 뒤의 서버와 bind는 다시 쓸 수 없습니다. 다시 연결하려면 `createBridgeServer`와 `bindElectronBridge`를 새로 만듭니다. 같은 namespace로 새로 만든 bind는 dispose된 bind의 IPC 연결을 넘겨받습니다. dispose되지 않은 bind가 있는 채 같은 namespace로 다시 만들면 오류가 납니다.
 
-창은 다음 설정으로 만드세요: `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색과 창 생성 제한, 명시적 신뢰 origin 목록. Renderer 코드는 preload가 노출한 동결 transport만 받고 `ipcRenderer`나 채널 이름에 접근하지 못합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)).
+창은 다음 설정으로 만드세요: `contextIsolation: true`, `sandbox: true`, `nodeIntegration: false`, 고정 preload, 탐색과 창 생성 제한, 명시적 신뢰 origin 목록. Renderer 코드는 preload가 노출한 동결 transport만 받고 `ipcRenderer`나 채널 이름에 접근하지 못합니다([ADR 0001](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0001-fixed-preload-capability.md)).
 
 ### 기본값
 
@@ -573,7 +573,7 @@ Main·preload·Renderer를 Electron IPC로 잇는 연결 설정입니다. [시�
 | `ipcMain` / `contextBridge` / `ipcRenderer` | `bindElectronBridge` / `exposeBridgeInMainWorld`                | 호출 시점에 `import * as electron from "electron"`으로 해석(`electron.ipcMain` 등). 둘 다 없으면(Electron 밖) `TypeError`. 주입값이 우선합니다. |
 | `transport`                                 | `createRendererApi<B>(options?)`                                | `globalThis.rxBridge`를 읽습니다. 없거나 transport 형태가 아니면 `rxBridge`·`exposeBridgeInMainWorld`를 언급하는 `TypeError`.                   |
 
-기본값과 해석 순서의 근거는 [ADR 0013](../../docs/adr/0013-wiring-defaults.md)에 있습니다.
+기본값과 해석 순서의 근거는 [ADR 0013](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0013-wiring-defaults.md)에 있습니다.
 
 ### 명시 형태
 
@@ -693,7 +693,7 @@ const server = createBridgeServer(impl, {
 - 전체 크기 한도를 사실상 끄려면 `maxTotalBytes: Number.MAX_SAFE_INTEGER`를 씁니다.
 - 한도는 Main 서버가 강제합니다. 기본값은 `DEFAULT_PAYLOAD_LIMITS`(동결)로 읽습니다.
 
-검사 단계별 결과는 [설계 08. Payload와 오류 모델](../../docs/design/08-payload-and-errors.md)에 있습니다.
+검사 단계별 결과는 [설계 08. Payload와 오류 모델](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/08-payload-and-errors.md)에 있습니다.
 
 ### 세션 자원 한도
 
@@ -716,7 +716,7 @@ const server = createBridgeServer(impl, {
 - 한도는 세션별로 격리됩니다. `signal`을 무시하는 handler는 자기 세션의 동시 RPC 한도만 계속 차지합니다.
 - `maxRetiredClientsPerWebContents`는 창마다 기억하는 종료된 Renderer 연결 ID 수입니다. 종료된 연결의 재사용을 거부하는 데 씁니다.
 
-근거는 [ADR 0009](../../docs/adr/0009-session-resource-limits.md), 세부는 [설계 09. 세션 자원 한도](../../docs/design/09-resource-limits.md)에 있습니다.
+근거는 [ADR 0009](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0009-session-resource-limits.md), 세부는 [설계 09. 세션 자원 한도](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/09-resource-limits.md)에 있습니다.
 
 ### Main 진단
 
@@ -747,7 +747,7 @@ const { sessions, rpcInFlight, subscriptions, queuedEvents } =
 - 식별자는 operation key만 실립니다. 그 밖의 필드는 사유 코드, 소요 시간, 대기 깊이, 버린 수 같은 수치입니다. 자격 증명, payload, origin, 요청·구독·연결 ID, `Error` 객체는 싣지 않습니다.
 - sink가 없거나 `record`가 예외를 던져도 bridge 동작은 같습니다. 지정하지 않으면 콘솔 출력도 없습니다.
 
-이벤트 종류와 사유별 판정 지점은 [ADR 0010](../../docs/adr/0010-operational-diagnostics.md)과 [설계 11. 진단](../../docs/design/11-diagnostics.md)에 있습니다.
+이벤트 종류와 사유별 판정 지점은 [ADR 0010](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0010-operational-diagnostics.md)과 [설계 11. 진단](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/11-diagnostics.md)에 있습니다.
 
 ### Renderer 진단
 
@@ -777,7 +777,7 @@ const api = await createRendererApi<AppBridge>({
 - sink가 없거나 `record`가 예외를 던져도 API 동작은 같습니다. 지정하지 않으면 콘솔 출력도 없습니다.
 - 스냅샷 조회는 없습니다. 활성 구독 수는 `subscription-opened`/`subscription-closed` 쌍으로 셉니다.
 
-원인 판정 전체 목록은 [ADR 0022](../../docs/adr/0022-renderer-diagnostics.md)와 [설계 11. 진단](../../docs/design/11-diagnostics.md)에 있습니다.
+원인 판정 전체 목록은 [ADR 0022](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0022-renderer-diagnostics.md)와 [설계 11. 진단](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/11-diagnostics.md)에 있습니다.
 
 ## 테스트
 
@@ -813,10 +813,10 @@ server.dispose();
 - `dispose()` 뒤 그 transport의 구독은 종료 통지를 받지 않고 `RemoteState`는 `current`로 남습니다. 먼저 `api.dispose()`를 부르세요.
 - 같은 `webContentsId`로 새 loopback transport를 만들면 앞 transport의 구독은 `CANCELLED "Bridge session ended."`로 끝납니다.
 
-운영 코드에서는 쓰지 않습니다. Renderer는 고정 preload transport만 받아야 합니다([ADR 0001](../../docs/adr/0001-fixed-preload-capability.md)). 전달 시점과 예외 처리의 세부는 [ADR 0017](../../docs/adr/0017-loopback-test-transport.md)과 [설계 03. Transport와 연결 설정](../../docs/design/03-transport-and-wiring.md)에 있습니다.
+운영 코드에서는 쓰지 않습니다. Renderer는 고정 preload transport만 받아야 합니다([ADR 0001](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0001-fixed-preload-capability.md)). 전달 시점과 예외 처리의 세부는 [ADR 0017](https://github.com/cp949/rx-bridge-electron/blob/main/docs/adr/0017-loopback-test-transport.md)과 [설계 03. Transport와 연결 설정](https://github.com/cp949/rx-bridge-electron/blob/main/docs/design/03-transport-and-wiring.md)에 있습니다.
 
 ## 범위 밖
 
 - 대용량 바이너리 전송과 지속적인 고속 스트림. 필요하면 이 API에 원시 IPC를 노출하지 말고 별도 MessagePort 어댑터 뒤에 구현합니다.
 - Renderer 쪽 도메인 에러 코드 타입 추론. `ErrorsFor<B>`는 Main 옵션 타입입니다.
-- 그 밖의 제외 항목은 [ROADMAP "현재 범위 밖의 확장"](../../ROADMAP.md#현재-범위-밖의-확장)에 있습니다.
+- 그 밖의 제외 항목은 [ROADMAP "현재 범위 밖의 확장"](https://github.com/cp949/rx-bridge-electron/blob/main/ROADMAP.md#현재-범위-밖의-확장)에 있습니다.

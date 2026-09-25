@@ -81,3 +81,7 @@ pnpm release-it             # 버전 선택 → verify → npm publish
 - [설계 문서](docs/design/README.md)
 - [ADR](docs/adr/)
 - [함정](docs/traps/INDEX.md)
+
+## 라이선스
+
+[MIT](LICENSE)
