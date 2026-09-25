@@ -3,6 +3,7 @@ import type {
   HandshakeResponse,
   RendererRpcRequest,
   RendererStreamCommand,
+  RpcErrorPayload,
   RpcResponse,
   StreamMessage,
 } from "../../src/protocol/index.js";
@@ -39,6 +40,15 @@ const defaultHandshake: HandshakeResponse = {
   },
 };
 
+/** 생성자에 넘겨 handshake manifest를 지정하는 옵션. 지정하지 않은 종류는 빈 배열이다. */
+export interface FakeTransportOptions {
+  readonly manifest?: {
+    readonly rpc?: readonly string[];
+    readonly state?: readonly string[];
+    readonly event?: readonly string[];
+  };
+}
+
 export class FakeTransport implements BridgeTransport {
   public connectCalls = 0;
   public handshake: Promise<unknown> = Promise.resolve(defaultHandshake);
@@ -49,6 +59,21 @@ export class FakeTransport implements BridgeTransport {
   public readonly streamListeners = new Set<(message: StreamMessage) => void>();
   public streamListenerRegistrations = 0;
   public controlHook?: (command: RendererStreamCommand) => void;
+
+  public constructor(options?: FakeTransportOptions) {
+    const manifest = options?.manifest;
+    if (manifest !== undefined) {
+      this.handshake = Promise.resolve({
+        protocolVersion: 1,
+        clientId: "client-1",
+        manifest: {
+          rpc: manifest.rpc ?? [],
+          state: manifest.state ?? [],
+          event: manifest.event ?? [],
+        },
+      });
+    }
+  }
 
   public connect(): Promise<never> {
     this.connectCalls += 1;
@@ -101,4 +126,75 @@ export class FakeTransport implements BridgeTransport {
       requestId: response.requestId ?? invocation.requestId,
     } as RpcResponse);
   }
+
+  /** `controls` 중 subscribe 명령만 타입 좁혀서 반환한다. */
+  public subscribeCommands(): SubscribeCommand[] {
+    return this.controls.filter(
+      (command): command is SubscribeCommand => command.type === "subscribe",
+    );
+  }
+
+  /** 같은 key로 온 subscribe 명령 중 nth번째의 subscriptionId를 반환한다. */
+  public subscriptionIdFor(key: string, nth = 0): string {
+    const matches = this.subscribeCommands().filter(
+      (command) => command.key === key,
+    );
+    const command = matches[nth];
+    if (command === undefined) {
+      throw new Error(
+        `Missing subscribe command for key "${key}" at index ${nth}.`,
+      );
+    }
+    return command.subscriptionId;
+  }
+}
+
+type SubscribeCommand = Extract<
+  RendererStreamCommand,
+  { readonly type: "subscribe" }
+>;
+
+/** `StreamMessage`에서 envelope·subscriptionId를 뺀 나머지 필드 모양. */
+export type StreamMessageBody = StreamMessage extends infer Message
+  ? Message extends StreamMessage
+    ? Omit<Message, "protocolVersion" | "clientId" | "subscriptionId">
+    : never
+  : never;
+
+/** envelope(`protocolVersion: 1`, `clientId: "client-1"`)을 고정해 StreamMessage를 만든다. */
+export function streamMessage(
+  subscriptionId: string,
+  body: StreamMessageBody,
+): StreamMessage {
+  return {
+    protocolVersion: 1,
+    clientId: "client-1",
+    subscriptionId,
+    ...body,
+  } as StreamMessage;
+}
+
+/** RPC 성공 응답 envelope을 만든다. */
+export function rpcSuccess(
+  requestId: string,
+  result: { readonly connected: boolean } = { connected: true },
+) {
+  return {
+    protocolVersion: 1 as const,
+    clientId: "client-1",
+    type: "success" as const,
+    requestId,
+    result,
+  };
+}
+
+/** RPC 에러 응답 envelope을 만든다. */
+export function rpcError(requestId: string, error: RpcErrorPayload) {
+  return {
+    protocolVersion: 1 as const,
+    clientId: "client-1",
+    type: "error" as const,
+    requestId,
+    error,
+  };
 }
