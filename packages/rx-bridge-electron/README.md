@@ -360,6 +360,73 @@ store의 listener들은 `state` 구독 하나를 공유합니다. 마지막 list
 
 다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다.
 
+### TanStack Query 연동
+
+RPC는 `Promise`를 돌려주므로 `queryFn`·`mutationFn`에 그대로 넣습니다. 이 패키지와 demo는 TanStack Query에 의존하지 않습니다 — 아래 예제는 문서로만 제공합니다.
+
+```ts
+// bridge/contract.ts
+export type Note = { readonly id: string; readonly title: string };
+
+export type AppBridge = {
+  notes: {
+    rpc: {
+      list(input: { readonly folder: string }): readonly Note[];
+      save(input: Note): Note;
+    };
+  };
+};
+```
+
+```ts
+// Renderer
+import {
+  QueryClient,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
+import { RemoteError } from "@cp949/rx-bridge-electron/renderer";
+import { api } from "./bridge.js"; // createRendererApi<AppBridge>() 결과
+import type { Note } from "./bridge/contract.js";
+
+const RETRYABLE_CODES = new Set(["RESOURCE_EXHAUSTED", "DEADLINE_EXCEEDED"]);
+
+export const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: (failureCount, error) =>
+        failureCount < 3 &&
+        error instanceof RemoteError &&
+        RETRYABLE_CODES.has(error.code),
+    },
+  },
+});
+
+export function useNotes(folder: string) {
+  return useQuery({
+    queryKey: ["notes", "list", folder],
+    queryFn: ({ signal }) => api.notes.rpc.list({ folder }, { signal }),
+  });
+}
+
+export function useSaveNote() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (note: Note) => api.notes.rpc.save(note),
+    onSuccess: () => client.invalidateQueries({ queryKey: ["notes"] }),
+  });
+}
+```
+
+- **`signal` 전달.** TanStack이 query를 취소하면(`cancelQueries`, 결과를 기다리는 observer가 없는 채 unmount 등) RPC가 즉시 `RemoteError("CANCELLED")`로 끝나고 Main에 cancel을 보내 handler의 `context.signal`이 abort됩니다. query는 error 상태가 되지 않고 이전 상태로 돌아갑니다. `signal`을 넘기지 않으면 화면을 떠나도 응답이나 `timeoutMs`(기본 30초)까지 Main의 RPC slot을 점유합니다.
+- **`queryKey`.** 입력값을 key에 포함합니다. RPC 입력은 structured clone 가능한 값이라 TanStack의 key hash에 그대로 쓸 수 있습니다.
+- **retry 판정.** TanStack의 query 기본값은 어떤 오류든 3회 재시도입니다. 재시도해도 결과가 같은 코드는 제외합니다: `FORBIDDEN`·`INVALID_ARGUMENT`·`NOT_FOUND`·`VERSION_MISMATCH`, handler 예외·출력 검증 실패의 `INTERNAL`, `errors` map으로 선언한 도메인 코드, `api.dispose()` 뒤의 `CANCELLED`. 재시도할 가치가 있는 것은 세션 동시 RPC 한도 초과(`RESOURCE_EXHAUSTED`)와 deadline 경과(`DEADLINE_EXCEEDED`)뿐입니다. `RemoteError`가 아닌 오류(`queryFn` 자체 코드의 예외)도 재시도하지 않습니다.
+- **재시도 간격.** Renderer의 `timeoutMs` 만료는 Main slot을 즉시 비우지 않습니다 — slot은 handler가 끝날 때 반환됩니다([ADR 0015](../../docs/adr/0015-rpc-request-lifecycle.md)). `AbortSignal`을 무시하는 handler 뒤로 곧바로 재시도하면 `DEADLINE_EXCEEDED`가 `RESOURCE_EXHAUSTED`로 바뀔 수 있으므로 `retryDelay`를 0으로 두지 않습니다(기본값은 지수 backoff).
+- **mutation.** TanStack의 mutation 기본값은 재시도 0회이며 `mutationFn`에 `signal`을 주지 않습니다. 재시도를 켜지 않습니다 — `DEADLINE_EXCEEDED`는 handler가 부작용을 이미 냈는지 알려주지 않습니다. 취소가 필요하면 직접 만든 `AbortController`의 `signal`을 `CallOptions`로 넘깁니다.
+
+검증 범위: 위 예제는 `@tanstack/react-query` 5.103.2로 타입 검사했고, `@tanstack/query-core` 5.103.2의 `QueryClient`와 `createLoopbackTransport`(아래 "Testing")로 실제 server에 대해 성공·취소·코드별 재시도 횟수를 1회 실행해 확인했습니다. 이 저장소의 test와 CI에는 포함되지 않으므로 TanStack Query 버전이 바뀌면 다시 확인해야 합니다.
+
 ### Renderer 진단
 
 `createRendererApi<B>(options)`의 `diagnostics` 옵션으로 `RendererDiagnosticsSink`를 연결하면 RPC 확정 원인, 원격 구독의 시작·종료 원인, 스트림 메시지 폐기, handshake 실패, `transport.cancel`·`transport.control`(unsubscribe·acknowledge) 전송 실패 삼킴을 이벤트 6종(`rpc-settled`·`subscription-opened`·`subscription-closed`·`handshake-failed`·`message-dropped`·`transport-failed`)으로 관측할 수 있습니다. `rpc-settled`는 호출 하나당 정확히 1회, `subscription-opened`/`subscription-closed`는 원격 구독(generation) 단위로 1쌍씩 기록됩니다. 식별자는 등록된 와이어 key만 실리며(`RemoteError.code`는 `cause: "remote-error"`일 때만 예외로 포함), `Error` 객체·`message`·`stack`·`details`·원문 payload·`requestId`·`subscriptionId`·`clientId`는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 API 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다. 스냅샷 조회는 없습니다 — 활성 구독 수는 `subscription-opened`/`closed` 쌍으로 셀 수 있습니다.
