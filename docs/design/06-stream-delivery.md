@@ -270,7 +270,7 @@ retire 통지는 `SlotLease.onRetire`(내부적으로 `DocumentSession.onRetire`
 
 ## 6. 한계
 
-- 같은 문서에서 같은 server에 붙은 두 transport가 서로 다른 `clientId`로 연결하면 앞 세션은 `replaced`로 retire되고 통지를 받지 않는다. 앞 transport의 `RemoteState`는 마지막 값을 현재값처럼 유지한다. 운영 preload는 문서당 transport 하나라 이 경우가 생기지 않고, loopback test에서 `clientId`를 바꿔 다시 붙일 때 생긴다.
+- 같은 문서에서 같은 server에 붙은 두 transport가 서로 다른 `clientId`로 연결하면 앞 세션은 `replaced`로 retire되고 통지를 받지 않는다. 앞 transport의 `RemoteState`는 마지막 값을 현재값처럼 유지한다. 같은 attach 아래에서 다른 `clientId`로 연결할 때만 생긴다(예: 한 문서에서 같은 namespace로 `exposeBridgeInMainWorld`를 두 번 호출). loopback transport는 만들 때마다 `server.attach`를 부르므로, 같은 `webContentsId`로 새로 만들면 앞 세션은 `detach`로 retire되어 `CANCELLED` 통지를 받는다.
 - ack를 보내지 않는 소비자는 `unsubscribe`·retire 전까지 slot 1개와 대기 값(Event 최대 `capacity`, State 1)을 점유한다. `error` 정책 overflow도 대기 값 drain 뒤에만 terminal을 보내므로 slot을 풀지 못한다. 영향은 그 세션의 `maxSubscriptions` 안에 머문다.
 - operator를 거친 source(`inner.pipe(map(...))`)에서 안쪽 source가 구독 중 동기로 끝나고 teardown이 던지면, rxjs `operate`가 예외를 이미 닫힌 upstream의 `error`로 보내고 rxjs가 그 알림을 버린다. 예외는 새지 않지만 `upstream-teardown-failed`가 남지 않는다. 해지 경로는 operator 체인도 `UnsubscriptionError`로 올라와 기록된다. `Subscriber.error` override로 잡는 안은 규약을 어긴 source의 늦은 `error`와 구분하지 못하고, rxjs 전역 `config.onStoppedNotification`은 앱 전체 설정을 바꾸므로 채택하지 않았다.
 - 사용자가 `BridgeContext.signal`에 붙인 abort listener의 예외는 Node `EventTarget`이 `uncaughtException`으로 보낸다.

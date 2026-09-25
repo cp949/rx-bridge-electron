@@ -199,7 +199,7 @@ interface DocumentSession {
 - navigation retire는 "새 문서의 첫 IPC가 commit 신호보다 늦게 온다"는 실측에 기댄다. 수명 사건은 그 시점의 현재 세션을 retire하므로, 새 문서의 요청이 먼저 세션을 열었다면 그 새 세션이 retire된다. 이 순서는 Electron 44.4.5 실측에서 관측되지 않았다.
 - "현재 main frame" 판정은 `contents.mainFrame.routingId`에 의존한다. `did-navigate`나 조건부 `did-fail-load` 없이 routingId가 바뀌는 경로가 있으면 retire 없이 frame 검사만 옛 문서를 막는다([ADR 0015](../adr/0015-rpc-request-lifecycle.md)).
 - retire된 문서가 뒤늦게 보낸 cancel·unsubscribe·acknowledge도 `rejected` 진단을 남긴다. main frame이 그대로면 `sender-unauthorized`, 교체 뒤면 `frame-not-main`이다. 정상 지연 도착과 오용을 사유만으로 구분할 수 없다.
-- 한 문서·한 server에는 `clientId` 하나만 살아 있다. 같은 server에 연결된 두 transport가 같은 `webContents`에서 서로 다른 `clientId`로 `establish`하면 나중 요청이 앞 세션을 `replaced`로 retire한다.
+- 한 문서·한 server에는 `clientId` 하나만 살아 있다. 같은 attach 아래의 두 transport가 서로 다른 `clientId`로 `establish`하면 나중 요청이 앞 세션을 `replaced`로 retire한다. 같은 `webContents`에 `attach`를 다시 부르면 그 전에 앞 attachment가 `detach`로 retire된다.
 - `destroyed`는 세션과 retired 기록을 정리하지만 attachment 항목은 map에 남는다. detach·dispose 때 지워진다.
 - loopback transport는 수명 사건을 내지 않는다. `dispose()`는 `detach`이므로 같은 `clientId`로 재접속하면 retired 기록 때문에 거부된다([TRP-006](../traps/TRP-006-loopback-retired-clientid-reconnect.md)).
 - 실제 Electron 다중 창·reload 정리 검증은 Linux, Electron 44.4.5에서만 했다([실제 Electron 검증 결과](../verification/rd-008.md)).

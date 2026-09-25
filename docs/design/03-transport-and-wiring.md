@@ -180,7 +180,7 @@ Renderer가 preload 뒤에서 다시 parse하는 이유: `createRendererApi`는 
 4. `invoke` 요청, 모든 응답, stream 메시지는 `structuredClone`을 거친다. handshake·cancel·control 요청은 새로 조립한 원시 필드 객체다. 어느 방향도 참조를 공유하지 않는다. 함수·class 인스턴스가 경계를 넘지 못하는 사실을 test가 관측한다.
 5. `connect`·`invoke`는 호출 즉시 server를 부른다. `cancel`·`control`은 `queueMicrotask`로 server 호출을 미루고, stream 메시지 전달도 microtask를 한 번 더 거친다. `control()`이 반환되기 전에 listener는 호출되지 않는다.
 6. server가 던지면 폴백 없이 그대로 드러난다(`connect`·`invoke`는 reject).
-7. `dispose()`는 detach와 listener 해제만 한다. server는 dispose하지 않는다. 이후 `connect`·`invoke`는 reject, `cancel`·`control`은 무시한다.
+7. `dispose()`는 detach와 listener 해제만 한다. server는 dispose하지 않는다. 이후 `connect`·`invoke`는 reject, `cancel`·`control`은 무시한다. listener를 detach보다 먼저 해제하므로 detach의 `CANCELLED` 통지와 이미 예약된 stream 메시지는 구독자에게 가지 않는다. 그 transport의 `RemoteState`는 마지막 상태(`current` 등)로 남는다.
 
 loopback은 [ADR 0001](../adr/0001-fixed-preload-capability.md)의 예외가 아니다. `./renderer`는 여전히 `BridgeTransport`만 받고, Renderer에 노출되는 운영 transport는 preload 하나다. loopback은 test 코드가 명시적으로 import하는 별도 subpath이고 `./main`을 타입으로만 참조한다.
 

@@ -202,7 +202,7 @@ unsubscribe·acknowledge 전송의 throw는 삼키고 `transport-failed`(`contro
 
 ### 4.7 Main State source 평탄화 권고
 
-Main State source의 `complete`·`error`는 Renderer에서 원격 `complete`·`error`가 되어 현재 generation을 끝낸다. 구독자는 `stale`/`uninitialized`에서 멈추고 store는 재구독하지 않는다. 따라서 장치 재연결처럼 source를 바꿔야 하면 source 자체를 교체하지 말고, complete하지 않는 오래 사는 `BehaviorSubject`에 `switchMap`으로 평탄화해 `next`만 흘리고 안쪽 error는 `catchError`로 값으로 바꾼다. 코드 예제는 패키지 README "Main State source 평탄화"에 있다.
+Main State source의 `complete`·`error`는 Renderer에서 원격 `complete`·`error`가 되어 현재 generation을 끝낸다. 구독자는 `stale`/`uninitialized`에서 멈추고 store는 재구독하지 않는다. 따라서 장치 재연결처럼 source를 바꿔야 하면 source 자체를 교체하지 말고, complete하지 않는 오래 사는 `BehaviorSubject`에 `switchMap`으로 평탄화해 `next`만 흘리고 안쪽 error는 `catchError`로 값으로 바꾼다. 코드 예제는 패키지 README "State source 교체" 절에 있다.
 
 평탄화는 source 교체만 해결한다. 출력 검증 실패, `authorize` 거부, 자원 한도, 세션 종료로 끝나는 generation은 막지 못한다. 이 경로는 Renderer 쪽 store 합류(4.5)가 listener에게 알린다.
 
