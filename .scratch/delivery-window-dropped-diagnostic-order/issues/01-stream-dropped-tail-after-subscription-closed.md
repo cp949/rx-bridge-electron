@@ -1,6 +1,6 @@
 # `stream-dropped` 도중 retire 시 `subscription-closed` 뒤 `stream-queue`가 1건 더 기록된다
 
-- Status: open
+- Status: 승격 (ROADMAP.md#RD-040)
 - 출처: RD-034 `_works/20260925-11-delivery-window/` DELTA-01 characterization test ①(실측 고정), 설계 판단은 같은 작업의 checklist 결정 13.
 
 ## 배경
@@ -47,3 +47,4 @@ RD-034 checklist 결정 6("효과 목록 반환형은 쓰지 않는다")과 결�
 ## Comments
 
 - 2026-09-25: RD-034 DELTA-05 마무리 시점에 `_works/20260925-11-delivery-window/pending-issues/01.md`에서 이 이슈 트래커로 승격했다. RD-034 범위 밖 후속 작업으로 등록, 아직 착수하지 않았다.
+- 2026-09-25: ROADMAP RD-040으로 승격했다. 계획은 `_works/20260925-17-dropped-queue-tail/`.

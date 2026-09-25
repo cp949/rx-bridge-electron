@@ -377,6 +377,22 @@
 
   계획: `_works/20260925-16-residue-cleanup/`. **결과:** 완료 조건 전부 충족, 편차 없음. DELTA-01(등록 항목의 `domainName`·`operation` 삭제, `manifestCategoryList`를 `bridgeOperation.domain`·`operation`·`key` 기반으로 교체, `upstreams.test.ts` fixture 6줄 삭제 — 40 files/784 tests 불변) → DELTA-02(`remote-error.ts`에 `remoteErrorFromPayload` 도입해 `rpc-client.ts`·`stream-multiplexer.ts`의 중복 변환 제거, stream 원격 오류 `details` 전달 characterization 1건이 변경 전 GREEN 확인 후 구현 — 785 tests) → DELTA-03(`CommonServerOptions` 삭제, `ImplServerOptions`에 필드 직접 선언, `buildBridgeServer`는 해석된 `ResolvedServerConfig`만 받음, 등록 오류 우선 검증 순서 characterization 1건이 변경 전 GREEN 확인 후 구현 — 786 tests) → DELTA-04(`TransportErrorCode`를 `protocol/error-code.ts`로 이동해 `STREAM_OVERFLOW` 추가, `BridgeProtocolError`·`localError`·`protocolError`·`rpc-requests`의 `error()`를 이 타입으로 좁힘, 이름 있는 상수 5곳·인라인 리터럴 6곳을 비공개 `LibraryErrorPayload`로 컴파일 타임 검사, probe로 4개 오용 경로 모두 컴파일 오류 확인 후 삭제, `pnpm build` 뒤 preload 번들 `rxjs` 오염 0(TRP-002) — 786 tests 불변) → DELTA-05(`BridgeServer`를 `StreamBridgeServer`에 병합·삭제, `/main` export 제거, README `:413`·ADR 0016 개정 주석 — 786 tests 불변) → DELTA-06(전체 검증, 이 항목·리뷰 카드 완료 표시) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 40 files/786 tests 통과(기준 784+DELTA-02 1+DELTA-03 1), 1회 통과. 루트 `pnpm lint`·`pnpm format:check` 통과. demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: `registration.ts`의 `readonly (domainName|operation): string` 0건, `src/renderer`의 `new RemoteError(` 3건(모두 `remote-error.ts`), `CommonServerOptions` 0건, `TransportErrorCode =` 정의 1건(`protocol/error-code.ts`), `BridgeServer`(패키지 src·test·README, `docs/architecture.md`) 0건. `git diff dev --numstat -- test`: `create-bridge-server-impl.test.ts` +9/0, `remote-event.test.ts` +32/0, `upstreams.test.ts` 0/-6(허용 편차), 그 외 삭제 열 0. **발견:** DELTA-05에서 `pnpm format:check` 1차 실행이 `create-bridge-server.ts`·`stream-multiplexer.ts`(DELTA-02에서 개정된 줄) 2파일 줄바꿈 실패 → `prettier --write`로 정리 후 재통과(내용 변경 없음). 그 외 계획과의 차이 없음.
 
+### 닫힌 구독의 `stream-queue` 꼬리 제거 (출처: `.scratch/delivery-window-dropped-diagnostic-order/issues/01-stream-dropped-tail-after-subscription-closed.md`, RD-034 보류 항목)
+
+- [ ] **RD-040 — `stream-dropped` 진단 도중 구독이 닫히면 뒤이은 `stream-queue` 진단을 기록하지 않는다.** 2026-09-25 재확인 기준(`dev` @ `0b097bd`): `DeliveryWindow.accept()`(`src/main/delivery-window.ts:233-249`)는 push 뒤 `onDropped`(dropped > 0) → `onQueueDepth`(push 뒤 depth)를 모두 부른 다음에야 `#closed`·`#concluded`를 확인한다. 진단 sink가 `stream-dropped`를 받는 중 동기로 detach·retire·unsubscribe하면 `subscription-closed` 뒤에 같은 구독의 `stream-queue`가 1건 더 기록된다(`..., stream-dropped(count 1), session-closed, subscription-closed, stream-queue(depth 2)`). retire 경로에서 이 depth는 `preempt`가 buffer를 비우기 전 값이라 이미 사실과 다르다. overflow 정책 3종(`drop-oldest`·`drop-newest`·`error`)이 모두 이 경로를 탄다. shift 뒤 경로(`#flush`)는 callback 직후 상태를 이미 재확인한다(RD-034 결정 12). 이 순서는 RD-034 checklist 결정 13이 보존 대상으로 고정했고, `test/main/subscriptions.test.ts`의 "detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED"와 `test/main/delivery-window.test.ts`의 "onDropped 안에서 preempt해도 onQueueDepth는 불리고 accept는 무출력이다"가 단언한다. **구조:**
+  - `accept()`에서 `onDropped` 호출 직후 창이 종결·닫힘이면 `onQueueDepth`를 부르지 않고 무출력(`{ message: undefined, overflowed: false }`)으로 반환한다. 판정은 창 안에 둔다. shift 뒤 guard와 같은 규칙이다.
+  - 정상 경로 순서(`stream-dropped` → `stream-queue`)와 빈도(push·shift마다, ADR 0010 결정 13)는 그대로다. wire 메시지·sequence·`getDiagnosticsSnapshot()` 값은 바뀌지 않는다.
+  - 결정 6(효과 목록 반환형 미사용)은 유지한다.
+  - **동작 변경(이것만):** 위 재진입 경로에서 `stream-queue` 1건이 사라진다. 결과적으로 한 구독에 대한 진단은 `subscription-closed` 뒤에 나오지 않는다.
+
+  **범위 밖:** `Subscriptions` 쪽 진단 callback 필터링, 진단 이벤트 종류·필드 변경, `stream-queue` 빈도 조정, RPC 진단 순서, Renderer 진단.
+
+  **완료 기준:**
+  - 수정 전 코드에서 RED를 확인한 뒤 고친다. 대상: seam test 3종(retire × `drop-newest`·`error`, unsubscribe × `drop-oldest`)과 기존 단언 2건.
+  - 기존 test 단언 변경은 위 2건으로 한정한다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0010 결정 13에 개정 주석을 단다. `docs/architecture.md` 운영 진단 절에 1문장을 추가한다. 신규 ADR은 쓰지 않는다. `.scratch` 이슈를 closed로 바꾼다.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
