@@ -590,6 +590,10 @@ export class Subscriptions {
         key: consumer.key,
         depth: consumer.pendingEvents?.length ?? 0,
       });
+      // 진단 sink가 동기로 detach하면 consumer가 이미 닫혔다. 선점 종료가
+      // 대기 값을 버리는 것(ADR 0020 결정 3)과 같은 논리로, terminal 뒤에
+      // 이 값을 batch로 내보내지 않고 버린다.
+      if (consumer.closed) return;
     }
     if (hasValue) {
       const sequence = ++consumer.sequence;
