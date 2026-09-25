@@ -66,13 +66,14 @@ pnpm --filter demo package                          # electron-builder 패키징
 ```sh
 npm login
 pnpm release-it --dry-run   # 실제 변경 없이 흐름 확인
-pnpm release-it             # 버전 선택 → verify → npm publish
+pnpm release-it             # verify → 버전 선택 → npm publish → commit·tag·push
 ```
 
 - 시작 전에 `before:init` hook이 패키지의 `pnpm run verify`(build, check-types, test)를 실행합니다.
-- `git: false`입니다. 작업 트리·branch 검사, 버전 커밋, tag, push를 하지 않습니다. 배포 뒤 `packages/rx-bridge-electron/package.json`의 버전 변경을 직접 커밋하고 필요하면 tag를 붙입니다.
+- git 사전 검사(작업 트리, upstream, branch, 새 커밋 유무)는 하지 않습니다.
+- publish 뒤 버전 커밋(`chore: v${version}을 배포한다`), tag(`v${version}`), push를 차례로 묻습니다. 커밋은 `packages/rx-bridge-electron/`에서 `git add . --update`로 만들므로 이 디렉터리 안의 추적 중인 다른 변경도 함께 들어갑니다. 작업 트리를 비운 뒤 실행합니다.
 - GitHub Release는 만들지 않습니다.
-- tarball에는 `dist/`, `README.md`, `package.json`만 들어갑니다(`files: ["dist"]`).
+- tarball에는 `dist/`, `LICENSE`, `README.md`, `package.json`만 들어갑니다(`files: ["dist"]`).
 
 ## 문서
 

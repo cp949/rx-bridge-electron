@@ -1,6 +1,14 @@
 {
   "$schema": "https://unpkg.com/release-it@21/schema/release-it.json",
-  "git": false,
+  "git": {
+    "requireCleanWorkingDir": false,
+    "requireUpstream": false,
+    "requireBranch": false,
+    "requireCommits": false,
+    "commitMessage": "chore: v${version}을 배포한다",
+    "tagName": "v${version}",
+    "push": true
+  },
   "github": {
     "release": false
   },
