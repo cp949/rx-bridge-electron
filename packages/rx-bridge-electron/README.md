@@ -310,6 +310,36 @@ const scopedDataEvent = scopedEvent(
 
 문서가 살아있는 채로 Main 쪽 세션이 끝나면(detach 또는 `server.dispose()`/bind `dispose()`), 활성 State/Event 구독과 `authorize` 대기 중이던 구독은 `RemoteError("CANCELLED", "Bridge session ended.")`를 받습니다 — `RemoteState`는 값이 있었으면 `stale`, 없었으면 `uninitialized`로 전이하고, 쌓여 있던 값은 전달하지 않습니다. 세션이 끝난 뒤의 새 구독은 `subscribed` 확인 직후 같은 `RemoteError("FORBIDDEN", "Bridge sender is not authorized.")`로 끝납니다(RPC 거부와 같은 코드·문구). navigation(문서 commit 시점, [ADR 0019](../../docs/adr/0019-navigation-retire-on-commit.md))·renderer process 종료·문서 파괴·같은 문서의 새 클라이언트 등록으로 인한 retire는 통지하지 않습니다 — 옛 문서 자신이 이미 없거나 재연결 흐름의 일부이기 때문입니다. 전송 실패는 삼킵니다(best-effort). 근거는 [ADR 0020](../../docs/adr/0020-stream-terminal-on-retire.md)에 있습니다.
 
+### 프레임워크 연동
+
+`snapshotStore(state: RemoteState<T>): RemoteStateStore<T>`는 `RemoteState`를 외부 store 계약(`subscribe(onChange) → unsubscribe` + `getSnapshot()`)으로 바꿉니다. 같은 `state` 객체로 다시 부르면 같은 store(같은 `subscribe`·`getSnapshot` 참조)를 돌려줍니다.
+
+React는 `useSyncExternalStore`에 그대로 연결합니다.
+
+```ts
+import { useSyncExternalStore } from "react";
+
+import {
+  snapshotStore,
+  type RemoteState,
+  type RemoteStateSnapshot,
+} from "@cp949/rx-bridge-electron/renderer";
+
+/** Converts a bridge State stream into React's external-store contract. */
+export function useRemoteState<T>(
+  state: RemoteState<T>,
+): RemoteStateSnapshot<T> {
+  const store = snapshotStore(state);
+  return useSyncExternalStore(store.subscribe, store.getSnapshot);
+}
+```
+
+`useSyncExternalStore`의 세 번째 인자(`getServerSnapshot`)는 생략합니다 — Electron renderer에는 SSR이 없습니다.
+
+원격 `complete`/`error` 뒤에는 `stale`/`uninitialized`에서 멈추고 재구독하지 않습니다. 다시 구독하려면 컴포넌트를 remount하거나 새 `state`를 넘기세요. 종료 원인(`RemoteError`)은 store로 알 수 없으므로, 필요하면 `state.subscribe({ error })`로 직접 구독하세요.
+
+다른 프레임워크도 같은 `subscribe`·`getSnapshot`을 각자의 store 연결 방식에 넘기면 됩니다.
+
 ### Renderer 진단
 
 `createRendererApi<B>(options)`의 `diagnostics` 옵션으로 `RendererDiagnosticsSink`를 연결하면 RPC 확정 원인, 원격 구독의 시작·종료 원인, 스트림 메시지 폐기, handshake 실패, `transport.cancel`·`transport.control`(unsubscribe·acknowledge) 전송 실패 삼킴을 이벤트 6종(`rpc-settled`·`subscription-opened`·`subscription-closed`·`handshake-failed`·`message-dropped`·`transport-failed`)으로 관측할 수 있습니다. `rpc-settled`는 호출 하나당 정확히 1회, `subscription-opened`/`subscription-closed`는 원격 구독(generation) 단위로 1쌍씩 기록됩니다. 식별자는 등록된 와이어 key만 실리며(`RemoteError.code`는 `cause: "remote-error"`일 때만 예외로 포함), `Error` 객체·`message`·`stack`·`details`·원문 payload·`requestId`·`subscriptionId`·`clientId`는 어떤 이벤트에도 넣지 않습니다. `sink`가 없거나 `record`가 예외를 던져도 API 동작은 같고, 지정하지 않으면 콘솔 출력이 없습니다. 스냅샷 조회는 없습니다 — 활성 구독 수는 `subscription-opened`/`closed` 쌍으로 셀 수 있습니다.
