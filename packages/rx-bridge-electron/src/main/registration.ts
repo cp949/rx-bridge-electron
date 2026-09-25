@@ -176,26 +176,23 @@ export interface RegistrationTable {
  * 정렬 순서로 나열한다. 테이블은 Map이라 삽입 순서를 보존하지만 여기서는
  * 순서를 다시 정렬해 항상 같은 manifest 형식·값을 보장한다 — 테이블 생성
  * 순서(impl 트리 순회 순서)에 기대지 않는다. 이 정렬은 wire key 정렬과 다르다.
+ * 한 도메인 안의 key는 `<category>:<domain>/` 접두어가 같으므로 key 정렬이
+ * 곧 operation명 정렬이다.
  */
 function manifestCategoryList(
   entries: ReadonlyMap<string, { readonly bridgeOperation: BridgeOperation }>,
 ): readonly string[] {
-  const byDomain = new Map<string, { operation: string; key: string }[]>();
+  const byDomain = new Map<string, string[]>();
   for (const entry of entries.values()) {
-    const { domain, operation, key } = entry.bridgeOperation;
+    const { domain, key } = entry.bridgeOperation;
     const domainName = domain.join("/");
-    const operations = byDomain.get(domainName);
-    if (operations === undefined)
-      byDomain.set(domainName, [{ operation, key }]);
-    else operations.push({ operation, key });
+    const keys = byDomain.get(domainName);
+    if (keys === undefined) byDomain.set(domainName, [key]);
+    else keys.push(key);
   }
   const list: string[] = [];
   for (const domainName of [...byDomain.keys()].sort())
-    for (const { key } of byDomain
-      .get(domainName)!
-      .slice()
-      .sort((a, b) => (a.operation < b.operation ? -1 : 1)))
-      list.push(key);
+    list.push(...byDomain.get(domainName)!.sort());
   return list;
 }
 
