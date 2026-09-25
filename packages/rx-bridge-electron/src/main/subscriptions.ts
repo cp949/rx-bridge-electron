@@ -10,7 +10,13 @@ import {
   type WireStreamCommand,
 } from "../protocol/index.js";
 import { authorizeOperation, bridgeContext } from "./authorization.js";
-import { BoundedQueue } from "./bounded-queue.js";
+import {
+  createEventDeliveryWindow,
+  createStateDeliveryWindow,
+  type DeliveryWindow,
+  type WindowMessage,
+  type WindowTerminal,
+} from "./delivery-window.js";
 import { recordDiagnostic } from "./diagnostics.js";
 import {
   SENDER_UNAUTHORIZED_MESSAGE,
@@ -55,18 +61,10 @@ interface Consumer {
   readonly controller: AbortController;
   readonly onSessionAbort: () => void;
   readonly shared?: SharedSource;
+  /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
+  readonly window: DeliveryWindow;
   sourceDetached: boolean;
   own?: Subscription;
-  pendingState: BridgeValue;
-  hasPendingState: boolean;
-  pendingEvents?: BoundedQueue<BridgeValue>;
-  inFlight: number | undefined;
-  terminal:
-    | { readonly type: "complete" }
-    | { readonly type: "error"; readonly error: RpcErrorPayload }
-    | undefined;
-  sequence: number;
-  closed: boolean;
 }
 
 /** 세션 1개가 소유한 구독 상태. `pending`+`consumers` 합이 slot 점유 수다. */
@@ -76,10 +74,6 @@ interface SessionState {
   readonly consumers: Map<string, Consumer>;
 }
 
-const overflowError: RpcErrorPayload = {
-  code: "STREAM_OVERFLOW",
-  message: "Event buffer capacity exceeded.",
-};
 const senderUnauthorizedError: RpcErrorPayload = {
   code: "FORBIDDEN",
   message: SENDER_UNAUTHORIZED_MESSAGE,
@@ -120,6 +114,10 @@ function endNotice(
  * 판정(`DocumentSessions#admit` — `frame-not-main`·`origin-not-allowed`·
  * `sender-unauthorized`)만 하고, subscriptionId 파싱·watermark·등록 조회·slot·
  * `authorize` 대기·consumer·교차 세션 fan-out·terminal은 이 모듈이 맡는다.
+ *
+ * consumer 1건의 전달 창(`DeliveryWindow`, RD-034)이 "수락 → ack 대기 → 다음
+ * 값 | terminal"과 선점 종료를 소유한다. 이 클래스는 값·ack·세션 종료를
+ * 창에 넘기고, 창이 돌려준 메시지를 envelope로 감싸 보낸다.
  */
 export class Subscriptions {
   readonly #table: RegistrationTable;
@@ -161,7 +159,7 @@ export class Subscriptions {
     let count = 0;
     for (const state of this.#liveStates)
       for (const consumer of state.consumers.values())
-        count += consumer.pendingEvents?.length ?? 0;
+        count += consumer.window.queuedValueCount();
     return count;
   }
 
@@ -304,14 +302,13 @@ export class Subscriptions {
         return;
       }
       const consumer = state.consumers.get(command.subscriptionId);
-      if (consumer !== undefined && !consumer.closed) this.#close(consumer);
+      if (consumer !== undefined) this.#close(consumer);
       return;
     }
     const consumer = state.consumers.get(command.subscriptionId);
-    if (consumer === undefined || consumer.closed) return;
-    if (consumer.inFlight !== command.sequence) return;
-    consumer.inFlight = undefined;
-    this.#flush(consumer);
+    if (consumer === undefined) return;
+    const message = consumer.window.ack(command.sequence);
+    if (message !== undefined) this.#send(consumer, message);
   }
 
   public dispose(): void {
@@ -320,7 +317,7 @@ export class Subscriptions {
         pending.controller.abort();
       state.pending.clear();
       for (const consumer of [...state.consumers.values()])
-        if (!consumer.closed) this.#close(consumer);
+        this.#close(consumer);
     }
   }
 
@@ -370,6 +367,32 @@ export class Subscriptions {
     registration: Registration,
   ): void {
     const controller = new AbortController();
+    // registration이 이미 capacity·overflow를 검증하고 동결 복사본을
+    // 저장했으므로(`registration.ts`의 `normalizeEventBuffer`), 여기서
+    // `createEventDeliveryWindow`가 만드는 `BoundedQueue` 생성은 공개
+    // seam에서 예외에 도달할 수 없다(C5, "## 결정" 참고). `subscribed`
+    // 송신 앞, try 밖에서 만든다.
+    const window: DeliveryWindow =
+      registration.kind === "event"
+        ? createEventDeliveryWindow(
+            registration.buffer.capacity,
+            registration.buffer.overflow,
+            {
+              onDropped: (count) =>
+                recordDiagnostic(this.#diagnostics, {
+                  type: "stream-dropped",
+                  key: command.key,
+                  count,
+                }),
+              onQueueDepth: (depth) =>
+                recordDiagnostic(this.#diagnostics, {
+                  type: "stream-queue",
+                  key: command.key,
+                  depth,
+                }),
+            },
+          )
+        : createStateDeliveryWindow();
     const consumer: Consumer = {
       session,
       key: command.key,
@@ -379,23 +402,16 @@ export class Subscriptions {
       send,
       registration,
       controller,
+      window,
       onSessionAbort: () => {
         const error = endNotice({ kind: "retired" }, session.signal);
-        if (error !== undefined)
-          this.#send(consumer, {
-            type: "error",
-            sequence: ++consumer.sequence,
-            error,
-          });
+        if (error !== undefined) {
+          const message = consumer.window.preempt(error);
+          if (message !== undefined) this.#send(consumer, message);
+        }
         this.#close(consumer);
       },
       sourceDetached: false,
-      pendingState: undefined,
-      hasPendingState: false,
-      inFlight: undefined,
-      terminal: undefined,
-      sequence: 0,
-      closed: false,
     };
     state.consumers.set(command.subscriptionId, consumer);
     this.#liveStates.add(state);
@@ -410,15 +426,9 @@ export class Subscriptions {
       this.#close(consumer);
       return;
     }
-    this.#send(consumer, { type: "subscribed", sequence: 0 });
-    if (consumer.closed) return;
+    this.#send(consumer, window.open());
+    if (window.closed) return;
     try {
-      if (registration.kind === "event") {
-        consumer.pendingEvents = new BoundedQueue(
-          registration.buffer.capacity,
-          registration.buffer.overflow,
-        );
-      }
       if (registration.kind === "state") {
         this.#startShared(consumer, command.key, registration.source);
       } else if (registration.delivery.mode === "scoped") {
@@ -429,7 +439,7 @@ export class Subscriptions {
           controller.signal,
         );
         const source = registration.delivery.factory(context);
-        if (consumer.closed) return;
+        if (window.closed) return;
         if (!(source instanceof Observable))
           throw new TypeError("Scoped factory must return an Observable.");
         const upstream = new Subscriber<BridgeValue>(this.#observer(consumer));
@@ -534,7 +544,6 @@ export class Subscriptions {
   }
 
   #next(consumer: Consumer, raw: unknown): void {
-    if (consumer.closed || consumer.terminal !== undefined) return;
     let value: BridgeValue;
     try {
       value = parseOutput(consumer.registration.output, raw, this.#limits);
@@ -546,95 +555,19 @@ export class Subscriptions {
       this.#terminate(consumer, { type: "error", error: internalError });
       return;
     }
-    if (consumer.registration.kind === "state") {
-      consumer.pendingState = value;
-      consumer.hasPendingState = true;
-    } else {
-      const queue = consumer.pendingEvents;
-      if (queue === undefined) return;
-      const result = queue.push(value);
-      if (result.dropped > 0)
-        recordDiagnostic(this.#diagnostics, {
-          type: "stream-dropped",
-          key: consumer.key,
-          count: result.dropped,
-        });
-      recordDiagnostic(this.#diagnostics, {
-        type: "stream-queue",
-        key: consumer.key,
-        depth: queue.length,
-      });
-      if (result.overflow)
-        this.#terminate(consumer, { type: "error", error: overflowError });
-    }
-    this.#flush(consumer);
+    const { message, overflowed } = consumer.window.accept(value);
+    if (overflowed) this.#detachSource(consumer);
+    if (message !== undefined) this.#send(consumer, message);
   }
 
-  #flush(consumer: Consumer): void {
-    if (consumer.closed || consumer.inFlight !== undefined) return;
-    let hasValue = false;
-    let value: BridgeValue;
-    if (consumer.registration.kind === "state" && consumer.hasPendingState) {
-      hasValue = true;
-      value = consumer.pendingState;
-      consumer.pendingState = undefined;
-      consumer.hasPendingState = false;
-    } else if (
-      consumer.registration.kind === "event" &&
-      (consumer.pendingEvents?.length ?? 0) > 0
-    ) {
-      hasValue = true;
-      value = consumer.pendingEvents?.shift();
-      recordDiagnostic(this.#diagnostics, {
-        type: "stream-queue",
-        key: consumer.key,
-        depth: consumer.pendingEvents?.length ?? 0,
-      });
-      // 진단 sink가 동기로 detach하면 consumer가 이미 닫혔다. 선점 종료가
-      // 대기 값을 버리는 것(ADR 0020 결정 3)과 같은 논리로, terminal 뒤에
-      // 이 값을 batch로 내보내지 않고 버린다.
-      if (consumer.closed) return;
-    }
-    if (hasValue) {
-      const sequence = ++consumer.sequence;
-      consumer.inFlight = sequence;
-      this.#send(consumer, { type: "batch", sequence, values: [value] });
-      return;
-    }
-    if (consumer.terminal !== undefined) {
-      this.#send(consumer, {
-        ...consumer.terminal,
-        sequence: ++consumer.sequence,
-      });
-      this.#close(consumer);
-    }
-  }
-
-  #terminate(
-    consumer: Consumer,
-    terminal: NonNullable<Consumer["terminal"]>,
-  ): void {
-    if (consumer.closed || consumer.terminal !== undefined) return;
-    consumer.terminal = terminal;
+  #terminate(consumer: Consumer, terminal: WindowTerminal): void {
+    const { recorded, message } = consumer.window.end(terminal);
+    if (!recorded) return;
     this.#detachSource(consumer);
-    this.#flush(consumer);
+    if (message !== undefined) this.#send(consumer, message);
   }
 
-  #send(
-    consumer: Consumer,
-    message:
-      | { readonly type: "subscribed" | "complete"; readonly sequence: number }
-      | {
-          readonly type: "batch";
-          readonly sequence: number;
-          readonly values: readonly BridgeValue[];
-        }
-      | {
-          readonly type: "error";
-          readonly sequence: number;
-          readonly error: RpcErrorPayload;
-        },
-  ): void {
+  #send(consumer: Consumer, message: WindowMessage): void {
     try {
       consumer.send(
         withEnvelope(consumer.clientId, {
@@ -643,6 +576,10 @@ export class Subscriptions {
         }),
       );
     } catch {
+      this.#close(consumer);
+      return;
+    }
+    if (message.type === "complete" || message.type === "error") {
       this.#close(consumer);
     }
   }
@@ -663,8 +600,7 @@ export class Subscriptions {
   }
 
   #close(consumer: Consumer): void {
-    if (consumer.closed) return;
-    consumer.closed = true;
+    if (!consumer.window.close()) return;
     recordDiagnostic(this.#diagnostics, {
       type: "subscription-closed",
       key: consumer.key,
