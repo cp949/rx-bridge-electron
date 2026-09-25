@@ -237,24 +237,6 @@ function asOptionalRecord(
   return value as Record<string, unknown>;
 }
 
-/** rpc `options.schemas` leaf(`{ input?, output? }`)의 방어적 형태 검사. */
-function readRpcSchemaEntry(
-  value: unknown,
-  path: string,
-): {
-  readonly input?: Schema<BridgeValue>;
-  readonly output?: Schema<BridgeValue>;
-} {
-  if (value === undefined) return {};
-  if (value === null || typeof value !== "object") {
-    throw new TypeError(`Schema entry for 'rpc:${path}' must be an object.`);
-  }
-  return value as {
-    readonly input?: Schema<BridgeValue>;
-    readonly output?: Schema<BridgeValue>;
-  };
-}
-
 /** event source가 요청별 scoped factory인지 판별한다(등록 시점 정규화 전용). */
 function isScopedSource(
   source: EventSource,
@@ -307,10 +289,144 @@ function normalizeEventBuffer(
 }
 
 /**
+ * impl 트리 leaf 하나와 같은 경로의 옵션 값. `schema`·`errors`는
+ * `options.schemas`/`options.errors`의 해당 leaf이며 없으면 `undefined`다.
+ * category별 `read*Entry`가 이것을 등록 항목으로 읽는다.
+ */
+interface ImplLeaf {
+  readonly value: unknown;
+  readonly schema: unknown;
+  readonly errors: unknown;
+  readonly bridgeOperation: BridgeOperation;
+  readonly path: string;
+}
+
+/** rpc leaf를 읽는다. `schema`는 `{ input?, output? }`, `errors`는 에러 코드 배열이다. */
+function readRpcEntry({
+  value,
+  schema,
+  errors,
+  bridgeOperation,
+  path,
+}: ImplLeaf): RpcRegistrationEntry {
+  if (typeof value !== "function") {
+    throw new TypeError(`RPC handler '${path}' must be a function.`);
+  }
+  if (schema !== undefined && (schema === null || typeof schema !== "object")) {
+    throw new TypeError(`Schema entry for 'rpc:${path}' must be an object.`);
+  }
+  if (errors !== undefined && !Array.isArray(errors)) {
+    throw new TypeError(
+      `Declared errors for 'rpc:${path}' must be an array of error codes.`,
+    );
+  }
+  const { input, output } = (schema ?? {}) as {
+    readonly input?: Schema<BridgeValue>;
+    readonly output?: Schema<BridgeValue>;
+  };
+  return {
+    kind: "rpc",
+    bridgeOperation,
+    handler: value as RpcHandler,
+    ...(input === undefined ? {} : { input }),
+    ...(output === undefined ? {} : { output }),
+    errors: Object.freeze([...(errors ?? [])]) as readonly string[],
+  };
+}
+
+/** state leaf를 읽는다. `schema`는 출력 스키마다. */
+function readStateEntry({
+  value,
+  schema,
+  bridgeOperation,
+  path,
+}: ImplLeaf): StateRegistrationEntry {
+  if (
+    !(value instanceof Observable) ||
+    typeof (value as { getValue?: unknown }).getValue !== "function"
+  ) {
+    throw new TypeError(`State source '${path}' must have a current value.`);
+  }
+  const output = schema as Schema<BridgeValue> | undefined;
+  return {
+    kind: "state",
+    bridgeOperation,
+    source: value as CurrentValueSource<BridgeValue>,
+    ...(output === undefined ? {} : { output }),
+  };
+}
+
+/**
+ * event leaf를 읽는다. source 3형태(plain `Observable`·broadcast·scoped)를
+ * `EventDelivery` 두 갈래로 정규화하고 buffer를 검증한다. `schema`는 출력 스키마다.
+ */
+function readEventEntry({
+  value,
+  schema,
+  bridgeOperation,
+  path,
+}: ImplLeaf): EventRegistrationEntry {
+  const source = value as EventSource | null | undefined;
+  if (
+    source === undefined ||
+    source === null ||
+    !(
+      source instanceof Observable ||
+      isBroadcastSource(source) ||
+      isScopedSource(source)
+    )
+  ) {
+    throw new TypeError(
+      `Event source '${path}' must be an Observable or source adapter.`,
+    );
+  }
+  let delivery: EventDelivery;
+  let rawBuffer: EventSourceBuffer | undefined;
+  if (source instanceof Observable) {
+    delivery = { mode: "broadcast", source };
+  } else if (isBroadcastSource(source)) {
+    if (!(source.source instanceof Observable)) {
+      throw new TypeError(
+        `Event source '${path}' source must be an Observable.`,
+      );
+    }
+    delivery = { mode: "broadcast", source: source.source };
+    rawBuffer = source.buffer;
+  } else {
+    if (typeof source.factory !== "function") {
+      throw new TypeError(`Event source '${path}' factory must be a function.`);
+    }
+    delivery = { mode: "scoped", factory: source.factory };
+    rawBuffer = source.buffer;
+  }
+  const buffer = normalizeEventBuffer(rawBuffer, path);
+  const output = schema as Schema<BridgeValue> | undefined;
+  return {
+    kind: "event",
+    bridgeOperation,
+    delivery,
+    ...(output === undefined ? {} : { output }),
+    buffer,
+  };
+}
+
+/** impl 트리 순회가 채워 가는 누적 상태. `table`은 완성 뒤 그대로 반환된다. */
+interface ImplWalkAccumulator {
+  readonly pathTrie: OperationPathTrie;
+  readonly table: {
+    readonly rpc: Map<string, RpcRegistrationEntry>;
+    readonly state: Map<string, StateRegistrationEntry>;
+    readonly event: Map<string, EventRegistrationEntry>;
+  };
+}
+
+/**
  * impl 트리 한 노드(도메인 자신 또는 중첩 네임스페이스)를 재귀 순회하며
  * rpc/state/event 카테고리는 등록하고, 그 외 키는 중첩 도메인으로 보고
  * 재귀한다. `schemasNode`/`errorsNode`는 impl과 같은 경로를 나란히 따라가는
  * `options.schemas`/`options.errors`의 해당 서브트리(없으면 `undefined`)다.
+ * 이 함수는 이름 규칙·경로 충돌·재귀만 맡고, leaf 하나의 형태 검사와 등록
+ * 항목 구성은 category별 `read*Entry`가 맡는다.
  *
  * 검증 순서: 노드 자체가 plain object인지 → 카테고리(rpc→state→event) 순서로
  * "각 operation의 이름·형태" → 나머지 키를 중첩 도메인으로 재귀. impl
@@ -322,10 +438,7 @@ function walkImplNode(
   domainSegments: readonly string[],
   schemasNode: unknown,
   errorsNode: unknown,
-  pathTrie: OperationPathTrie,
-  rpcTable: Map<string, RpcRegistrationEntry>,
-  stateTable: Map<string, StateRegistrationEntry>,
-  eventTable: Map<string, EventRegistrationEntry>,
+  acc: ImplWalkAccumulator,
 ): void {
   const nodeLabel =
     domainSegments.length === 0
@@ -355,7 +468,7 @@ function walkImplNode(
     for (const operation of Object.keys(categoryRecord)) {
       assertOperationName(operation, `${category} operation`);
       const path = `${domainName}/${operation}`;
-      assertNoPathCollision(pathTrie, path.split("/"), path);
+      assertNoPathCollision(acc.pathTrie, path.split("/"), path);
       const key = formatWireKey(category, domainSegments, operation);
       const bridgeOperation: BridgeOperation = Object.freeze({
         key,
@@ -363,99 +476,23 @@ function walkImplNode(
         domain: Object.freeze([...domainSegments]),
         operation,
       });
-      const value = categoryRecord[operation];
-
-      if (category === "rpc") {
-        if (typeof value !== "function") {
-          throw new TypeError(`RPC handler '${path}' must be a function.`);
-        }
-        const schemaEntry = readRpcSchemaEntry(
-          categorySchemas?.[operation],
-          path,
-        );
-        const declaredErrors = categoryErrors?.[operation];
-        if (declaredErrors !== undefined && !Array.isArray(declaredErrors)) {
-          throw new TypeError(
-            `Declared errors for 'rpc:${path}' must be an array of error codes.`,
-          );
-        }
-        rpcTable.set(key, {
-          kind: "rpc",
-          bridgeOperation,
-          handler: value as RpcHandler,
-          ...(schemaEntry.input === undefined
-            ? {}
-            : { input: schemaEntry.input }),
-          ...(schemaEntry.output === undefined
-            ? {}
-            : { output: schemaEntry.output }),
-          errors: Object.freeze([
-            ...(declaredErrors ?? []),
-          ]) as readonly string[],
-        });
-      } else if (category === "state") {
-        if (
-          !(value instanceof Observable) ||
-          typeof (value as { getValue?: unknown }).getValue !== "function"
-        ) {
-          throw new TypeError(
-            `State source '${path}' must have a current value.`,
-          );
-        }
-        const stateOutput = categorySchemas?.[operation] as
-          Schema<BridgeValue> | undefined;
-        stateTable.set(key, {
-          kind: "state",
-          bridgeOperation,
-          source: value as CurrentValueSource<BridgeValue>,
-          ...(stateOutput === undefined ? {} : { output: stateOutput }),
-        });
-      } else {
-        const source = value as EventSource | null | undefined;
-        if (
-          source === undefined ||
-          source === null ||
-          !(
-            source instanceof Observable ||
-            isBroadcastSource(source) ||
-            isScopedSource(source)
-          )
-        ) {
-          throw new TypeError(
-            `Event source '${path}' must be an Observable or source adapter.`,
-          );
-        }
-        let delivery: EventDelivery;
-        let rawBuffer: EventSourceBuffer | undefined;
-        if (source instanceof Observable) {
-          delivery = { mode: "broadcast", source };
-        } else if (isBroadcastSource(source)) {
-          if (!(source.source instanceof Observable)) {
-            throw new TypeError(
-              `Event source '${path}' source must be an Observable.`,
-            );
-          }
-          delivery = { mode: "broadcast", source: source.source };
-          rawBuffer = source.buffer;
-        } else {
-          if (typeof source.factory !== "function") {
-            throw new TypeError(
-              `Event source '${path}' factory must be a function.`,
-            );
-          }
-          delivery = { mode: "scoped", factory: source.factory };
-          rawBuffer = source.buffer;
-        }
-        const buffer = normalizeEventBuffer(rawBuffer, path);
-        const eventOutput = categorySchemas?.[operation] as
-          Schema<BridgeValue> | undefined;
-        eventTable.set(key, {
-          kind: "event",
-          bridgeOperation,
-          delivery,
-          ...(eventOutput === undefined ? {} : { output: eventOutput }),
-          buffer,
-        });
+      const leaf: ImplLeaf = {
+        value: categoryRecord[operation],
+        schema: categorySchemas?.[operation],
+        errors: categoryErrors?.[operation],
+        bridgeOperation,
+        path,
+      };
+      switch (category) {
+        case "rpc":
+          acc.table.rpc.set(key, readRpcEntry(leaf));
+          break;
+        case "state":
+          acc.table.state.set(key, readStateEntry(leaf));
+          break;
+        case "event":
+          acc.table.event.set(key, readEventEntry(leaf));
+          break;
       }
     }
   }
@@ -468,10 +505,7 @@ function walkImplNode(
       [...domainSegments, key],
       schemasRecord?.[key],
       errorsRecord?.[key],
-      pathTrie,
-      rpcTable,
-      stateTable,
-      eventTable,
+      acc,
     );
   }
 }
@@ -527,31 +561,15 @@ export function buildRegistrationTableFromImpl(
   schemas: unknown,
   errors: unknown,
 ): RegistrationTable {
-  const pathTrie = new OperationPathTrie();
-  const rpcTable = new Map<string, RpcRegistrationEntry>();
-  const stateTable = new Map<string, StateRegistrationEntry>();
-  const eventTable = new Map<string, EventRegistrationEntry>();
-  walkImplNode(
-    impl,
-    [],
-    schemas,
-    errors,
-    pathTrie,
-    rpcTable,
-    stateTable,
-    eventTable,
-  );
+  const acc: ImplWalkAccumulator = {
+    pathTrie: new OperationPathTrie(),
+    table: { rpc: new Map(), state: new Map(), event: new Map() },
+  };
+  walkImplNode(impl, [], schemas, errors, acc);
+  const { table } = acc;
   const hasPath = (category: OperationCategory, key: string): boolean =>
-    category === "rpc"
-      ? rpcTable.has(key)
-      : category === "state"
-        ? stateTable.has(key)
-        : eventTable.has(key);
+    table[category].has(key);
   assertNoExtraOptionPaths(schemas, [], "options.schemas", hasPath);
   assertNoExtraOptionPaths(errors, [], "options.errors", hasPath);
-  return {
-    rpc: rpcTable,
-    state: stateTable,
-    event: eventTable,
-  };
+  return table;
 }
