@@ -16,7 +16,7 @@ Renderer 문서 안에서 State/Event 로컬 구독자가 원격 구독을 어�
 
 | 개념                  | 소유자(모듈)                                  | 역할                                                                                                                   |
 | --------------------- | --------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
-| local generation      | `LocalGeneration` (`local-generation.ts`)     | operation key 하나의 로컬 구독자 집합과 원격 구독 하나를 묶는다. State면 snapshot 상태기계도 소유한다                  |
+| local generation      | `LocalGeneration` (`local-generation.ts`)     | operation key 하나의 로컬 구독자 집합과 원격 구독 하나를 rxjs `share`로 묶는다. State면 snapshot 상태기계도 소유한다   |
 | `RemoteState<T>`      | `RemoteStateClient` (`local-generation.ts`)   | `Observable<T>` + `snapshot`. `kind: "state"` `LocalGeneration`을 감싼다                                               |
 | Event `Observable<T>` | `createRemoteEvent` (`local-generation.ts`)   | `kind: "event"` `LocalGeneration`을 감싼다. snapshot·재생이 없다                                                       |
 | 원격 구독 다중화      | `StreamMultiplexer` (`stream-multiplexer.ts`) | API 인스턴스당 하나. `subscriptionId`별 generation 표, stream 메시지 판정·전달, subscribe·unsubscribe·acknowledge 전송 |
@@ -45,10 +45,10 @@ generation 경계:
 
 ## 3. 불변식
 
-1. operation key당 활성 generation은 최대 1개다. 같은 key의 로컬 구독자는 모두 그 generation의 `Subject` 하나를 구독한다.
+1. operation key당 활성 generation은 최대 1개다. 같은 key의 로컬 구독자는 모두 그 generation의 connector(State `ReplaySubject(1)`, Event `Subject`) 하나를 구독한다.
 2. 값의 수명은 generation의 수명과 같다. 끝난 generation의 값은 다음 generation의 Observable 구독자에게 재생하지 않는다.
 3. snapshot 반영이 구독자 통지보다 먼저다. `next`·`complete`·`error` 콜백 안에서 읽은 `snapshot`은 이미 그 사건을 반영한다.
-4. `undefined`는 유효한 값이다. "값 있음"은 값이 아니라 generation의 `hasValue` 플래그로 판정한다. `undefined` 값도 `current`로 반영하고 늦은 합류자에게 재생한다.
+4. `undefined`는 유효한 값이다. "값 있음"은 값이 아니라 connector가 값을 받았는지로 판정한다(`ReplaySubject`는 `undefined`도 버퍼에 둔다). `undefined` 값도 `current`로 반영하고 늦은 합류자에게 재생한다.
 5. `connecting`은 값을 갖지 않는다. 새 generation이 열리면 이전 `stale` 값을 버린다.
 6. snapshot 객체는 전이나 값 도착 때만 새로 만든다. 그 사이의 읽기는 같은 참조를 돌려준다.
 7. generation당 `error`·`complete` 중 하나만 최대 1회 통지한다. generation이 닫힌 뒤(`unsubscribed` 포함)에는 `next`를 포함해 어떤 handler도 호출하지 않는다.
@@ -61,13 +61,13 @@ generation 경계:
 
 ### 4.1 generation 열기 (`LocalGeneration.subscribe`)
 
-1. `lifetime.disposed`면 subscriber에 동기 `CANCELLED` error를 주고 끝낸다. generation·snapshot·전송 모두 건드리지 않는다.
-2. 활성 generation이 없으면 새 generation(`Subject`, `hasValue: false`)을 만든다. State면 snapshot을 `connecting`으로 바꾼다.
-3. 구독자 수를 늘리고 `Subject`를 구독한다.
-4. 기존 generation에 합류했고, State이고, `hasValue`이고, generation이 여전히 활성이면 현재값을 이 subscriber에게만 동기로 1회 전달한다.
-5. 새 generation이면 `multiplexer.open(key, handlers, registered)`를 호출한다.
-6. 새 generation이 여전히 활성이면(State 한정) 내부 "generation 열림" 신호를 발사한다(4.6).
-7. 해제 함수를 돌려준다.
+공유는 `defer(() => new Observable(subscriber => #connect(subscriber)))`에 붙인 `share({ connector })`가 한다. reset 3종(`resetOnError`·`resetOnComplete`·`resetOnRefCountZero`)은 기본값 `true`다([ADR 0027](../adr/0027-local-generation-share.md)).
+
+1. `lifetime.disposed`면 subscriber에 동기 `CANCELLED` error를 주고 끝낸다. `share`에 닿지 않으므로 generation·snapshot·전송 모두 건드리지 않는다.
+2. `share`가 subscriber를 현재 connector에 붙인다. connector가 없으면 새로 만든다(State `ReplaySubject(1)`, Event `Subject`).
+3. 기존 generation에 합류했으면 State connector가 받은 마지막 값을 이 subscriber에게만 동기로 1회 재생한다. Event는 재생하지 않는다.
+4. 활성 연결이 없으면 `share`가 `#connect`를 부른다. State면 snapshot을 `connecting`으로 바꾸고 `multiplexer.open(key, handlers, registered)`를 호출한다.
+5. `open`이 끝났을 때 연결이 아직 끝나지 않았으면(State 한정) 내부 "generation 열림" 신호를 발사한다(4.6).
 
 늦은 합류자 규칙:
 
@@ -79,22 +79,22 @@ generation 경계:
 | 다른 구독자의 `next` 콜백 안(재진입)        | 진행 중인 값 1회  |
 | Event generation                            | 없음. 재생 없음   |
 
-재진입 합류자가 진행 중인 값을 정확히 1회 받는 이유: 값 대입(`latest`, snapshot)이 `Subject.next`보다 먼저라 합류 시 재생이 그 값을 주고, 이미 시작된 `Subject.next` 순회는 새 구독자를 포함하지 않는다.
+재진입 합류자가 진행 중인 값을 정확히 1회 받는 이유: `ReplaySubject.next`는 값을 버퍼에 넣은 뒤 구독자에게 전달하므로 합류 시 재생이 그 값을 주고, 이미 시작된 순회는 순회 전에 복사한 구독자 목록이라 새 구독자를 포함하지 않는다. 이 순서와 아래 4.2의 reset 순서는 rxjs 7 `share`·`Subject` 구현에 기대며 `test/renderer/local-generation-reentrancy.test.ts`가 고정한다.
 
 ### 4.2 값 도착과 generation 종료 (`LocalGeneration`)
 
-값(`next`): generation이 현재이고 닫히지 않았을 때만 처리한다. `hasValue`·`latest` 대입 → State면 snapshot `current` → `Subject.next` 순서다.
+값(`next`): 연결이 끝나지 않았을 때만 처리한다. State면 snapshot `current` → connector `next`(버퍼 대입 → 구독자 전달) 순서다.
 
 종료 경로:
 
-| 사건                    | 처리 순서                                                                                                |
-| ----------------------- | -------------------------------------------------------------------------------------------------------- |
-| 마지막 로컬 구독자 해제 | generation 닫힘 표시 → 현재 generation 비움 → snapshot 비활성 전이 → `multiplexer.close(subscriptionId)` |
-| 원격 `complete`·`error` | generation 닫힘 표시 → 현재 generation 비움 → snapshot 비활성 전이 → `Subject.complete()`/`error()`      |
-| subscribe 전송 실패     | 원격 `error`와 같다. 오류는 `RemoteError("INTERNAL", "Stream transport failed.")`                        |
-| `api.dispose()`         | multiplexer가 `complete` handler를 호출한다 → 원격 `complete`와 같다                                     |
+| 사건                    | 처리 순서                                                                                                                       |
+| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------- |
+| 마지막 로컬 구독자 해제 | `share` reset(현재 connector·연결 비움) → 연결 teardown: 끝남 표시 → snapshot 비활성 전이 → `multiplexer.close(subscriptionId)` |
+| 원격 `complete`·`error` | 끝남 표시 → snapshot 비활성 전이 → `share` reset(현재 connector·연결 비움) → connector `complete()`/`error()`                   |
+| subscribe 전송 실패     | 원격 `error`와 같다. 오류는 `RemoteError("INTERNAL", "Stream transport failed.")`                                               |
+| `api.dispose()`         | multiplexer가 `complete` handler를 호출한다 → 원격 `complete`와 같다                                                            |
 
-현재 generation을 비우는 단계가 통지보다 먼저이므로, `complete`·`error` 콜백 안의 `subscribe()`는 끝난 generation에 합류하지 않고 새 generation을 연다.
+`share` reset이 connector 통지보다 먼저이므로, `complete`·`error` 콜백 안의 `subscribe()`는 끝난 generation에 합류하지 않고 새 generation을 연다.
 
 ### 4.3 snapshot 전이
 
@@ -214,7 +214,7 @@ Main State source의 `complete`·`error`는 Renderer에서 원격 `complete`·`e
 - **stale 값을 새 generation에 재생하지 않음**: State는 현재값이다([ADR 0003](../adr/0003-state-and-event-delivery.md)). 끝난 generation의 값은 현재라는 보장이 없다. 새 generation의 현재값은 Main이 새 구독에 보낸다. `stale` 값은 `active: false`와 함께 snapshot에만 남아 "마지막으로 알던 값"으로 읽힌다.
 - **`connecting`이 이전 값을 버림**: 한 snapshot이 서로 다른 generation의 값을 섞지 않는다. 새 generation이 첫 값 전에 끝나면 `uninitialized`로 돌아가며, 옛 값이 새 generation의 결과처럼 보이지 않는다.
 - **snapshot 반영 먼저**: 구독자 콜백과 React 렌더가 같은 값을 본다. 콜백 안에서 `snapshot`을 읽는 코드가 한 박자 늦은 값을 보지 않는다.
-- **늦은 합류자 재생을 subscriber에 직접 전달**: `Subject.next`로 재생하면 기존 구독자가 값을 중복 수신한다.
+- **공유를 `share`에 맡김**: refCount·reset·재생을 직접 구현하지 않는다. 구독자 수, generation identity 검사, 재생 분기 같은 수동 불변식이 없다. `share`가 대신하지 못하는 snapshot 전이·열림 신호·종료 뒤 차단만 `LocalGeneration`이 소유한다([ADR 0027](../adr/0027-local-generation-share.md)).
 - **generation 등록이 subscribe 전송보다 먼저**: 동기 transport(embedder·test)의 즉시 응답을 잃지 않는다.
 - **terminal 경로 하나(`#terminate`)**: 진단 1쌍, unsubscribe 최대 1회, handler 통지 최대 1회를 cause 표 하나로 보장한다.
 - **로컬 해제 뒤 ack 유지**: 받아들인 batch의 확인이다. dispose 뒤 ack 억제와 구분한다([10. 종료](10-shutdown.md)).
@@ -223,8 +223,8 @@ Main State source의 `complete`·`error`는 Renderer에서 원격 `complete`·`e
 기각한 대안:
 
 - **`shareReplay({ bufferSize: 1, refCount: true })`**: `resetOnComplete: false`라 원격 complete 뒤 구독자에게 옛 값과 complete를 재생하고 재구독하지 않는다. "stale 값은 재생하지 않고 새 generation을 연다" 계약과 맞지 않는다.
-- **`share({ connector: () => new ReplaySubject(1) })`(현재 미채택)**: 공유·refCount 해제·늦은 합류 재생·종료 뒤 새 연결은 대응한다. 그러나 snapshot 상태기계, dispose 뒤 subscribe 차단, "generation 열림" 신호를 `defer`·`tap`·reset 콜백·`finalize`로 흩어 구현해야 하고, snapshot 반영 순서와 재진입 안전성을 같은 수준으로 지키는지 입증되지 않았다.
-- **`Subject.next`로 늦은 합류자 재생**: 기존 구독자 중복 수신.
+- **generation마다 `Subject`와 구독자 수를 직접 관리(RD-050 이전 구조)**: `share`가 제공하는 refCount·reset·재생을 다시 구현하고 identity 검사를 여러 곳에서 지켜야 한다.
+- **snapshot 전이를 `tap`·`finalize`로 흩어 두기**: `finalize`는 구독자 통지 뒤에 실행돼 "snapshot 반영 먼저"를 지키지 못한다.
 - **dispose 뒤에도 활성 generation 합류 허용**: 현재값 재생과 늦은 `complete`를 받아 "종료 뒤 subscribe는 오류" 규칙이 깨진다.
 - **store 자동 재구독**: 원격 종료는 최종 상태다([ADR 0020](../adr/0020-stream-terminal-on-retire.md)). 원격이 계속 종료하면 재구독이 반복된다.
 - **snapshot에 error 추가**: `RemoteStateSnapshot`은 공개 계약이다. 모든 소비자에 판별 분기가 늘어난다.

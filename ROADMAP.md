@@ -550,6 +550,25 @@
 
   계획: `_works/20260926-06-adr-code-drift/`. **결과:** 완료 조건 충족, 편차 없음. DELTA-01(RD-036 결과 문단의 잘린 꼬리 복원 — f29a75c의 용어 변경이 이미 적용돼 원문 전체가 아니라 꼬리만 되돌렸다. 가짜 제목 삭제, RD-047·RD-048 절을 RD-046 뒤로 이동(두 블록 본문은 `dev`와 동일), RD-036·RD-045 결과 문단의 제목 인용에서 `## ` 접두어 제거) → DELTA-02(ADR 0003·0004·0006(2곳)·0007·0009(2곳) note) → DELTA-03(ADR 0012(2곳)·0014·0015·0017(2곳)·0024 note, `docs/architecture.md` loopback clone 범위) → DELTA-04(`protocol-error.ts` 주석 3줄 삭제, test 제목 1건) → DELTA-05(패키지 `pnpm check-types`, `pnpm test` 46 files/881 tests, 루트 `pnpm lint`·`pnpm format:check` 통과. `git diff dev -- docs/adr` 삭제 줄 0건. `src/`·`test/` 변경 2파일, 주석·제목뿐). **발견:** 이슈 목록 밖 불일치 1건 — ADR 0012 event buffer 절의 `eventSource(data$, { buffer })`는 존재하지 않는 이름이다(실제 `broadcastEvent`·`scopedEvent`). 같은 RD-049 note로 처리했다.
 
+### LocalGeneration의 `share` 전환 (출처: [.scratch/local-generation-share/issues/01-share-replaysubject-refactor.md](.scratch/local-generation-share/issues/01-share-replaysubject-refactor.md))
+
+- [x] **RD-050 — Renderer `LocalGeneration`이 generation 공유·refCount 해제·늦은 합류 재생·종료 뒤 새 연결을 rxjs `share({ connector })`로 얻게 바꾼다.** 동작 보존 refactor이며 공개 API는 바뀌지 않는다. 2026-09-26 prototype 판정(`dev` @ `266a02d`): `share` + `ReplaySubject(1)`(State)·`Subject`(Event) connector 구조가 `test/renderer` 7 files/162 tests를 단언 변경 없이 통과했다. mutation 6종은 모두 RED였고, 기존 test 밖 재진입 probe 10종은 원본과 같은 로그를 냈다. `LocalGeneration` class 코드는 164줄에서 113줄로 줄었다(주석·빈 줄 제외). 대가로 재진입 순서가 rxjs 7.8 `share` 구현 순서 3가지에 기댄다: 구독자를 먼저 붙이고 source를 연결한다, reset이 terminal 통지보다 먼저다, `Subject.next`는 순회 목록을 복사한다. **구조:**
+  - 원격 연결 1회를 `defer(() => new Observable(...))`로 만든다. snapshot 전이(`connecting`·`current`·비활성), `multiplexer.open`·`close`, "generation 열림" 신호는 그 안에 둔다.
+  - 공유는 `share({ connector })`가 한다. reset 3종은 기본값(`true`)이다. `Generation` 구조체, 구독자 수, generation identity 검사, `hasValue`/`latest` 재생 분기를 지운다.
+  - 종료 뒤 subscribe 차단은 `share` 바깥 한 곳에 남는다. 공개 export와 `snapshotStore` 합류 통로(`onGenerationOpened`)는 그대로다.
+
+  **범위 밖:** `StreamMultiplexer`·`snapshotStore`·`api-lifetime` 변경, rxjs 버전 변경, 공개 타입 변경.
+
+  **완료 기준:**
+  - 재진입 probe 10종을 회귀 test로 먼저 추가하고 교체 전 코드에서 GREEN이다.
+  - 교체 단계의 `test/` 변경은 0이다.
+  - mutation 6종이 각각 RED다: state connector `Subject`, `resetOnRefCountZero: false`, `resetOnComplete: false`, 해제 시 비활성 전이 제거, 열림 신호 제거, 종료 뒤 차단 제거.
+  - `src/` 변경은 `renderer/local-generation.ts` 1파일이다.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0027 신규, `docs/design/07-renderer-streams.md` 구현 서술, `.scratch` 이슈 Status를 갱신한다.
+
+  계획: `_works/20260926-07-local-generation-share/`. **결과:** 완료 조건 충족, 편차 없음. DELTA-01(재진입 회귀 test `test/renderer/local-generation-reentrancy.test.ts` 10건 추가 — 교체 전 코드와 prototype 양쪽에서 10 passed. prototype probe의 구독자 throw 시나리오는 보고가 비동기라 비어 있었고, test는 한 tick 뒤 보고를 단언한다) → DELTA-02(`local-generation.ts` 1파일 교체, 311 → 279줄, diff +84 −116. `test/` 변경 0. 패키지 47 files/891 tests 통과. mutation(`test/renderer` 172 tests 기준) m1 connector `Subject` 8, m2 `resetOnRefCountZero: false` 21, m3 `resetOnComplete: false` 14, m4 teardown 비활성 전이 제거 6, m5 열림 신호 제거 15, m6 종료 뒤 차단 제거 7 failed, 전부 원복. `LocalGeneration.subscribe(subscriber)` 메서드를 유지해 `RemoteStateClient`·`createRemoteEvent`는 그대로다) → DELTA-03(ADR 0027 신규, `docs/design/07-renderer-streams.md` §2·§3·§4.1·§4.2·§5 갱신. 순서 서술은 rxjs 7.8.2 `share.js`·`ReplaySubject.js`·`Subject.js` 소스와 대조) → DELTA-04(패키지 `xvfb-run -a pnpm verify` exit 0, 47 files/891 tests, 그중 Electron acceptance 2 files/17 tests. 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit` 11 files/26 tests 통과. 완료 기준 밖으로 demo `test:electron` 4/4도 통과, TRP-001 미발동).
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
