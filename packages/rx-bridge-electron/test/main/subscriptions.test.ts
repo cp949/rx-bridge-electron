@@ -1954,4 +1954,113 @@ describe("Main stream terminal notify on retire", () => {
     expect(inSink).toEqual([1]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
+
+  test.each(["detach", "server.dispose()"] as const)(
+    "%s inside the session-opened diagnostic notifies a pending subscription to an existing key with CANCELLED",
+    async (mode) => {
+      const { server, source, diagnostics, messages, send } = harness();
+      const detach = server.attach(new FakeTarget());
+      diagnostics.record.mockImplementation((event: { type: string }) => {
+        if (event.type === "session-opened") {
+          if (mode === "detach") detach();
+          else server.dispose();
+        }
+      });
+      await server.controlStream(
+        sender(),
+        command("subscribe", testSubscriptionId(1)),
+        send,
+      );
+      expect(messages.map((message) => message.type)).toEqual([
+        "subscribed",
+        "error",
+      ]);
+      expect(messages[0]).toMatchObject({ sequence: 0 });
+      expect(messages[1]).toMatchObject({
+        sequence: 1,
+        error: { code: "CANCELLED", message: "Bridge session ended." },
+      });
+      expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+      expect(source.observed).toBe(false);
+      expect(
+        diagnostics.record.mock.calls.map(
+          ([event]) => (event as { type: string }).type,
+        ),
+      ).toEqual(["session-opened", "session-closed"]);
+    },
+  );
+
+  test.each(["detach", "server.dispose()"] as const)(
+    "%s inside the subscription-opened diagnostic notifies a not-yet-open consumer with CANCELLED",
+    async (mode) => {
+      const { server, source, diagnostics, messages, send } = harness();
+      const detach = server.attach(new FakeTarget());
+      diagnostics.record.mockImplementation((event: { type: string }) => {
+        if (event.type === "subscription-opened") {
+          if (mode === "detach") detach();
+          else server.dispose();
+        }
+      });
+      await server.controlStream(
+        sender(),
+        command("subscribe", testSubscriptionId(1)),
+        send,
+      );
+      expect(messages.map((message) => message.type)).toEqual([
+        "subscribed",
+        "error",
+      ]);
+      expect(messages[0]).toMatchObject({ sequence: 0 });
+      expect(messages[1]).toMatchObject({
+        sequence: 1,
+        error: { code: "CANCELLED", message: "Bridge session ended." },
+      });
+      expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+      expect(source.observed).toBe(false);
+      expect(
+        diagnostics.record.mock.calls.map(
+          ([event]) => (event as { type: string }).type,
+        ),
+      ).toEqual([
+        "session-opened",
+        "subscription-opened",
+        "session-closed",
+        "subscription-closed",
+      ]);
+    },
+  );
+
+  test("main-frame-navigation inside the session-opened diagnostic sends nothing for a pending subscription to an existing key", async () => {
+    const target = new FakeTarget();
+    const { server, diagnostics, messages, send } = harness();
+    server.attach(target);
+    diagnostics.record.mockImplementation((event: { type: string }) => {
+      if (event.type === "session-opened")
+        target.fireLifecycle("main-frame-navigation");
+    });
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    expect(messages).toEqual([]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
+
+  test("main-frame-navigation inside the subscription-opened diagnostic sends nothing for a not-yet-open consumer", async () => {
+    const target = new FakeTarget();
+    const { server, diagnostics, messages, send } = harness();
+    server.attach(target);
+    diagnostics.record.mockImplementation((event: { type: string }) => {
+      if (event.type === "subscription-opened")
+        target.fireLifecycle("main-frame-navigation");
+    });
+    await server.controlStream(
+      sender(),
+      command("subscribe", testSubscriptionId(1)),
+      send,
+    );
+    expect(messages).toEqual([]);
+    expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
+  });
 });

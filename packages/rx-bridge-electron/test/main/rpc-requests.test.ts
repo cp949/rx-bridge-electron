@@ -254,6 +254,51 @@ describe("Main RPC dispatch", () => {
       }),
     );
   });
+
+  test.each(["detach", "server.dispose()"] as const)(
+    "%s inside the session-opened diagnostic cancels the request before the handler runs",
+    async (mode) => {
+      const handler = vi.fn(async () => "connected");
+      const diagnostics = {
+        record: vi.fn<(event: BridgeDiagnostic) => void>(),
+      };
+      const impl: BridgeImpl<HardwareBridge> = {
+        hardware: { rpc: { connect: handler } },
+      };
+      const server = createBridgeServer(impl, {
+        payloadLimits: limits,
+        schemas: {
+          hardware: { rpc: { connect: { input: object, output: string } } },
+        },
+        errors: { hardware: { rpc: { connect: ["DEVICE_GONE"] } } },
+        diagnostics,
+      });
+      const detach = server.attach(new FakeTarget());
+      diagnostics.record.mockImplementation((event: { type: string }) => {
+        if (event.type === "session-opened") {
+          if (mode === "detach") detach();
+          else server.dispose();
+        }
+      });
+      await expect(
+        server.dispatchRpc(sender(), request()),
+      ).resolves.toMatchObject({
+        type: "error",
+        error: { code: "CANCELLED", message: "Request cancelled." },
+      });
+      expect(handler).not.toHaveBeenCalled();
+      expect(
+        diagnostics.record.mock.calls.map(
+          ([event]) => (event as { type: string }).type,
+        ),
+      ).toEqual([
+        "session-opened",
+        "session-closed",
+        "rpc-cancelled",
+        "rpc-finished",
+      ]);
+    },
+  );
 });
 
 describe("Duplicate requestId handling", () => {
