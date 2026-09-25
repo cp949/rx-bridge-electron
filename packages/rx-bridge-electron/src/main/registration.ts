@@ -79,15 +79,18 @@ function throwNameError(
 }
 
 /**
- * impl namespace key(`"a/b"` 형태 가능)를 `/`로 나눠 조각마다 위치 무관
- * 규칙만 검사한다. root `dispose`·카테고리 이름 규칙은 도메인 전체 경로
- * 기준이라 `assertDomainName`이 따로 적용한다.
+ * impl namespace key 하나를 도메인 segment 하나로 검사한다. `/`를 거부해
+ * `{ "a/b": ... }`가 `{ a: { b: ... } }`와 같은 wire key를 만들면서
+ * `BridgeOperation.domain`만 달라지는 경우를 막는다. 그 밖에는 위치 무관
+ * 규칙만 본다. root `dispose`·카테고리 이름 규칙은 도메인 전체 경로 기준이라
+ * `assertDomainName`이 따로 적용한다.
  */
-function assertPathSegments(path: string, label: string): void {
-  for (const segment of path.split("/")) {
-    const verdict = checkSegment(segment);
-    if (!verdict.ok) throwNameError(label, path, verdict);
+function assertNamespaceKey(key: string, label: string): void {
+  if (key.includes("/")) {
+    throw new TypeError(`${label} '${key}' cannot contain '/'.`);
   }
+  const verdict = checkSegment(key);
+  if (!verdict.ok) throwNameError(label, key, verdict);
 }
 
 /** 도메인 이름의 segment 규칙(예약어 금지)에 더해 루트 `dispose`·`rpc`/`state`/`event`를 거부한다. */
@@ -499,7 +502,7 @@ function walkImplNode(
 
   for (const key of Object.keys(record)) {
     if (isOperationCategory(key)) continue;
-    assertPathSegments(key, "Domain name segment");
+    assertNamespaceKey(key, "Domain name segment");
     walkImplNode(
       record[key],
       [...domainSegments, key],
@@ -510,12 +513,21 @@ function walkImplNode(
   }
 }
 
+/** 옵션 트리의 namespace 키·operation 이름 하나에 `/`가 있으면 거부한다. */
+function assertNoSlash(key: string, label: string): void {
+  if (key.includes("/")) {
+    throw new TypeError(`${label} key '${key}' cannot contain '/'.`);
+  }
+}
+
 /**
  * `options.schemas`/`options.errors`에 impl에 없는 경로가 있으면 생성 시
  * `TypeError`로 거부한다(계획 항목 4의 마지막 요구사항). impl 트리 순회
  * (`walkImplNode`)는 impl에 실제로 있는 경로만 옵션에서 읽으므로, 옵션 쪽에만
  * 있는 여분의 경로(오타 포함)는 이 별도 순회로만 걸러진다. table이 wire
- * key로 keyed되어 있으므로 `hasPath`도 wire key로 조회한다.
+ * key로 keyed되어 있으므로 `hasPath`도 wire key로 조회한다. `/`가 든 키는
+ * wire key가 중첩 impl 경로와 같아져 조회를 통과하지만 impl 순회가 읽지
+ * 않으므로 먼저 거부한다.
  */
 function assertNoExtraOptionPaths(
   node: unknown,
@@ -533,6 +545,7 @@ function assertNoExtraOptionPaths(
       );
       if (categoryRecord === undefined) continue;
       for (const operation of Object.keys(categoryRecord)) {
+        assertNoSlash(operation, label);
         const wireKey = formatWireKey(key, domainSegments, operation);
         if (!hasPath(key, wireKey)) {
           throw new TypeError(
@@ -542,6 +555,7 @@ function assertNoExtraOptionPaths(
       }
       continue;
     }
+    assertNoSlash(key, label);
     assertNoExtraOptionPaths(
       record[key],
       [...domainSegments, key],

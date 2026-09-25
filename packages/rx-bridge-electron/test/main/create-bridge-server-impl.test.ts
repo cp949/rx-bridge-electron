@@ -352,23 +352,35 @@ describe("createBridgeServer(impl, options): 이름 규칙 위반은 생성 시�
     ).toThrow(TypeError);
   });
 
-  // namespace key split(`"sub/rpc"`)은 코어가 아니라 Main impl 순회의 책임이라
-  // seam에서만 검증된다.
   test.each([
     [
       "reserved 'then' segment",
       { then: { rpc: { x: () => 1 } } },
       /reserved segment 'then'/,
     ],
-    [
-      "reserved 'rpc' segment nested (namespace key split)",
-      { "sub/rpc": { rpc: { x: () => 1 } } },
-      /reserved segment 'rpc'/,
-    ],
   ] as const)(
     "%s는 실패한다(DELTA-07: contract.test.ts에서 옮김)",
     (_label, impl, pattern) => {
       expect(() => createBridgeServer(impl)).toThrow(pattern);
+    },
+  );
+
+  // namespace 키의 `/` 거부는 코어가 아니라 Main impl 순회의 책임이라
+  // seam에서만 검증된다. 허용하면 `{ "a/b": ... }`와 `{ a: { b: ... } }`가
+  // 같은 wire key를 만들면서 `BridgeOperation.domain`은 달라진다.
+  test.each([
+    ["루트", { "a/b": { rpc: { x: () => 1 } } }, "a/b"],
+    [
+      "중첩",
+      { admin: { "users/list": { rpc: { x: () => 1 } } } },
+      "users/list",
+    ],
+  ] as const)(
+    "%s namespace 키에 '/'가 있으면 실패한다",
+    (_label, impl, key) => {
+      expect(() => createBridgeServer(impl)).toThrow(
+        new TypeError(`Domain name segment '${key}' cannot contain '/'.`),
+      );
     },
   );
 
@@ -426,6 +438,36 @@ describe("createBridgeServer(impl, options): schemas/errors 옵션 배선", () =
       }),
     ).toThrow(/has no matching implementation/);
   });
+
+  // `/`가 든 옵션 키는 wire key가 중첩 impl 경로와 같아져 경로 검사를
+  // 통과하지만, impl 순회는 중첩 경로만 읽으므로 그 항목은 적용되지 않는다.
+  test.each([
+    [
+      "schemas namespace 키",
+      { schemas: { "a/b": { rpc: { x: { input: sendSchema } } } } },
+      "options.schemas key 'a/b'",
+    ],
+    [
+      "schemas operation 이름",
+      { schemas: { a: { rpc: { "b/x": { input: sendSchema } } } } },
+      "options.schemas key 'b/x'",
+    ],
+    [
+      "errors namespace 키",
+      { errors: { "a/b": { rpc: { x: ["DEVICE_TIMEOUT"] } } } },
+      "options.errors key 'a/b'",
+    ],
+  ] as const)(
+    "%s에 '/'가 있으면 중첩 impl 경로와 wire key가 같아도 실패한다",
+    (_label, options, prefix) => {
+      expect(() =>
+        createBridgeServer(
+          { a: { b: { rpc: { x: (value: unknown) => value } } } },
+          options as never,
+        ),
+      ).toThrow(new TypeError(`${prefix} cannot contain '/'.`));
+    },
+  );
 
   // 타입을 우회한 schemas/errors 서브트리의 형태 오류. 노드 → category →
   // rpc leaf 순으로 경로마다 다른 메시지가 난다.

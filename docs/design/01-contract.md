@@ -171,9 +171,9 @@ type Authorize = (
    1. 도메인 경로 전체에 `checkDomainSegments`를 적용한다. 루트 노드에 카테고리가 있으면 도메인이 비어 `empty-segment`로 거부한다.
    2. 카테고리 레코드가 plain object인지 검사한다.
    3. operation마다: `checkOperationName` → 경로 trie 추가 → `BridgeOperation` 생성·동결 → leaf 형태 검사와 entry 생성.
-3. 카테고리가 아닌 키를 하위 namespace로 보고 `/`로 나눈 조각마다 `checkSegment`(위치 무관 규칙)를 적용한 뒤 재귀한다. 첫 segment `dispose`·카테고리 이름 규칙은 그 아래 카테고리를 만났을 때 2-1에서 적용된다. `schemas`·`errors`의 같은 경로 서브트리를 함께 내려보낸다.
+3. 카테고리가 아닌 키를 하위 namespace로 보고 `/`가 있으면 거부한 뒤 키 하나를 segment 하나로 `checkSegment`(위치 무관 규칙)에 넣고 재귀한다. `{ "a/b": ... }`를 허용하면 `{ a: { b: ... } }`와 wire key가 같으면서 `BridgeOperation.domain`이 `["a/b"]`로 달라지기 때문이다. 첫 segment `dispose`·카테고리 이름 규칙은 그 아래 카테고리를 만났을 때 2-1에서 적용된다. `schemas`·`errors`의 같은 경로 서브트리를 함께 내려보낸다.
 
-순회가 끝나면 `options.schemas`, `options.errors` 순서로 옵션 트리만 따로 순회해 impl에 없는 경로를 거부한다. impl 순회는 impl에 있는 경로만 옵션에서 읽으므로 옵션에만 있는 경로(오타)는 이 단계에서만 걸린다.
+순회가 끝나면 `options.schemas`, `options.errors` 순서로 옵션 트리만 따로 순회해 impl에 없는 경로를 거부한다. impl 순회는 impl에 있는 경로만 옵션에서 읽으므로 옵션에만 있는 경로(오타)는 이 단계에서만 걸린다. 옵션의 namespace 키·operation 이름에 `/`가 있으면 먼저 거부한다. `{ "a/b": { rpc: { x } } }`는 wire key가 impl `{ a: { b: { rpc: { x } } } }`와 같아 경로 조회를 통과하지만 impl 순회가 읽지 않아 조용히 무시되기 때문이다.
 
 ### leaf 형태 검사
 
@@ -205,10 +205,11 @@ type Authorize = (
 | ------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 노드·카테고리 레코드 형태 | `<label> must be an object.` / `must be a plain object.` / `cannot contain symbol keys.` / `must contain enumerable data properties only.`                                                            |
 | 도메인 경로 segment       | `Domain name cannot contain an empty segment.` / `cannot contain dotted segments.` / `contains reserved segment '<s>'.`                                                                               |
-| namespace 키 segment      | `Domain name segment ...` (같은 접미사)                                                                                                                                                               |
+| namespace 키 segment      | `Domain name segment ...` (같은 접미사), `Domain name segment '<key>' cannot contain '/'.`                                                                                                            |
 | operation 이름            | `<category> operation ...` (같은 접미사), `<category> operation '<name>' cannot be a nested path.`                                                                                                    |
 | 경로 충돌                 | `Leaf/namespace collision at '<path>'.` / `Duplicate path or leaf/namespace collision at '<path>'.`                                                                                                   |
 | 옵션 서브트리 형태        | `Schema entry must be an object.` / `Errors entry must be an object.` / `Schema entries for '<category>:<domain>' must be an object.` / `Errors entries for '<category>:<domain>' must be an object.` |
+| 옵션 키의 `/`             | `options.schemas key '<key>' cannot contain '/'.` / `options.errors key ...`                                                                                                                          |
 | 옵션에만 있는 경로        | `options.schemas path '<wire key>' has no matching implementation.` / `options.errors path ...`                                                                                                       |
 
 `<label>`은 루트 `Bridge implementation`, 도메인 노드 `Domain '<d>' implementation`, 카테고리 `<category> implementations for '<d>'`다.
@@ -267,7 +268,6 @@ wire key 문자열을 받으면 앱 코드가 `startsWith("rpc:")`처럼 문자�
 
 - 초과 키의 컴파일 오류는 TypeScript excess property check에 의존한다. 이 검사는 fresh object literal에만 적용된다. 변수를 거쳐 대입한 impl의 초과 operation은 타입 검사를 통과하고, 런타임 등록되어 manifest에 노출된다. Renderer 타입 `RendererApi<B>`에는 나타나지 않는다.
 - 계약 타입은 예약어를 거부하지 않는다. `{ dispose: {...} }`, `{ then: {...} }`, operation 이름 `a.b` 같은 계약은 컴파일되고 `createBridgeServer` 생성 시 `TypeError`로 거부된다.
-- impl namespace 키에 `/`를 쓰면(`{ "a/b": { rpc: { x } } }`) segment별로 검사되고 wire key는 `rpc:a/b/x`로 중첩 형태와 같다. 이때 `BridgeOperation.domain`은 `["a", "b"]`가 아니라 `["a/b"]`다. 계약 타입의 중첩 객체 형태를 쓰면 이 차이가 없다.
 - 스키마 값의 모양(`parse` 함수 보유)은 등록 시 검사하지 않는다. rpc 스키마 항목이 객체인지만 본다. State·Event 스키마 항목은 형태를 보지 않는다.
 - `options.errors`에서 state·event 경로 항목은 해당 경로가 impl에 있으면 거부되지 않고 무시된다. errors 배열 원소가 문자열인지도 검사하지 않는다. 둘 다 타입을 우회한 경우에만 생긴다.
 - 빈 namespace(`{ a: {} }`)와 빈 카테고리(`{ a: { rpc: {} } }`)는 허용되고 manifest에 아무것도 남기지 않는다.

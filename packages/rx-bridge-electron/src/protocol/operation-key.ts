@@ -55,7 +55,7 @@ export type OperationKeyVerdict = OperationKeyOk | OperationKeyReject;
 /**
  * segment 하나의 위치 무관 검사(빈 문자열·dotted·JS 예약어). 도메인 전체
  * 경로 기준 규칙(root `dispose`, 카테고리 이름)은 적용하지 않는다 — Main이
- * impl namespace key(`"a/b"`)를 조각별로 검사할 때 이 함수를 쓴다.
+ * impl namespace key 하나를 검사할 때 이 함수를 쓴다.
  */
 export function checkSegment(segment: string): OperationKeyVerdict {
   if (segment.length === 0) {
