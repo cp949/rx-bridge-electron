@@ -9,12 +9,8 @@ import type {
   ResourceLimits,
   StreamBridgeServer,
 } from "../../src/main/index.js";
-import type {
-  StreamMessage,
-  WireStreamCommand,
-} from "../../src/protocol/index.js";
-import { FakeTarget, sender } from "./fake-ipc.js";
-import { testSubscriptionId } from "./subscription-ids.js";
+import { FakeTarget } from "./fake-ipc.js";
+import { rendererDocument } from "./renderer-document.js";
 
 type AppBridge = {
   hardware: {
@@ -22,45 +18,6 @@ type AppBridge = {
     event: { change$: number };
   };
 };
-
-function command(
-  type: "subscribe",
-  subscriptionId: string,
-  clientId: string,
-  key: string,
-): Extract<WireStreamCommand, { type: "subscribe" }>;
-function command(
-  type: "unsubscribe",
-  subscriptionId: string,
-  clientId?: string,
-): Extract<WireStreamCommand, { type: "unsubscribe" }>;
-function command(
-  type: "subscribe" | "unsubscribe",
-  subscriptionId: string,
-  clientId = "client-1",
-  key?: string,
-): WireStreamCommand {
-  return type === "subscribe"
-    ? {
-        protocolVersion: 1,
-        clientId,
-        type,
-        subscriptionId,
-        key: key as string,
-      }
-    : { protocolVersion: 1, clientId, type, subscriptionId };
-}
-const ack = (
-  subscriptionId: string,
-  sequence: number,
-  clientId = "client-1",
-) => ({
-  protocolVersion: 1 as const,
-  clientId,
-  type: "acknowledge" as const,
-  subscriptionId,
-  sequence,
-});
 
 function setup(
   options: {
@@ -97,47 +54,17 @@ function setup(
   return { server, currentSource, otherSource, events, target };
 }
 
-const types = (messages: readonly StreamMessage[]) =>
-  messages.map((message) => message.type);
-
 describe("세션별 구독 한도", () => {
   test("maxSubscriptions 도달 시 다음 subscribe는 subscribed+error(RESOURCE_EXHAUSTED)다", async () => {
     const { server, events } = setup({
       resourceLimits: { maxSubscriptions: 2 },
     });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      () => {},
-    );
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(3),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({
+    const doc = rendererDocument(server);
+    await doc.subscribe("state:hardware/current$");
+    await doc.subscribe("state:hardware/other$");
+    const sub = await doc.subscribe("event:hardware/change$");
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: {
         code: "RESOURCE_EXHAUSTED",
         message: "Too many bridge subscriptions.",
@@ -155,77 +82,28 @@ describe("세션별 구독 한도", () => {
       resourceLimits: { maxSubscriptions: 2 },
       authorize,
     });
-    const p1 = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    const p2 = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      () => {},
-    );
+    const doc = rendererDocument(server);
+    const p1 = doc.begin("state:hardware/current$");
+    const p2 = doc.begin("state:hardware/other$");
     await vi.waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(3),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({
+    const sub = await doc.subscribe("event:hardware/change$");
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({
       error: { code: "RESOURCE_EXHAUSTED" },
     });
     resolvers[0]?.(true);
     resolvers[1]?.(true);
-    await p1;
-    await p2;
+    await p1.ready;
+    await p2.ready;
   });
 
   test("원격 unsubscribe(활성) 뒤 슬롯이 반환된다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      () => {},
-    );
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    const doc = rendererDocument(server);
+    const first = await doc.subscribe("state:hardware/current$");
+    await first.unsubscribe();
+    const sub = await doc.subscribe("state:hardware/other$");
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("대기 중 unsubscribe 뒤 슬롯이 반환된다", async () => {
@@ -237,35 +115,13 @@ describe("세션별 구독 한도", () => {
       resourceLimits: { maxSubscriptions: 1 },
       authorize: () => authorization,
     });
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      () => {},
-    );
+    const doc = rendererDocument(server);
+    const pending = doc.begin("state:hardware/current$");
+    await pending.unsubscribe();
     allow(true);
-    await pending;
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    await pending.ready;
+    const sub = await doc.subscribe("state:hardware/other$");
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("대기 중 세션 retire는 authorize signal을 abort하고 늦은 허용을 무시한다", async () => {
@@ -281,24 +137,14 @@ describe("세션별 구독 한도", () => {
       resourceLimits: { maxSubscriptions: 1 },
       authorize,
     });
-    const late: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => late.push(message),
-    );
+    const late = rendererDocument(server).begin("state:hardware/current$");
     await vi.waitFor(() => expect(signal).toBeDefined());
     target.endDocument();
     expect(signal?.aborted).toBe(true);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
     allow(true);
-    await pending;
-    expect(late).toEqual([]);
+    await late.ready;
+    expect(late.frames).toEqual([]);
     expect(currentSource.observed).toBe(false);
   });
 
@@ -306,116 +152,47 @@ describe("세션별 구독 한도", () => {
     const { server, currentSource } = setup({
       resourceLimits: { maxSubscriptions: 1 },
     });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("state:hardware/current$");
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
     currentSource.complete();
-    await server.controlStream(
-      sender(),
-      ack(testSubscriptionId(1), 1),
-      () => {},
-    );
-    expect(messages.at(-1)).toMatchObject({ type: "complete" });
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    await sub.ack(1);
+    expect(sub.frames.at(-1)).toMatchObject({ type: "complete" });
+    const more = await doc.subscribe("state:hardware/other$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("소스 error 뒤 슬롯이 반환된다", async () => {
     const { server, events } = setup({
       resourceLimits: { maxSubscriptions: 1 },
     });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("event:hardware/change$");
     events.error(new Error("boom"));
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    const more = await doc.subscribe("state:hardware/current$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("Event overflow error 정책 종료 뒤 슬롯이 반환된다", async () => {
     const { server, events } = setup({
       resourceLimits: { maxSubscriptions: 1 },
     });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => messages.push(message),
-    );
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("event:hardware/change$");
     events.next(1);
     events.next(2);
     events.next(3);
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
-    await server.controlStream(
-      sender(),
-      ack(testSubscriptionId(1), 1),
-      () => {},
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch", "batch"]);
-    await server.controlStream(
-      sender(),
-      ack(testSubscriptionId(1), 2),
-      () => {},
-    );
-    expect(messages.at(-1)).toMatchObject({
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
+    await sub.ack(1);
+    expect(sub.types()).toEqual(["subscribed", "batch", "batch"]);
+    await sub.ack(2);
+    expect(sub.frames.at(-1)).toMatchObject({
       type: "error",
       error: { code: "STREAM_OVERFLOW" },
     });
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    const more = await doc.subscribe("state:hardware/current$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("authorize가 false를 반환하면 FORBIDDEN 뒤 슬롯이 반환된다", async () => {
@@ -424,31 +201,12 @@ describe("세션별 구독 한도", () => {
       resourceLimits: { maxSubscriptions: 1 },
       authorize: () => calls++ !== 0,
     });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({ error: { code: "FORBIDDEN" } });
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("state:hardware/current$");
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({ error: { code: "FORBIDDEN" } });
+    const more = await doc.subscribe("state:hardware/other$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("authorize가 예외를 던지면 INTERNAL 뒤 슬롯이 반환된다", async () => {
@@ -460,198 +218,68 @@ describe("세션별 구독 한도", () => {
         return true;
       },
     });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({ error: { code: "INTERNAL" } });
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("state:hardware/current$");
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({ error: { code: "INTERNAL" } });
+    const more = await doc.subscribe("state:hardware/other$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("알 수 없는 key는 NOT_FOUND 뒤 슬롯이 반환된다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/missing$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({ error: { code: "NOT_FOUND" } });
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed", "batch"]);
+    const doc = rendererDocument(server);
+    const sub = await doc.subscribe("state:hardware/missing$");
+    expect(sub.types()).toEqual(["subscribed", "error"]);
+    expect(sub.frames[1]).toMatchObject({ error: { code: "NOT_FOUND" } });
+    const more = await doc.subscribe("state:hardware/current$");
+    expect(more.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("한도 초과 거부는 슬롯을 소비하지 않는다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    const rejected: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => rejected.push(message),
-    );
-    expect(types(rejected)).toEqual(["subscribed", "error"]);
-    await server.controlStream(
-      sender(),
-      command("unsubscribe", testSubscriptionId(1)),
-      () => {},
-    );
-    const more: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(3),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => more.push(message),
-    );
-    expect(types(more)).toEqual(["subscribed"]);
+    const doc = rendererDocument(server);
+    const first = await doc.subscribe("state:hardware/current$");
+    const rejected = await doc.subscribe("state:hardware/other$");
+    expect(rejected.types()).toEqual(["subscribed", "error"]);
+    await first.unsubscribe();
+    const more = await doc.subscribe("event:hardware/change$");
+    expect(more.types()).toEqual(["subscribed"]);
   });
 
   test("세션 retire 뒤 새 세션은 구독 슬롯 0부터 시작한다", async () => {
     const { server, target } = setup({
       resourceLimits: { maxSubscriptions: 1 },
     });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
+    await rendererDocument(server).subscribe("state:hardware/current$");
     target.endDocument();
-    const messages: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-2",
-        "state:hardware/other$",
-      ),
-      (message) => messages.push(message),
-    );
-    expect(types(messages)).toEqual(["subscribed", "batch"]);
+    const sub = await rendererDocument(server, {
+      clientId: "client-2",
+    }).subscribe("state:hardware/other$");
+    expect(sub.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("세션 격리: A가 구독 한도를 소진해도 B는 정상 처리된다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
     server.attach(new FakeTarget(2, "main"));
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
+    const a = rendererDocument(server);
+    await a.subscribe("state:hardware/current$");
+    const rejected = await a.subscribe("state:hardware/other$");
+    expect(rejected.types()).toEqual(["subscribed", "error"]);
+    const b = await rendererDocument(server, { webContentsId: 2 }).subscribe(
+      "state:hardware/other$",
+      { id: 1 },
     );
-    const rejected: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => rejected.push(message),
-    );
-    expect(types(rejected)).toEqual(["subscribed", "error"]);
-    const bMessages: StreamMessage[] = [];
-    await server.controlStream(
-      sender({ webContentsId: 2 }),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      (message) => bMessages.push(message),
-    );
-    expect(types(bMessages)).toEqual(["subscribed", "batch"]);
+    expect(b.types()).toEqual(["subscribed", "batch"]);
   });
 
   test("공유 upstream이어도 consumer마다 슬롯 1개를 쓴다", async () => {
     const { server } = setup({ resourceLimits: { maxSubscriptions: 1 } });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      () => {},
-    );
-    const rejected: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => rejected.push(message),
-    );
-    expect(types(rejected)).toEqual(["subscribed", "error"]);
-    expect(rejected[1]).toMatchObject({
+    const doc = rendererDocument(server);
+    await doc.subscribe("event:hardware/change$");
+    const rejected = await doc.subscribe("event:hardware/change$");
+    expect(rejected.types()).toEqual(["subscribed", "error"]);
+    expect(rejected.frames[1]).toMatchObject({
       error: { code: "RESOURCE_EXHAUSTED" },
     });
   });
@@ -668,40 +296,13 @@ describe("세션별 구독 한도", () => {
       resourceLimits: { maxSubscriptions: 2 },
       authorize,
     });
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      () => {},
-    );
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(2),
-        "client-1",
-        "state:hardware/other$",
-      ),
-      () => {},
-    );
+    const doc = rendererDocument(server);
+    await doc.subscribe("state:hardware/current$");
+    const pending = doc.begin("state:hardware/other$");
     await vi.waitFor(() => expect(allowOther).toBeDefined());
-    const rejected: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(3),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => rejected.push(message),
-    );
-    expect(types(rejected)).toEqual(["subscribed", "error"]);
-    expect(rejected[1]).toMatchObject({
+    const rejected = await doc.subscribe("event:hardware/change$");
+    expect(rejected.types()).toEqual(["subscribed", "error"]);
+    expect(rejected.frames[1]).toMatchObject({
       error: {
         code: "RESOURCE_EXHAUSTED",
         message: "Too many bridge subscriptions.",
@@ -709,20 +310,10 @@ describe("세션별 구독 한도", () => {
     });
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(2);
     allowOther(true);
-    await pending;
-    const rejectedAgain: StreamMessage[] = [];
-    await server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(4),
-        "client-1",
-        "event:hardware/change$",
-      ),
-      (message) => rejectedAgain.push(message),
-    );
-    expect(types(rejectedAgain)).toEqual(["subscribed", "error"]);
-    expect(rejectedAgain[1]).toMatchObject({
+    await pending.ready;
+    const rejectedAgain = await doc.subscribe("event:hardware/change$");
+    expect(rejectedAgain.types()).toEqual(["subscribed", "error"]);
+    expect(rejectedAgain.frames[1]).toMatchObject({
       error: { code: "RESOURCE_EXHAUSTED" },
     });
   });
@@ -750,26 +341,16 @@ describe("세션별 구독 한도", () => {
       authorize: () => authorization,
     });
     const detach = server.attach(new FakeTarget());
-    const messages: StreamMessage[] = [];
-    const pending = server.controlStream(
-      sender(),
-      command(
-        "subscribe",
-        testSubscriptionId(1),
-        "client-1",
-        "state:hardware/current$",
-      ),
-      (message) => messages.push(message),
-    );
+    const pending = rendererDocument(server).begin("state:hardware/current$");
     detach();
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
-    expect(types(messages)).toEqual(["subscribed", "error"]);
-    expect(messages[1]).toMatchObject({
+    expect(pending.types()).toEqual(["subscribed", "error"]);
+    expect(pending.frames[1]).toMatchObject({
       error: { code: "CANCELLED", message: "Bridge session ended." },
     });
     allow(true);
-    await pending;
-    expect(types(messages)).toEqual(["subscribed", "error"]);
+    await pending.ready;
+    expect(pending.types()).toEqual(["subscribed", "error"]);
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
     expect(currentSource.observed).toBe(false);
   });
