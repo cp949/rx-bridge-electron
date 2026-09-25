@@ -355,6 +355,28 @@
 
   계획: `_works/20260925-15-payload-limits-resolution/`. **결과:** 완료 조건 전부 충족, 편차 없음(TRP-001·TRP-004 미사용). DELTA-01(현재 구조 그대로 server seam(`create-bridge-server-impl.test.ts`)에 `{ maxTotalBytes: undefined }` 거부 `test.each` 4행 추가 — `maxTotalBytes` 행이 수정 전 RED·나머지 3행 GREEN, `assertPartialPayloadLimits`의 `maxTotalBytes` 전용 통과 블록을 제거해 GREEN 전환, 기존 test 단언 무변경 — 39 files/746 tests) → DELTA-02(신규 `src/main/payload-limits.ts`에 `resolvePayloadLimits`·동결한 `DEFAULT_PAYLOAD_LIMITS`를 `resource-limits.ts`와 같은 모양(undefined 시 기본값 객체 그대로 반환, 알 수 없는 키 우선 검사, `KEYS` 순회 + `Object.hasOwn`, 결과 동결)으로 추출, `/main`에서 export, `create-bridge-server.ts`에서 `defaultLimits`·`PAYLOAD_LIMIT_KEYS`·`assertPartialPayloadLimits` 삭제, 신규 `payload-limits.test.ts` 직접 test 36건 — 40 files/782 tests) → DELTA-03(ADR 0009 결정 5에 `_(개정: RD-038 — …)_` 주석, `docs/architecture.md` "Payload 및 제한"·README payload 절에 `undefined` 거부와 `DEFAULT_PAYLOAD_LIMITS` 반영, README "호환성 변경" 항목 추가 안 함(외부 사용자 없음), 신규 test 없음, 782 tests 그대로) → DELTA-04(전체 검증, ROADMAP·리뷰 카드 완료 표시) 순으로 진행. 검증 수치: 패키지 `xvfb-run -a pnpm verify`(build+check-types+vitest, Electron acceptance 포함) 40 files/782 tests 통과(기준 742+DELTA-01 4+DELTA-02 36), 24.4초, 1회 통과. 루트 `pnpm lint`·`pnpm format:check` 통과. demo `check-types`·`test:unit` 10 files/24 tests 통과. grep: `create-bridge-server.ts`의 `defaultLimits|PAYLOAD_LIMIT_KEYS|assertPartialPayloadLimits` 0건, `index.ts`의 `DEFAULT_PAYLOAD_LIMITS` 1건. `git diff dev -- src/protocol` 빈 출력. `git diff dev --stat -- src/main`은 `create-bridge-server.ts`(-53)·`index.ts`(+1)·`payload-limits.ts`(신규 +37) 3개뿐. `git diff dev --numstat -- test`: `create-bridge-server-impl.test.ts` 18/0, `payload-limits.test.ts` 114/0, 삭제 열 전부 0. **발견:** DELTA-01·02·03 모두 `pnpm format:check` 1차 실행에서 신규/개정 코드 블록의 줄바꿈이 prettier 규칙과 달라 실패 → `prettier --write`로 자동 정리 후 재통과(내용 변경 없음, 편차 아님). 그 외 계획과의 차이 없음.
 
+### 리뷰 03 잔재 정리 (출처: 아키텍처 리뷰 `_works/arch-review/03.html` 잔재 섹션)
+
+- [ ] **RD-039 — 리뷰 03 잔재 5건을 동작 변경 없이 정리한다: registration 중복 필드, `RemoteError` 변환 2벌, `CommonServerOptions`, `TransportErrorCode` 누락·미사용, `BridgeServer` 부모 interface.** 2026-09-25 재확인 기준(`dev` @ `e7e1ea5`): 등록 항목의 `domainName`·`operation`은 `bridgeOperation`과 겹치고 manifest 목록(`manifestCategoryList`)만 읽는다. `RpcErrorPayload → RemoteError` 변환이 `rpc-client.ts`·`stream-multiplexer.ts`에 2벌이다. `CommonServerOptions`·`buildBridgeServer`는 호출자가 1개이고, "테이블 만드는 방법과 분리" 주석의 두 번째 방법이 없다. `TransportErrorCode`는 `./protocol`에서 공개되지만 사용처가 0곳이고, wire로 나가는 `STREAM_OVERFLOW`가 빠져 있다. 라이브러리 오류 code는 `string` 인자로 약 50곳에서 만들어져 컴파일러가 검사하지 못한다. `BridgeServer`는 `StreamBridgeServer`의 부모로만 쓰이고 부모 단독 호출자가 0이다. **구조:**
+  - manifest: 등록 항목의 `domainName`·`operation`을 삭제하고 목록은 `bridgeOperation`(`domain`·`operation`·`key`)으로 만든다. 순서(도메인명 → operation명, wire key 정렬과 다름)는 유지한다.
+  - `remote-error.ts`의 `remoteErrorFromPayload`가 원격 오류 payload 변환을 전담한다(비공개).
+  - `CommonServerOptions`를 삭제하고 필드를 `ImplServerOptions`에 직접 둔다. `buildBridgeServer`는 해석된 값(payload·resource limits, `authorize`, `diagnostics`)만 받는다. 생성 시점 검증 순서(payload limits → 등록 → resource limits)는 유지한다.
+  - `TransportErrorCode`를 `protocol/error-code.ts`로 옮기고 `STREAM_OVERFLOW`를 추가한다. `localError`·`protocolError`·`BridgeProtocolError`·`rpc-requests`의 `error()`를 이 타입으로 좁히고, 객체 리터럴은 비공개 `LibraryErrorPayload`로 검사한다. `RemoteError.code`·`RpcErrorPayload.code`는 선언 오류를 싣기 위해 `string`으로 둔다.
+  - `BridgeServer`를 `StreamBridgeServer`에 병합·삭제한다. 이름은 `StreamBridgeServer`로 유지한다.
+  - 이전 방법: 외부 사용자가 없으므로 README "호환성 변경" 항목을 추가하지 않는다. 기존 항목 8의 "부모 `BridgeServer`" 문구만 고친다.
+
+  **범위 밖:** `TransportErrorCode`·`StreamBridgeServer` 개명, 과거 ADR·ROADMAP 본문의 이름 수정, 리뷰 03 후보 05(`LocalGeneration` kind 분기, 채택 안 함).
+
+  **완료 기준:**
+  - 런타임 동작 불변. 기존 test 단언 변경 0건(`upstreams.test.ts` fixture 필드 6줄 삭제만 허용).
+  - stream 원격 오류 `details` 전달과 생성 시점 검증 순서를 characterization test로 먼저 고정한다.
+  - 목록에 없는 code를 helper·리터럴에 넣으면 컴파일 오류임을 probe로 확인한다.
+  - `grep -rnw BridgeServer`(패키지 src·test·README, `docs/architecture.md`) 0건, `CommonServerOptions` 0건.
+  - 패키지 `xvfb-run -a pnpm verify`, 루트 `pnpm lint`·`pnpm format:check`, demo `check-types`·`test:unit`이 통과한다.
+  - ADR 0016에 개정 주석을 단다. 신규 ADR은 쓰지 않는다.
+
+  계획: `_works/20260925-16-residue-cleanup/`.
+
 ## 현재 범위 밖의 확장
 
 Binary/MessagePort 전송, 지속적인 초고속 Event, 원격 콘텐츠·플러그인 권한, 범용 `global/session/webContents` 스트림 scope, React 전용 패키지는 지금의 RD에 포함하지 않는다. 타입에서 스키마 자동 생성(typia, ts-to-zod), 타입 수준 RPC 에러 코드, RPC 다중 인자도 경량 계약 RD 범위 밖이다. 실제 사용 사례가 생기면 성능·신뢰 모델과 공개 인터페이스를 별도로 설계한 뒤 다음 RD 번호로 추가한다. 기존 `rx-bridge-electron`의 RPC·State·Event 인터페이스를 통해 해결 가능한지 먼저 확인한다.
