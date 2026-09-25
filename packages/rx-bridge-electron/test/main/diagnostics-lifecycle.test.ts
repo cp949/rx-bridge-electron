@@ -1,3 +1,9 @@
+/**
+ * 세션·RPC·구독 수명주기 진단 이벤트와 `getDiagnosticsSnapshot` 집계를
+ * server seam에서 확인한다. 생성·종료 이벤트가 사건마다 정확한 횟수로 남는지,
+ * 거부된 구독은 opened/closed를 남기지 않는지, 스냅샷 값이 대기·활성·retire·
+ * dispose 단계마다 맞게 갱신되는지를 다룬다.
+ */
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
@@ -23,6 +29,7 @@ type HardwareBridge = {
   };
 };
 
+/** `rpc:hardware/wait` 호출 envelope. test는 필요한 필드만 덮어쓴다. */
 const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   protocolVersion: 1,
   clientId: "document-1",
@@ -32,6 +39,11 @@ const request = (overrides: Partial<WireRpcRequest> = {}): WireRpcRequest => ({
   ...overrides,
 });
 
+/**
+ * RPC 1개(끝나지 않는 handler)·State 1개·Event 1개를 가진 server를 만든다.
+ * 진단은 `records`에 쌓이고, `handlers`로 대기 중인 RPC를 test가 끝낸다.
+ * target attach는 test가 직접 한다.
+ */
 function harness(
   options: {
     authorize?: Authorize;
@@ -72,6 +84,7 @@ function harness(
   return { server, currentSource, events, records, handler, handlers };
 }
 
+/** `records`에서 `type` 진단 이벤트의 개수를 센다. */
 const opened = (records: readonly BridgeDiagnostic[], type: string) =>
   records.filter((record) => record.type === type).length;
 
@@ -286,7 +299,7 @@ describe("구독 수명주기 진단", () => {
   });
 });
 
-describe("getDiagnosticsSnapshot", () => {
+describe("getDiagnosticsSnapshot 집계", () => {
   test("세션·RPC·구독이 없으면 네 값 모두 0이다", () => {
     const { server } = harness();
     const snapshot: DiagnosticsSnapshot = server.getDiagnosticsSnapshot();
@@ -385,7 +398,7 @@ describe("getDiagnosticsSnapshot", () => {
     });
   });
 
-  test("active consumer의 queuedEvents와 pending 구독을 포함한 subscriptions, dispose 뒤 모두 0으로 돌아온다", async () => {
+  test("활성 consumer의 queuedEvents와 대기 구독을 포함한 subscriptions가 집계되고 dispose 뒤 모두 0으로 돌아온다", async () => {
     let allow!: (value: boolean) => void;
     let pendingSignal: AbortSignal | undefined;
     const authorize: Authorize = (context, operation) => {

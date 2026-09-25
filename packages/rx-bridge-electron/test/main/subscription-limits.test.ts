@@ -1,3 +1,9 @@
+/**
+ * 세션별 구독 한도(`maxSubscriptions`)와 slot 반환 시점을 server seam에서 확인한다.
+ * authorize 대기 구독의 slot 점유, unsubscribe·소스 종료·거부·retire·detach 뒤
+ * slot 반환, 세션 격리, 공유 upstream의 consumer별 slot을 다루고, 결함 있는
+ * 직접 작성 event source가 생성 시점에 거부되는지도 확인한다.
+ */
 import { BehaviorSubject, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
@@ -19,6 +25,11 @@ type AppBridge = {
   };
 };
 
+/**
+ * State 2개(`current$`·`other$`)와 capacity 1 Event를 가진 server와 attach된
+ * target을 만든다. 한도·authorize는 test마다 넘기고, 소스와 `target`으로
+ * 소스 종료·문서 종료를 test가 제어한다.
+ */
 function setup(
   options: {
     resourceLimits?: Partial<ResourceLimits>;

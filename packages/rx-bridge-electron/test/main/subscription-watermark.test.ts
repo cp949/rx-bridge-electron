@@ -1,3 +1,8 @@
+/**
+ * 세션별 subscriptionId 워터마크 규칙을 server seam에서 확인한다.
+ * 같은 ID·더 낮은 ID·unsubscribe 뒤 재사용·한도 거부 뒤 재전송은 무응답이고,
+ * 형식 오류 ID는 거부되며, 새 문서 세션은 워터마크를 다시 시작한다.
+ */
 import { BehaviorSubject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
@@ -17,6 +22,10 @@ type AppBridge = {
 
 const KEY = "state:hardware/current$";
 
+/**
+ * State 1개짜리 server와 attach된 target을 만든다. `subscribe` spy로 소스
+ * 구독 여부를, `target`으로 문서 종료를 test가 제어한다.
+ */
 function setup(resourceLimits?: Partial<ResourceLimits>) {
   const source = new BehaviorSubject(1);
   const subscribe = vi.spyOn(source, "subscribe");

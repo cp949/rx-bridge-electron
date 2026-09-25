@@ -1,3 +1,9 @@
+/**
+ * Main stream 구독의 server seam 동작을 확인한다.
+ * State·broadcast Event·scoped Event의 upstream 공유와 전달, ACK 게이트
+ * 흐름 제어와 overflow, 구독 수명주기와 순서, 세션 retire 때의 terminal
+ * 통지를 `renderer-document` 드라이버로 구독하며 검증한다.
+ */
 import { BehaviorSubject, Observable, Subject } from "rxjs";
 import { describe, expect, test, vi } from "vitest";
 
@@ -19,6 +25,11 @@ import { testSubscriptionId } from "./subscription-ids.js";
 const STATE = "state:hardware/current$";
 const EVENT = "event:hardware/change$";
 
+/**
+ * State 1개·broadcast Event 1개(buffer 용량·overflow 정책 선택)와 진단 spy를
+ * 가진 server를 만들고 webContents 1·2 target을 attach한다. 대부분의 test가
+ * 이 fixture 위에서 구독한다.
+ */
 function harness(
   options: {
     capacity?: number;
@@ -49,8 +60,8 @@ function harness(
   return { server, source, events, diagnostics };
 }
 
-describe("Main stream sources and sharing", () => {
-  test("terminal ACK from an old consumer cannot evict a newer shared upstream", async () => {
+describe("Main stream 소스와 공유", () => {
+  test("옛 consumer의 terminal ACK는 더 새로 공유된 upstream을 해제시키지 못한다", async () => {
     let subscriptions = 0;
     let live = 0;
     const source = new Observable<number>((subscriber) => {
@@ -87,13 +98,13 @@ describe("Main stream sources and sharing", () => {
       messages.filter((message) => message.type === "subscribed"),
     ).toHaveLength(3);
   });
-  test("rejects a plain Subject as State source", () => {
+  test("plain Subject를 State 소스로 쓰면 거부한다", () => {
     expect(() => currentValueSource(new Subject<number>() as never)).toThrow(
       TypeError,
     );
   });
 
-  test("delivers current State first and shares one upstream between windows", async () => {
+  test("현재 State를 먼저 전달하고 창 사이에 upstream 하나를 공유한다", async () => {
     const source = new BehaviorSubject(7);
     const subscribe = vi.spyOn(source, "subscribe");
     const server = createBridgeServer({
@@ -122,7 +133,7 @@ describe("Main stream sources and sharing", () => {
     expect(subscribe).toHaveBeenCalledTimes(2);
   });
 
-  test("scoped factory receives trusted role and sender only after attached subscribe", async () => {
+  test("scoped factory는 attach된 문서의 subscribe 뒤에만 신뢰된 role과 sender를 받는다", async () => {
     const contexts: unknown[] = [];
     const server = createBridgeServer({
       hardware: {
@@ -149,7 +160,7 @@ describe("Main stream sources and sharing", () => {
     ]);
   });
 
-  test("a late-joining State consumer whose getValue() throws is masked without disturbing the shared upstream", async () => {
+  test("늦게 합류한 State consumer의 getValue()가 throw하면 공유 upstream을 건드리지 않고 마스킹된 오류로 끝난다", async () => {
     const raw = new BehaviorSubject(1);
     let throwing = false;
     const flagged = Object.assign(
@@ -191,7 +202,7 @@ describe("Main stream sources and sharing", () => {
     ],
     ["returns a non-Observable", () => 42 as unknown as Observable<number>],
   ] as const)(
-    "scoped Event terminates with a masked INTERNAL error and returns the slot when the factory %s",
+    "factory가 %s일 때 scoped Event는 마스킹된 INTERNAL 오류로 끝나고 slot을 반환한다",
     async (_label, factory) => {
       const server = createBridgeServer({
         hardware: { event: { change$: scopedEvent(factory) } },
@@ -206,7 +217,7 @@ describe("Main stream sources and sharing", () => {
     },
   );
 
-  test("a first State batch send failure during the shared subscribe closes the consumer without ever observing upstream", async () => {
+  test("공유 subscribe 중 첫 State batch 전송이 실패하면 upstream을 관찰하지 않은 채 consumer를 닫는다", async () => {
     const source = new BehaviorSubject(1);
     const server = createBridgeServer({
       hardware: { state: { current$: currentValueSource(source) } },
@@ -222,7 +233,7 @@ describe("Main stream sources and sharing", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("a broadcast upstream error masks the original message for every fanned-out consumer", async () => {
+  test("broadcast upstream 오류는 fan-out된 모든 consumer에서 원래 메시지를 마스킹한다", async () => {
     const source = new Subject<number>();
     const server = createBridgeServer({
       hardware: { event: { change$: broadcastEvent(source) } },
@@ -252,8 +263,8 @@ describe("Main stream sources and sharing", () => {
   });
 });
 
-describe("Main stream scoped Event delivery", () => {
-  test("scoped Event batches values with the same ack-gated flow control as broadcast", async () => {
+describe("Main stream scoped Event 전달", () => {
+  test("scoped Event는 broadcast와 같은 ACK 게이트 흐름 제어로 값을 batch로 보낸다", async () => {
     const upstream = new Subject<number>();
     const server = createBridgeServer({
       hardware: { event: { change$: scopedEvent(() => upstream) } },
@@ -269,7 +280,7 @@ describe("Main stream scoped Event delivery", () => {
     expect(sub.frames.at(-1)).toMatchObject({ values: [2] });
   });
 
-  test("scoped Event error terminates with a masked INTERNAL error and returns the slot", async () => {
+  test("scoped Event 오류는 마스킹된 INTERNAL 오류로 끝나고 slot을 반환한다", async () => {
     const upstream = new Subject<number>();
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
@@ -288,7 +299,7 @@ describe("Main stream scoped Event delivery", () => {
     );
   });
 
-  test("scoped Event complete terminates and returns the slot", async () => {
+  test("scoped Event complete는 stream을 끝내고 slot을 반환한다", async () => {
     const upstream = new Subject<number>();
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
@@ -304,7 +315,7 @@ describe("Main stream scoped Event delivery", () => {
     );
   });
 
-  test("scoped Event creates a separate upstream per subscription, unlike broadcast", async () => {
+  test("scoped Event는 broadcast와 달리 구독마다 별도 upstream을 만든다", async () => {
     let factoryCalls = 0;
     const firstSubject = new Subject<number>();
     const secondSubject = new Subject<number>();
@@ -333,8 +344,8 @@ describe("Main stream scoped Event delivery", () => {
   });
 });
 
-describe("Main stream flow control", () => {
-  test("queued State is an immutable snapshot of the accepted schema value", async () => {
+describe("Main stream 흐름 제어", () => {
+  test("대기 중인 State는 수락된 schema 값의 불변 snapshot이다", async () => {
     const source = new BehaviorSubject({ nested: { count: 1 } });
     const server = createBridgeServer({
       hardware: { state: { current$: currentValueSource(source) } },
@@ -351,7 +362,7 @@ describe("Main stream flow control", () => {
     });
   });
 
-  test("queued Event cannot be mutated into a non-BridgeValue before ACK", async () => {
+  test("대기 중인 Event는 ACK 전에 BridgeValue가 아닌 값으로 변형될 수 없다", async () => {
     const source = new Subject<{ nested: { count: number } }>();
     const server = createBridgeServer({
       hardware: { event: { change$: broadcastEvent(source) } },
@@ -377,7 +388,7 @@ describe("Main stream flow control", () => {
       }),
     ).toEqual({ nested: { count: 2 } });
   });
-  test("holds one State batch and replaces pending State with latest value until ACK", async () => {
+  test("ACK 전까지 State batch 하나만 보내고 대기 State를 최신 값으로 교체한다", async () => {
     const { server, source } = harness();
     const sub = await rendererDocument(server).subscribe(STATE);
     source.next(2);
@@ -398,7 +409,7 @@ describe("Main stream flow control", () => {
     ["drop-newest", [2, 3], false],
     ["error", [2, 3], true],
   ] as const)(
-    "Event %s keeps accepted values and counts drops",
+    "Event %s는 수락한 값을 유지하고 드롭 수를 센다",
     async (overflow, expected, ends) => {
       const { server, events, diagnostics } = harness({
         capacity: 2,
@@ -437,8 +448,8 @@ describe("Main stream flow control", () => {
   );
 });
 
-describe("Main stream lifecycle and ordering", () => {
-  test("scoped factory cannot start a source after ending its document", async () => {
+describe("Main stream 수명주기와 순서", () => {
+  test("자기 문서를 끝낸 scoped factory는 소스를 시작할 수 없다", async () => {
     let starts = 0;
     const target = new FakeTarget();
     const server = createBridgeServer({
@@ -458,7 +469,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(sub.types()).toEqual(["subscribed"]);
     expect(starts).toBe(0);
   });
-  test("navigation inside subscribed delivery prevents a late error or upstream subscription", async () => {
+  test("subscribed 전달 안의 navigation은 늦은 error와 upstream 구독을 막는다", async () => {
     const source = new Subject<number>();
     const server = createBridgeServer(
       { hardware: { event: { change$: broadcastEvent(source) } } },
@@ -475,7 +486,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(source.observed).toBe(false);
   });
 
-  test("retired client IDs cannot replay after detach and a new client may reuse its stream ID", async () => {
+  test("retire된 clientId는 detach 뒤 다시 보낼 수 없고 새 client는 그 stream ID를 재사용할 수 있다", async () => {
     const { server, source } = harness();
     const doc = rendererDocument(server);
     await doc.subscribe(STATE);
@@ -500,7 +511,7 @@ describe("Main stream lifecycle and ordering", () => {
       values: [2],
     });
   });
-  test("unsubscribe during pending authorization prevents a late source subscription", async () => {
+  test("authorization 대기 중 unsubscribe는 늦은 소스 구독을 막는다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -528,7 +539,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(source.observed).toBe(false);
     expect(messages).toEqual([]);
   });
-  test("a rejected subscription receives a terminal response without starting its source", async () => {
+  test("거부된 구독은 소스를 시작하지 않고 terminal 응답을 받는다", async () => {
     const source = new Subject<number>();
     const server = createBridgeServer(
       { hardware: { event: { change$: broadcastEvent(source) } } },
@@ -541,7 +552,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(source.observed).toBe(false);
   });
 
-  test("a failing sender closes the consumer before subscribing upstream", async () => {
+  test("실패하는 sender는 upstream 구독 전에 consumer를 닫는다", async () => {
     const source = new Subject<number>();
     const server = createBridgeServer({
       hardware: { event: { change$: broadcastEvent(source) } },
@@ -556,7 +567,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(source.observed).toBe(false);
   });
 
-  test("delimiter-laden clientIds cannot collide across sessions", async () => {
+  test("구분자가 든 clientId는 세션 사이에 충돌하지 않는다", async () => {
     const { server } = harness();
     const messages: StreamMessage[] = [];
     const record = {
@@ -576,7 +587,7 @@ describe("Main stream lifecycle and ordering", () => {
     ).toEqual(["a", "a:b:c"]);
   });
 
-  test("synchronous overflow unsubscribes the producer at the capacity boundary", async () => {
+  test("동기 overflow는 용량 경계에서 producer 구독을 해제한다", async () => {
     let produced = 0;
     const source = new Observable<number>((subscriber) => {
       for (let value = 1; value <= 100 && !subscriber.closed; value += 1) {
@@ -598,7 +609,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(produced).toBe(3);
   });
 
-  test("synchronous Event emission follows subscribed and terminal follows ACK", async () => {
+  test("동기 Event 방출은 subscribed 뒤에 오고 terminal은 ACK 뒤에 온다", async () => {
     const source = new Observable<number>((subscriber) => {
       subscriber.next(5);
       subscriber.complete();
@@ -613,7 +624,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(sub.frames.at(-1)).toMatchObject({ type: "complete" });
   });
 
-  test("terminal error drains accepted values and a later subscription starts fresh", async () => {
+  test("terminal error는 수락한 값을 모두 보낸 뒤 오고 이후 구독은 새로 시작한다", async () => {
     const { server, events } = harness();
     const doc = rendererDocument(server);
     const sub = await doc.subscribe(EVENT);
@@ -630,7 +641,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(fresh.types()).toEqual(["subscribed", "batch"]);
   });
 
-  test("old-session ACK and unsubscribe cannot affect replacement", async () => {
+  test("옛 세션의 ACK와 unsubscribe는 교체한 세션에 영향을 주지 못한다", async () => {
     const { server, source } = harness();
     const sub = await rendererDocument(server).subscribe(STATE);
     const replacement = await rendererDocument(server, {
@@ -648,7 +659,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(sub.frames).toHaveLength(2);
   });
 
-  test("a State value exceeding maxTotalBytes fails validation instead of being sent", async () => {
+  test("maxTotalBytes를 넘는 State 값은 전송되지 않고 검증 실패가 된다", async () => {
     const source = new BehaviorSubject("x".repeat(2000));
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
@@ -674,7 +685,7 @@ describe("Main stream lifecycle and ordering", () => {
     );
   });
 
-  test("unsubscribe during pending authorization silences a later deny", async () => {
+  test("authorization 대기 중 unsubscribe는 뒤이은 거부를 침묵시킨다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -698,7 +709,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("detach during pending authorization silences a later authorize exception", async () => {
+  test("authorization 대기 중 detach는 뒤이은 authorize 예외를 침묵시킨다", async () => {
     let fail!: (cause: unknown) => void;
     const authorization = new Promise<boolean>((_resolve, reject) => {
       fail = reject;
@@ -726,7 +737,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("subscribing without an authorize option delivers subscribed synchronously", async () => {
+  test("authorize 옵션 없이 구독하면 subscribed를 동기로 전달한다", async () => {
     const { server } = harness();
     const sub = rendererDocument(server).begin(STATE);
     expect(sub.frames[0]).toMatchObject({ type: "subscribed", sequence: 0 });
@@ -734,7 +745,7 @@ describe("Main stream lifecycle and ordering", () => {
   });
 
   test.each(["drop-oldest", "drop-newest", "error"] as const)(
-    "detach from the diagnostics sink during stream-dropped ends the stream with CANCELLED and records no stream-queue after subscription-closed (%s)",
+    "stream-dropped 중 진단 sink에서 detach하면 stream이 CANCELLED로 끝나고 subscription-closed 뒤 stream-queue를 기록하지 않는다(%s)",
     async (policy) => {
       const { server, events, diagnostics } = harness({
         capacity: 2,
@@ -783,7 +794,7 @@ describe("Main stream lifecycle and ordering", () => {
     },
   );
 
-  test("unsubscribe from the diagnostics sink during stream-dropped records no stream-queue after subscription-closed", async () => {
+  test("stream-dropped 중 진단 sink에서 unsubscribe하면 subscription-closed 뒤 stream-queue를 기록하지 않는다", async () => {
     const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -823,7 +834,7 @@ describe("Main stream lifecycle and ordering", () => {
     });
   });
 
-  test("detach from the diagnostics sink during a post-push stream-queue diagnostic drops the pending batch", async () => {
+  test("push 뒤 stream-queue 진단 중 진단 sink에서 detach하면 대기 batch를 버린다", async () => {
     const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -860,7 +871,7 @@ describe("Main stream lifecycle and ordering", () => {
     ]);
   });
 
-  test("a synchronous acknowledge reentrant inside send drains the deferred queue in order", async () => {
+  test("send 안에서 재진입한 동기 acknowledge는 미뤄 둔 큐를 순서대로 비운다", async () => {
     const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -906,7 +917,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("a synchronous unsubscribe reentrant inside send stops delivery immediately", async () => {
+  test("send 안에서 재진입한 동기 unsubscribe는 전달을 즉시 멈춘다", async () => {
     const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -947,7 +958,7 @@ describe("Main stream lifecycle and ordering", () => {
     expect(sub.frames).toHaveLength(2);
   });
 
-  test("detach from the diagnostics sink during a post-shift stream-queue diagnostic discards the flushed value", async () => {
+  test("shift 뒤 stream-queue 진단 중 진단 sink에서 detach하면 flush할 값을 버린다", async () => {
     const { server, events, diagnostics } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -988,7 +999,7 @@ describe("Main stream lifecycle and ordering", () => {
     });
   });
 
-  test("a shared value reaching a consumer after its terminal was recorded in the same fan-out is not delivered", async () => {
+  test("같은 fan-out에서 terminal이 기록된 뒤 consumer에 도달한 공유 값은 전달되지 않는다", async () => {
     const { server, events } = harness({
       capacity: 2,
       overflow: "drop-oldest",
@@ -1018,7 +1029,7 @@ describe("Main stream lifecycle and ordering", () => {
     ]);
   });
 
-  test("a shared value reaching a consumer closed earlier in the same fan-out records no validation-failed", async () => {
+  test("같은 fan-out에서 먼저 닫힌 consumer에 도달한 공유 값은 validation-failed를 기록하지 않는다", async () => {
     const { server, events, diagnostics } = harness();
     const doc = rendererDocument(server);
     let second: TestSubscription | undefined;
@@ -1042,8 +1053,8 @@ describe("Main stream lifecycle and ordering", () => {
   });
 });
 
-describe("Main stream terminal notify on retire", () => {
-  test("detach retires an active State subscriber with CANCELLED, discarding an unacked pending value", async () => {
+describe("Main stream retire 시 terminal 통지", () => {
+  test("detach는 활성 State 구독자를 CANCELLED로 retire하고 ACK되지 않은 대기 값을 버린다", async () => {
     const { server, source } = harness();
     const detach = server.attach(new FakeTarget());
     const sub = await rendererDocument(server).subscribe(STATE);
@@ -1059,7 +1070,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(sub.frames).toHaveLength(3);
   });
 
-  test("detach replaces a recorded terminal still waiting for ACK with CANCELLED", async () => {
+  test("detach는 아직 ACK를 기다리는 기록된 terminal을 CANCELLED로 바꾼다", async () => {
     const { server, source } = harness();
     const detach = server.attach(new FakeTarget());
     const sub = await rendererDocument(server).subscribe(STATE);
@@ -1073,7 +1084,7 @@ describe("Main stream terminal notify on retire", () => {
     });
   });
 
-  test("server.dispose() retires an active broadcast Event subscriber with CANCELLED", async () => {
+  test("server.dispose()는 활성 broadcast Event 구독자를 CANCELLED로 retire한다", async () => {
     const { server } = harness();
     const sub = await rendererDocument(server).subscribe(EVENT);
     expect(sub.types()).toEqual(["subscribed"]);
@@ -1084,7 +1095,7 @@ describe("Main stream terminal notify on retire", () => {
     });
   });
 
-  test("detach retires an active scoped Event subscriber with CANCELLED", async () => {
+  test("detach는 활성 scoped Event 구독자를 CANCELLED로 retire한다", async () => {
     const upstream = new Subject<number>();
     const server = createBridgeServer({
       hardware: {
@@ -1106,7 +1117,7 @@ describe("Main stream terminal notify on retire", () => {
     ["render-process-gone"],
     ["destroyed"],
   ] as const)(
-    "%s retires an active subscriber without a stream termination",
+    "%s는 stream 종료 없이 활성 구독자를 retire한다",
     async (reason) => {
       const target = new FakeTarget();
       const { server } = harness();
@@ -1122,7 +1133,7 @@ describe("Main stream terminal notify on retire", () => {
     },
   );
 
-  test("a replacing clientId retires the previous active subscriber without a stream termination", async () => {
+  test("교체하는 clientId는 stream 종료 없이 이전 활성 구독자를 retire한다", async () => {
     const { server } = harness();
     const sub = await rendererDocument(server).subscribe(STATE);
     const before = sub.frames.length;
@@ -1133,7 +1144,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(replacement.types()).toEqual(["subscribed", "batch"]);
   });
 
-  test("a send failure while notifying an active subscriber still closes it", async () => {
+  test("활성 구독자에게 통지하다 send가 실패해도 구독자를 닫는다", async () => {
     const source = new BehaviorSubject(1);
     const server = createBridgeServer({
       hardware: { state: { current$: currentValueSource(source) } },
@@ -1156,7 +1167,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("detach during pending authorization sends subscribed then CANCELLED", async () => {
+  test("authorization 대기 중 detach는 subscribed 뒤 CANCELLED를 보낸다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -1178,7 +1189,7 @@ describe("Main stream terminal notify on retire", () => {
     });
   });
 
-  test("server.dispose() during pending authorization sends subscribed then CANCELLED", async () => {
+  test("authorization 대기 중 server.dispose()는 subscribed 뒤 CANCELLED를 보낸다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -1200,7 +1211,7 @@ describe("Main stream terminal notify on retire", () => {
     });
   });
 
-  test("a send failure while notifying a pending subscriber still releases its slot", async () => {
+  test("대기 구독자에게 통지하다 send가 실패해도 slot을 반환한다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -1224,7 +1235,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("navigation during pending authorization sends nothing", async () => {
+  test("authorization 대기 중 navigation은 아무것도 보내지 않는다", async () => {
     let allow!: (value: boolean) => void;
     const authorization = new Promise<boolean>((resolve) => {
       allow = resolve;
@@ -1244,7 +1255,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(sub.frames).toEqual([]);
   });
 
-  test("detach while sending a rejection's subscribed replaces the rejection with CANCELLED", async () => {
+  test("거부의 subscribed를 보내는 중 detach하면 거부를 CANCELLED로 바꾼다", async () => {
     const { server } = harness();
     const target = new FakeTarget();
     const detach = server.attach(target);
@@ -1265,7 +1276,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("a non-notifying retire while sending a rejection's subscribed sends nothing more", async () => {
+  test("거부의 subscribed를 보내는 중 통지하지 않는 retire가 일어나면 더 보내지 않는다", async () => {
     const { server } = harness();
     const target = new FakeTarget();
     server.attach(target);
@@ -1281,7 +1292,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("detach from the diagnostics sink before a rejection is sent answers with CANCELLED", async () => {
+  test("거부를 보내기 전 진단 sink에서 detach하면 CANCELLED로 응답한다", async () => {
     const { server, diagnostics } = harness();
     const detach = server.attach(new FakeTarget());
     diagnostics.record.mockImplementation((event: { type: string }) => {
@@ -1298,7 +1309,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("detach from the diagnostics sink during an authorize-denied rejection answers with CANCELLED", async () => {
+  test("authorize-denied 거부 중 진단 sink에서 detach하면 CANCELLED로 응답한다", async () => {
     const source = new BehaviorSubject(1);
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
@@ -1331,7 +1342,7 @@ describe("Main stream terminal notify on retire", () => {
     ]);
   });
 
-  test("the authorize-denied diagnostic is recorded before the subscription slot is released", async () => {
+  test("authorize-denied 진단은 구독 slot을 반환하기 전에 기록된다", async () => {
     const diagnostics = { record: vi.fn() };
     const server = createBridgeServer(
       {
@@ -1355,7 +1366,7 @@ describe("Main stream terminal notify on retire", () => {
   });
 
   test.each(["detach", "server.dispose()"] as const)(
-    "%s inside the session-opened diagnostic notifies a pending subscription to an existing key with CANCELLED",
+    "session-opened 진단 안의 %s는 존재하는 key의 대기 구독에 CANCELLED를 통지한다",
     async (mode) => {
       const { server, source, diagnostics } = harness();
       const detach = server.attach(new FakeTarget());
@@ -1383,7 +1394,7 @@ describe("Main stream terminal notify on retire", () => {
   );
 
   test.each(["detach", "server.dispose()"] as const)(
-    "%s inside the subscription-opened diagnostic notifies a not-yet-open consumer with CANCELLED",
+    "subscription-opened 진단 안의 %s는 아직 열리지 않은 consumer에 CANCELLED를 통지한다",
     async (mode) => {
       const { server, source, diagnostics } = harness();
       const detach = server.attach(new FakeTarget());
@@ -1415,7 +1426,7 @@ describe("Main stream terminal notify on retire", () => {
     },
   );
 
-  test("main-frame-navigation inside the session-opened diagnostic sends nothing for a pending subscription to an existing key", async () => {
+  test("session-opened 진단 안의 main-frame-navigation은 존재하는 key의 대기 구독에 아무것도 보내지 않는다", async () => {
     const target = new FakeTarget();
     const { server, diagnostics } = harness();
     server.attach(target);
@@ -1428,7 +1439,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("main-frame-navigation inside the subscription-opened diagnostic sends nothing for a not-yet-open consumer", async () => {
+  test("subscription-opened 진단 안의 main-frame-navigation은 아직 열리지 않은 consumer에 아무것도 보내지 않는다", async () => {
     const target = new FakeTarget();
     const { server, diagnostics } = harness();
     server.attach(target);
@@ -1441,7 +1452,7 @@ describe("Main stream terminal notify on retire", () => {
     expect(server.getDiagnosticsSnapshot().subscriptions).toBe(0);
   });
 
-  test("unsubscribe inside the subscription-opened diagnostic leaves no retire listener that notifies on a later detach", async () => {
+  test("subscription-opened 진단 안의 unsubscribe는 뒤이은 detach 때 통지하는 retire listener를 남기지 않는다", async () => {
     const { server, diagnostics } = harness();
     const detach = server.attach(new FakeTarget());
     // subscribe 호출 도중이라 handle이 아직 없다 — unsubscribe를 raw로 보낸다.
