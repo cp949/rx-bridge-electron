@@ -20,7 +20,7 @@ _Avoid_: close, shutdown(구분 없이 섞어 쓰기)
 _Avoid_: sender 검증, origin check(단독)
 
 **구독 (subscription)**:
-렌더러 문서 세션이 소유하는 State/Event 전달 단위. `subscriptionId`로 식별하며, 수명은 admission(ID 형식·watermark·등록 조회·slot·`authorize`)부터 terminal 전송과 slot 반환까지다. 세션이 retire되면 함께 끝난다. Main에서는 `Subscriptions` 모듈이 소유한다.
+렌더러 문서 세션이 소유하는 State/Event 전달 단위. `subscriptionId`로 식별하며, 수명은 admission(ID 형식·watermark·등록 조회·slot·`authorize`)부터 terminal 전송과 slot 반환까지다. 세션이 retire되면 함께 끝난다. Main에서는 `Subscriptions` 모듈이 소유한다. consumer 1건의 전달 창(ack 게이트·terminal drain·선점 종료, sequence 번호)은 내부 module `DeliveryWindow`가 소유한다.
 _Avoid_: stream consumer, 스트림 세션
 
 **Event 전달 방식 (event delivery)**:
