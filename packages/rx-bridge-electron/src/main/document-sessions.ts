@@ -11,7 +11,6 @@ import type {
 export interface DocumentSession {
   readonly target: AttachedTarget;
   readonly clientId: string;
-  readonly signal: AbortSignal;
   /** retire 사유. 살아 있는 세션은 `undefined`다. */
   readonly retireReason: RetireReason | undefined;
   /**
@@ -53,10 +52,6 @@ class SessionImpl implements DocumentSession {
   public constructor(target: AttachedTarget, clientId: string) {
     this.target = target;
     this.clientId = clientId;
-  }
-
-  public get signal(): AbortSignal {
-    return this.#controller.signal;
   }
 
   public get retireReason(): RetireReason | undefined {

@@ -20,6 +20,7 @@ import { recordDiagnostic } from "./diagnostics.js";
 import {
   SENDER_UNAUTHORIZED_MESSAGE,
   type DocumentSession,
+  type RetireReason,
 } from "./document-sessions.js";
 import { internalError } from "./error-serializer.js";
 import { parseOutput } from "./output-boundary.js";
@@ -42,6 +43,8 @@ type ControlCommand = Exclude<WireStreamCommand, { type: "subscribe" }>;
 interface PendingEntry {
   readonly controller: AbortController;
   readonly onAbort: () => void;
+  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
+  releaseRetire: () => void;
 }
 
 interface Consumer {
@@ -54,6 +57,8 @@ interface Consumer {
   readonly registration: Registration;
   readonly controller: AbortController;
   readonly onSessionAbort: () => void;
+  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
+  releaseRetire: () => void;
   /** consumer 1건의 전달 창(RD-034). "닫힘"은 이 창이 단독 소유한다. */
   readonly window: DeliveryWindow;
   /**
@@ -89,18 +94,19 @@ type EndCause =
 
 /**
  * cause → 통지 표(ADR 0020). `admission`은 `FORBIDDEN`을 항상 보낸다. 그 외는
- * session이 없거나 살아 있으면 `rejected.error`(`retired`는 항상 aborted라 이
- * 분기에 오지 않는다), aborted고 사유가 `detach`·`dispose`면 `CANCELLED`, 그 외
- * aborted 사유는 침묵한다. `undefined`면 아무것도 보내지 않는다.
+ * `retireReason`이 `undefined`면(세션이 없거나 살아 있으면) `rejected.error`
+ * (`retired`는 항상 retire된 세션에서만 오므로 이 분기에 오지 않는다), 사유가
+ * `detach`·`dispose`면 `CANCELLED`, 그 외 사유는 침묵한다. `undefined`면
+ * 아무것도 보내지 않는다.
  */
 function endNotice(
   cause: EndCause,
-  sessionSignal?: AbortSignal,
+  retireReason?: RetireReason,
 ): RpcErrorPayload | undefined {
   if (cause.kind === "admission") return senderUnauthorizedError;
-  if (sessionSignal === undefined || !sessionSignal.aborted)
+  if (retireReason === undefined)
     return cause.kind === "rejected" ? cause.error : undefined;
-  return sessionSignal.reason === "detach" || sessionSignal.reason === "dispose"
+  return retireReason === "detach" || retireReason === "dispose"
     ? sessionEndedError
     : undefined;
 }
@@ -203,7 +209,7 @@ export class Subscriptions {
             message: "Invalid bridge subscription ID.",
           },
         },
-        session.signal,
+        session,
       );
       return;
     }
@@ -225,7 +231,7 @@ export class Subscriptions {
           kind: "rejected",
           error: { code: "NOT_FOUND", message: "Unknown bridge stream." },
         },
-        session.signal,
+        session,
       );
       return;
     }
@@ -249,7 +255,7 @@ export class Subscriptions {
             message: "Too many bridge subscriptions.",
           },
         },
-        session.signal,
+        session,
       );
       return;
     }
@@ -261,20 +267,19 @@ export class Subscriptions {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
         controller.abort();
-        this.#endUnstarted(command, send, { kind: "retired" }, session.signal);
+        this.#endUnstarted(command, send, { kind: "retired" }, session);
       },
+      releaseRetire: () => {},
     };
     state.pending.set(command.subscriptionId, entry);
     this.#liveStates.add(state);
-    session.signal.addEventListener("abort", entry.onAbort, { once: true });
-    if (session.signal.aborted) {
-      // 세션이 등록 이전에 이미 retire됐다 — "abort" listener는 지난 이벤트를
-      // 받지 못하므로 여기서 직접 `onAbort`를 불러 같은 처리(삭제·prune·
-      // controller.abort()·통지, ADR 0020)를 맡긴다.
-      session.signal.removeEventListener("abort", entry.onAbort);
-      entry.onAbort();
-      return;
-    }
+    // 세션이 등록 이전에 이미 retire됐으면 `onRetire`가 여기서 `entry.onAbort`를
+    // 즉시 동기 호출한다(같은 처리: 삭제·prune·controller.abort()·통지, ADR
+    // 0020) — 이 경우 entry는 이미 map에서 빠져 있으므로 handle을 저장하지
+    // 않고 그대로 return한다(authorize로 진행하지 않는다).
+    const release = session.onRetire(entry.onAbort);
+    if (state.pending.get(command.subscriptionId) !== entry) return;
+    entry.releaseRetire = release;
 
     const context = bridgeContext(
       session,
@@ -296,7 +301,7 @@ export class Subscriptions {
         command,
         send,
         { kind: "rejected", error: verdict.error },
-        session.signal,
+        session,
       );
       return;
     }
@@ -312,7 +317,7 @@ export class Subscriptions {
       if (pending !== undefined) {
         state.pending.delete(command.subscriptionId);
         this.#pruneIfEmpty(state);
-        session.signal.removeEventListener("abort", pending.onAbort);
+        pending.releaseRetire();
         pending.controller.abort();
         return;
       }
@@ -356,9 +361,9 @@ export class Subscriptions {
    * 먼저(공유 단계 안에서) 기록되므로 slot 반환보다 앞선다(RPC와 같은 순서).
    * 그 사이 sink가 동기로 detach·dispose를 일으키면 아직 등록된 pending
    * `onAbort`가 retire 통지를 맡는다. `false`면 이미 취소됐거나(unsubscribe·
-   * retire) signal이 abort된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
-   * (등록 직후, 이 메서드에 닿기 전에 이미 retire된 경우는 호출부가 같은
-   * `entry.onAbort`를 직접 불러 처리한다 — RD-037.)
+   * retire) 세션이 retire된 것이므로 `subscribe()`는 이어서 진행하지 않는다.
+   * (등록 시점에 이미 retire된 세션이면 `onRetire`의 즉시 호출이 그 자리에서
+   * `entry.onAbort`를 대신 실행한다 — RD-037.)
    */
   #finishPending(
     session: DocumentSession,
@@ -368,10 +373,11 @@ export class Subscriptions {
   ): boolean {
     const current = state.pending.get(id);
     if (current !== entry) return false;
-    const ok = !entry.controller.signal.aborted && !session.signal.aborted;
+    const ok =
+      !entry.controller.signal.aborted && session.retireReason === undefined;
     state.pending.delete(id);
     this.#pruneIfEmpty(state);
-    session.signal.removeEventListener("abort", entry.onAbort);
+    entry.releaseRetire();
     return ok;
   }
 
@@ -421,20 +427,16 @@ export class Subscriptions {
       controller,
       window,
       opened: false,
+      releaseRetire: () => {},
       onSessionAbort: () => {
         if (!consumer.opened) {
           // `subscribed` 송신 전 retire(시작 전 거부와 같은 창) — 활성 구독의
           // `preempt` 대신 `#endUnstarted`가 sequence 0·1을 매겨 통지한다.
           this.#close(consumer);
-          this.#endUnstarted(
-            command,
-            send,
-            { kind: "retired" },
-            session.signal,
-          );
+          this.#endUnstarted(command, send, { kind: "retired" }, session);
           return;
         }
-        const error = endNotice({ kind: "retired" }, session.signal);
+        const error = endNotice({ kind: "retired" }, session.retireReason);
         if (error !== undefined) {
           const message = consumer.window.preempt(error);
           if (message !== undefined) this.#send(consumer, message);
@@ -448,15 +450,13 @@ export class Subscriptions {
       type: "subscription-opened",
       key: consumer.key,
     });
-    session.signal.addEventListener("abort", consumer.onSessionAbort, {
-      once: true,
-    });
-    if (session.signal.aborted) {
-      // 세션이 등록 이전에 이미 retire됐다 — "abort" listener는 지난 이벤트를
-      // 받지 못하므로 여기서 직접 `onSessionAbort`를 불러 open 전 분기를 태운다.
-      consumer.onSessionAbort();
-      return;
-    }
+    // 세션이 등록 이전에 이미 retire됐으면 `onRetire`가 여기서
+    // `consumer.onSessionAbort`를 즉시 동기 호출해 open 전 분기(`#close` +
+    // `#endUnstarted`)를 태운다 — 이 경우 `window.close()`가 이미 닫혔으므로
+    // handle을 저장하지 않고 그대로 return한다.
+    const release = session.onRetire(consumer.onSessionAbort);
+    if (window.closed) return;
+    consumer.releaseRetire = release;
     consumer.opened = true;
     this.#send(consumer, window.open());
     if (window.closed) return;
@@ -490,15 +490,15 @@ export class Subscriptions {
     command: SubscribeCommand,
     send: StreamSender,
     cause: EndCause,
-    sessionSignal?: AbortSignal,
+    session?: DocumentSession,
   ): void {
-    if (endNotice(cause, sessionSignal) === undefined) return;
+    if (endNotice(cause, session?.retireReason) === undefined) return;
     const window = createRejectionDeliveryWindow();
     try {
       send(
         streamFrame(command.clientId, command.subscriptionId, window.open()),
       );
-      const error = endNotice(cause, sessionSignal);
+      const error = endNotice(cause, session?.retireReason);
       if (error === undefined) return;
       const message = window.preempt(error);
       // 거부 경로에서 창을 쥔 쪽은 이 메서드 하나뿐이라 `preempt`가
@@ -557,10 +557,7 @@ export class Subscriptions {
       type: "subscription-closed",
       key: consumer.key,
     });
-    consumer.session.signal.removeEventListener(
-      "abort",
-      consumer.onSessionAbort,
-    );
+    consumer.releaseRetire();
     const state = this.#sessions.get(consumer.session);
     if (state !== undefined) {
       state.consumers.delete(consumer.subscriptionId);

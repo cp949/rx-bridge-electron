@@ -65,7 +65,8 @@ function cancelledIfAborted(
 interface ActiveRequest {
   readonly key: string;
   readonly controller: AbortController;
-  readonly onSessionAbort: () => void;
+  /** `onRetire` 해제 handle. 등록 전 즉시 호출에 대비한 초기값은 no-op이다. */
+  releaseRetire: () => void;
 }
 
 /** 세션 1개가 소유한 RPC 상태. `running`은 slot(동시 개수) 점유, `active`는 취소 대상 조회용. */
@@ -81,7 +82,7 @@ interface SessionState {
  * 그 판정을 응답으로 번역만 한다. `create-bridge-server.ts`는 세션 해석만
  * 맡긴다 — 이 클래스는 `DocumentSessions`를 모른다(`DocumentSession` 타입만
  * 참조). "세션이 여전히 현재인가"는 재검사하지 않는다: retire 경로는 전부
- * `session.signal`을 abort하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
+ * `session.onRetire`로 통지하므로(ADR 0015) 요청 signal 판정 하나로 충분하다.
  */
 export class RpcRequests {
   readonly #table: RegistrationTable;
@@ -242,18 +243,19 @@ export class RpcRequests {
 
   /**
    * 같은 `requestId`의 기존 요청을 취소하고 새 controller를 등록한다.
-   * `session.signal`에 abort listener를 달아 retire 시 이 요청을 스스로
-   * 취소하게 한다 — 등록 시점에 이미 aborted면 listener가 뒤늦게 불리지
-   * 않으므로 즉시 취소한 것과 같은 결과를 낸다.
+   * `session.onRetire`로 retire 통지를 구독해 이 요청을 스스로 취소하게
+   * 한다 — 이미 retire된 세션이면 `onRetire`가 등록 즉시 동기 호출하므로
+   * (그 안에서 entry가 map에서 먼저 빠진다) 재검사 없이 즉시 취소한 것과
+   * 같은 결과를 낸다.
    */
   #begin(session: DocumentSession, id: string, key: string): AbortController {
     this.#cancelActive(session, id);
     const state = this.#stateFor(session);
     const controller = new AbortController();
-    const onSessionAbort = (): void => this.#cancelActive(session, id);
-    state.active.set(id, { key, controller, onSessionAbort });
-    session.signal.addEventListener("abort", onSessionAbort, { once: true });
-    if (session.signal.aborted) this.#cancelActive(session, id);
+    const entry: ActiveRequest = { key, controller, releaseRetire: () => {} };
+    state.active.set(id, entry);
+    const release = session.onRetire(() => this.#cancelActive(session, id));
+    if (state.active.get(id) === entry) entry.releaseRetire = release;
     return controller;
   }
 
@@ -267,7 +269,7 @@ export class RpcRequests {
     const entry = state.active.get(id);
     if (entry === undefined || entry.controller !== controller) return;
     state.active.delete(id);
-    session.signal.removeEventListener("abort", entry.onSessionAbort);
+    entry.releaseRetire();
   }
 
   #cancelActive(session: DocumentSession, id: string): void {
@@ -276,7 +278,7 @@ export class RpcRequests {
     const entry = state.active.get(id);
     if (entry === undefined) return;
     state.active.delete(id);
-    session.signal.removeEventListener("abort", entry.onSessionAbort);
+    entry.releaseRetire();
     // active에 남은 채 이미 aborted면 deadline이 먼저 확정해 rpc-timed-out을 남긴 요청이다.
     if (entry.controller.signal.aborted) return;
     entry.controller.abort();
