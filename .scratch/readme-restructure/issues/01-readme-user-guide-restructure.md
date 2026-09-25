@@ -1,6 +1,6 @@
 # 패키지 README를 사용자 가이드로 재구성
 
-- Status: open
+- Status: closed — RD-047 완료(ROADMAP.md#RD-047)
 - 출처: 2026-09-26 사용자 피드백("README 파일을 읽기가 싫다"), 이슈 `renderer-framework-integration/01` 종료 직후 진단.
 
 ## 사실
@@ -82,3 +82,4 @@ README는 사용자 가이드로 둔다. 문단당 규칙 1~2개, 목차를 두�
 ## Comments
 
 - 2026-09-26: 검토 질문 1·2 결정. (1) README에서 뺄 세부의 이관처는 `docs/design/` 기능별 설계 문서다(RD-046에서 11개 작성). architecture.md는 개요로 남기고 축약 여부는 재구성 때 판단한다. (2) README는 한글 단일이다(RD-046에서 설치 절 영어 병기와 `Hello world`·`Testing` 절 이름을 `시작하기`·`테스트`로 바꿨다). 질문 3(오류 코드 표)은 `docs/design/08-payload-and-errors.md`의 공통 표 1개(적용 경로 열 포함)를 기준으로 README 표를 만든다. README의 사실 오류 3건(adapter envelope 검사, stream의 CANCELLED 우선, signal 무시 handler의 slot 점유)은 RD-046에서 고쳤다.
+- 2026-09-26: RD-047로 재구성 완료. 제안 구조 1~10과 목차, 오류 코드 표 1개(`docs/design/08-payload-and-errors.md` 4.5 기준, RPC·구독 적용 열), 구독 종료 원인 표 1개. architecture.md 축약은 하지 않았다(범위 밖 유지). 결과 세부는 ROADMAP RD-047.
