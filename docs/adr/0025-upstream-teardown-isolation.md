@@ -33,6 +33,7 @@ Main의 State·Event 구독은 내부 module `Upstreams`가 사용자 source(`cu
 ## 한계
 
 - 사용자가 `BridgeContext.signal`에 붙인 abort listener의 예외는 여전히 Node `EventTarget`이 `uncaughtException`으로 보낸다. 사용자 코드 자체의 예외이며 이 결정의 범위 밖이다.
+- 결정 3은 source의 subscribe 함수가 돌려준 teardown에만 적용된다. operator를 거친 source(`inner.pipe(map(...))`)에서 안쪽 source가 동기로 끝나고 teardown이 던지면, rxjs `operate`가 예외를 잡아 이미 닫힌 upstream의 `error`로 보내고 rxjs가 그 알림을 버린다. 예외는 새지 않지만 진단도 남지 않는다. 해지 경로(결정 1)는 operator 체인도 `UnsubscriptionError`로 올라오므로 기록된다.
 - 진단은 key만 싣는다. 어떤 구독·세션의 해지였는지는 알 수 없다([ADR 0010](0010-operational-diagnostics.md) 한계와 같다).
 
 ## 범위 밖
