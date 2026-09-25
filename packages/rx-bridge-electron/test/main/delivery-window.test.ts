@@ -10,6 +10,7 @@ import { describe, expect, test, vi } from "vitest";
 
 import {
   createEventDeliveryWindow,
+  createRejectionDeliveryWindow,
   createStateDeliveryWindow,
   type DeliveryWindow,
 } from "../../src/main/delivery-window.js";
@@ -293,6 +294,46 @@ describe("진단 callback 안 재진입", () => {
       overflowed: false,
     });
     expect(window.closed).toBe(true);
+  });
+});
+
+describe("시작 전 거부 창", () => {
+  test("open은 subscribed(0), preempt는 error(1)를 반환하고 buffer는 채워지지 않는다", () => {
+    const window = createRejectionDeliveryWindow();
+    expect(window.open()).toEqual({ type: "subscribed", sequence: 0 });
+    expect(window.queuedValueCount()).toBe(0);
+
+    const error = { code: "FORBIDDEN", message: "sender unauthorized" };
+    expect(window.preempt(error)).toEqual({
+      type: "error",
+      sequence: 1,
+      error,
+    });
+    expect(window.queuedValueCount()).toBe(0);
+  });
+
+  test.each([
+    ["accept", (window: DeliveryWindow) => window.accept(1)],
+    ["ack", (window: DeliveryWindow) => window.ack(1)],
+    ["end", (window: DeliveryWindow) => window.end({ type: "complete" })],
+    [
+      "preempt",
+      (window: DeliveryWindow) =>
+        window.preempt({ code: "CANCELLED", message: "again" }),
+    ],
+  ] as const)("open과 preempt 뒤 %s는 무출력이다", (_label, call) => {
+    const window = createRejectionDeliveryWindow();
+    window.open();
+    window.preempt({ code: "FORBIDDEN", message: "sender unauthorized" });
+
+    expect(call(window)).toEqual(
+      _label === "accept"
+        ? { message: undefined, overflowed: false }
+        : _label === "end"
+          ? { recorded: false, message: undefined }
+          : undefined,
+    );
+    expect(window.queuedValueCount()).toBe(0);
   });
 });
 

@@ -10,6 +10,7 @@ import {
 import { authorizeOperation, bridgeContext } from "./authorization.js";
 import {
   createEventDeliveryWindow,
+  createRejectionDeliveryWindow,
   createStateDeliveryWindow,
   type DeliveryWindow,
   type WindowMessage,
@@ -96,6 +97,19 @@ function endNotice(
   return sessionSignal.reason === "detach" || sessionSignal.reason === "dispose"
     ? sessionEndedError
     : undefined;
+}
+
+/**
+ * `WindowMessage`를 wire `StreamMessage`로 조립하는 순수 함수(C10). envelope
+ * 조립(`withEnvelope`)을 이 함수 하나로 모은다 — 창(`DeliveryWindow`)은
+ * envelope도 `subscriptionId`도 모른다(RD-034 결정 3 유지).
+ */
+function streamFrame(
+  clientId: string,
+  subscriptionId: string,
+  message: WindowMessage,
+): StreamMessage {
+  return withEnvelope(clientId, { subscriptionId, ...message });
 }
 
 /**
@@ -442,7 +456,8 @@ export class Subscriptions {
    * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire)의 통지:
    * `subscribed`(0) 전후로 `endNotice`를 평가해 `error`(1)를 보낸다. 앞 평가는
    * 진단 sink가 동기로 일으킨 retire를, 뒤 평가는 `send` 중 동기 retire를
-   * 반영한다. 전송 실패는 삼킨다(ADR 0020 결정 6).
+   * 반영한다. 거부 전용 창(`createRejectionDeliveryWindow`)이 두 sequence를
+   * 매긴다. 전송 실패는 삼킨다(ADR 0020 결정 6).
    */
   #endUnstarted(
     command: SubscribeCommand,
@@ -451,24 +466,18 @@ export class Subscriptions {
     sessionSignal?: AbortSignal,
   ): void {
     if (endNotice(cause, sessionSignal) === undefined) return;
+    const window = createRejectionDeliveryWindow();
     try {
       send(
-        withEnvelope(command.clientId, {
-          subscriptionId: command.subscriptionId,
-          type: "subscribed" as const,
-          sequence: 0,
-        }),
+        streamFrame(command.clientId, command.subscriptionId, window.open()),
       );
       const error = endNotice(cause, sessionSignal);
       if (error === undefined) return;
-      send(
-        withEnvelope(command.clientId, {
-          subscriptionId: command.subscriptionId,
-          type: "error" as const,
-          sequence: 1,
-          error,
-        }),
-      );
+      const message = window.preempt(error);
+      // C9: 거부 경로에서 창을 쥔 쪽은 이 메서드 하나뿐이라 `preempt`가
+      // `undefined`(닫힘·종결)를 돌려주는 경우는 도달하지 않는다.
+      if (message === undefined) return;
+      send(streamFrame(command.clientId, command.subscriptionId, message));
     } catch {
       // A closed renderer route has no subscriber to notify.
     }
@@ -504,10 +513,7 @@ export class Subscriptions {
   #send(consumer: Consumer, message: WindowMessage): void {
     try {
       consumer.send(
-        withEnvelope(consumer.clientId, {
-          subscriptionId: consumer.subscriptionId,
-          ...message,
-        }),
+        streamFrame(consumer.clientId, consumer.subscriptionId, message),
       );
     } catch {
       this.#close(consumer);

@@ -161,6 +161,10 @@ const overflowError: RpcErrorPayload = {
  * 분리는 호출자(`Subscriptions`)가 맡는다. State/Event 차이는 생성 시 주입한
  * `DeliveryBuffer` 하나로만 표현되고, 이 클래스 안에는 `kind` 분기가 없다.
  *
+ * 시작 전 거부(`createRejectionDeliveryWindow`)도 이 창이 sequence를 매긴다
+ * — `open()`으로 0, 뒤이은 `preempt()`로 1을 받는다. `accept`·`ack`·`end`는
+ * 거부 경로에서 쓰이지 않는다.
+ *
  * 상태는 두 단계다. "종결"은 terminal 메시지를 반환했거나 `preempt`한
  * 뒤이고, "닫힘"은 `close()` 뒤다. 종결 뒤에도 `close()` 전까지는 `closed`가
  * `false`다 — 수명 정리 멱등성은 `close()`의 반환값에 달려 있기 때문이다.
@@ -186,7 +190,10 @@ export class DeliveryWindow {
     this.#onQueueDepth = callbacks.onQueueDepth ?? ((): void => {});
   }
 
-  /** 창을 연다. sequence 0의 `subscribed`를 반환한다. 이후 sequence도 모두 창이 매긴다. */
+  /**
+   * 창을 연다. sequence 0의 `subscribed`를 반환한다. 이후 sequence도 모두
+   * 창이 매긴다 — 시작 전 거부 창의 `preempt()`(sequence 1)도 포함이다.
+   */
   public open(): WindowMessage {
     return { type: "subscribed", sequence: 0 };
   }
@@ -340,4 +347,14 @@ export function createEventDeliveryWindow(
   callbacks?: DeliveryWindowCallbacks,
 ): DeliveryWindow {
   return new DeliveryWindow(createEventBuffer(capacity, overflow), callbacks);
+}
+
+/**
+ * 시작하지 못한 구독(admission 거부, 시작 전 거부, 대기 중 retire) 통지 전용
+ * 창을 만든다. 호출자는 `open()`과 `preempt(error)`만 쓴다 —
+ * `subscribed`(0)에 이어 `error`(1)를 매긴다. `accept`·`ack`·`end`로 이어질
+ * 값이 없으므로 버퍼는 채워지지 않고, 진단 callback도 없다.
+ */
+export function createRejectionDeliveryWindow(): DeliveryWindow {
+  return new DeliveryWindow(createStateBuffer());
 }
